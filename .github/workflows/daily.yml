@@ -1,0 +1,83 @@
+# Robots quotidiens — MonPortefeuille 2
+#
+# Chaque soir :
+#   21h05 UTC — cours et taux de change
+#   21h35 UTC — snapshot du portefeuille (en onces d'or)
+#   22h05 UTC — inflation annuelle
+#   22h35 UTC — alertes fiscales
+#
+# Les secrets SUPABASE_URL et SUPABASE_KEY doivent être définis dans
+# Settings > Secrets and variables > Actions du repo.
+#
+# ATTENTION SÉCURITÉ : la v1 commitait ses credentials Supabase en dur dans
+# take_snapshot.py et calc_perf.py, sur un repo public. Révoquez l'ancienne clé
+# publishable et utilisez exclusivement les secrets GitHub.
+
+name: Robots quotidiens
+
+on:
+  schedule:
+    - cron: '5 21 * * *'    # cours et taux de change
+    - cron: '35 21 * * *'   # snapshot
+    - cron: '5 22 * * *'    # inflation
+    - cron: '35 22 * * *'   # alertes fiscales
+  workflow_dispatch:
+
+jobs:
+  market-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Cours et taux de change
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/update_market_data.py
+
+  snapshot:
+    needs: market-data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Snapshot du portefeuille
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/daily_snapshot.py
+
+  inflation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Inflation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/update_inflation.py
+
+  alertes:
+    needs: snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Alertes fiscales
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/fiscal_alerts.py
