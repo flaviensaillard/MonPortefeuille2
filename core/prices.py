@@ -39,10 +39,46 @@ class CoursIndisponible(Exception):
 
 
 _cache: dict[tuple[str, str], float] = {}
+_cache_devise: dict[str, str | None] = {}
 
 
 def vider_cache() -> None:
     _cache.clear()
+    _cache_devise.clear()
+
+
+def devise_de(ticker: str) -> str | None:
+    """Devise de cotation réellement rapportée par Yahoo, ou `None`.
+
+    C'est la source la plus fiable qui existe : celle du marché de cotation
+    lui-même. On renvoie `None` quand Yahoo ne la donne pas — l'absence d'une
+    information vaut mieux qu'une information fausse, parce qu'une devise
+    erronée corrompt toute la valorisation de la position.
+    """
+    ticker = str(ticker).upper().strip()
+    if not ticker:
+        return None
+    if ticker in _cache_devise:
+        return _cache_devise[ticker]
+
+    devise: str | None = None
+    try:
+        tk = yf.Ticker(ticker)
+        try:
+            # `fast_info` interroge le point d'entrée des cotations : peu
+            # coûteux, et il porte la devise.
+            devise = str(getattr(tk.fast_info, "currency", "") or "").upper() or None
+        except Exception:
+            devise = None
+        if not devise:
+            # Repli sur `info`, plus lent (une requête de plus) mais fiable.
+            devise = str((tk.info or {}).get("currency", "") or "").upper() or None
+    except Exception as exc:
+        log.warning("Devise de cotation de %s indisponible : %s", ticker, exc)
+        devise = None
+
+    _cache_devise[ticker] = devise
+    return devise
 
 
 def cours(ticker: str, date: str | None = None) -> float:
