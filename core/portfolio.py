@@ -71,8 +71,60 @@ def classe_de(ticker: str) -> Classe:
     return Classe.ACTION_ETF
 
 
-def devise_cotation_de(ticker: str) -> str:
-    return DEVISES_COTATION.get(str(ticker).upper().strip(), "USD")
+def devise_cotation_de(ticker: str) -> str | None:
+    """Devise de cotation connue, ou `None` si le ticker est inconnu.
+
+    CORRECTION : cette fonction renvoyait `"USD"` par défaut. Tout titre
+    européen absent de la table — ASML, MC.PA, SAP.DE... — se retrouvait donc
+    réétiqueté en dollars, son cours en euro étant ensuite lu comme un cours
+    en dollar. La valorisation de la ligne était fausse, et l'allocation avec.
+
+    Une devise inconnue doit se voir, pas se deviner. Les appelants traitent
+    le `None` : soit ils demandent à Yahoo (`prices.devise_de`), soit ils
+    signalent la ligne.
+    """
+    return DEVISES_COTATION.get(str(ticker).upper().strip())
+
+
+# ---------------------------------------------------------------------------
+# Noms de colonnes : la v1 et la v2 n'écrivent pas pareil
+# ---------------------------------------------------------------------------
+# La v1 stockait les transactions avec des intitulés français
+# (`Ticker`, `Type`, `Quantité`, `Cours`...). La v2 utilise du snake_case
+# (`ticker`, `sens`, `quantite`, `cours`...), conformément à
+# `migrations/001_init.sql`. C'est le même contenu sous deux habillages.
+#
+# `charger_transactions()` accepte les deux, parce qu'il est appelé sur deux
+# sources différentes : un CSV exporté de la v1, et la table `pf2_transactions`.
+# Ne reconnaître qu'une écriture, c'est casser l'autre en silence.
+ALIAS_COLONNES = {
+    "ticker":      "Ticker",
+    "sens":        "Type",
+    "date":        "Date",
+    "quantite":    "Quantité",
+    "cours":       "Cours",
+    "frais":       "Frais",
+    "devise":      "Devise",
+    "source":      "Source",
+    "reference":   "Référence",
+    "montant_net": "Montant net",
+}
+
+
+def _normaliser_colonnes(df: pd.DataFrame) -> pd.DataFrame:
+    """Renomme les colonnes snake_case de la v2 vers les intitulés de la v1.
+
+    Idempotent : un DataFrame déjà au format v1 repart inchangé. Les colonnes
+    inconnues sont conservées telles quelles — on ne jette rien.
+    """
+    if df is None or df.empty:
+        return df
+    renommage = {
+        v2: v1
+        for v2, v1 in ALIAS_COLONNES.items()
+        if v2 in df.columns and v1 not in df.columns
+    }
+    return df.rename(columns=renommage) if renommage else df
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +159,8 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
     if df is None or df.empty:
         return []
 
+    df = _normaliser_colonnes(df)
+
     requises = {"Ticker", "Type", "Date", "Quantité", "Cours", "Frais", "Devise"}
     manquantes = requises - set(df.columns)
     if manquantes:
@@ -115,7 +169,13 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
     sortie: list[Transaction] = []
     for i, row in df.iterrows():
         try:
-            d = pd.to_datetime(row["Date"], dayfirst=True, errors="coerce")
+            # `format="mixed"` : la v1 écrit des dates jj/mm/aaaa, la v2 écrit
+            # de l'ISO aaaa-mm-jj. Sans ce paramètre, pandas émet un
+            # UserWarning à chaque ligne ISO — du bruit inutile dans les logs
+            # des robots nocturnes.
+            d = pd.to_datetime(
+                row["Date"], dayfirst=True, errors="coerce", format="mixed"
+            )
             if pd.isna(d):
                 raise ValueError(f"date illisible : {row['Date']!r}")
             ticker = str(row["Ticker"]).upper().strip()
@@ -134,6 +194,15 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
             devise = str(row.get("Devise", "") or "").upper().strip()
             if not devise:
                 devise = devise_cotation_de(ticker)
+                if not devise:
+                    # La colonne Devise est vide et le ticker est inconnu de la
+                    # table de cotation. On refuse la ligne plutôt que de
+                    # deviner : une transaction sans devise ne peut pas être
+                    # valorisée, et une devise fausse la valorise de travers.
+                    raise ValueError(
+                        f"devise absente pour {ticker} et ticker inconnu de "
+                        f"DEVISES_COTATION — renseignez la colonne Devise"
+                    )
 
             net = quantite * cours
             net = net + frais if "achat" in typ else net - frais
