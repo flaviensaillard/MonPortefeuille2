@@ -1,0 +1,45 @@
+# Import des données de la v1 — à lancer UNE SEULE FOIS, à la main.
+#
+# Allez dans l'onglet Actions du repo → « Import des données v1 » →
+# Run workflow → cochez « dry-run » d'abord pour voir ce qui sera importé,
+# puis relancez sans dry-run.
+#
+# L'import est protégé contre les doublons par un index unique sur
+# (ticker, sens, date, quantite, cours). Le relancer deux fois ne crée pas de
+# lignes en double — mais lisez quand même la sortie du dry-run avant.
+
+name: Import des données v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simuler sans écrire (recommandé pour le premier essai)'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  importer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Import
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "=== MODE SIMULATION ==="
+            python jobs/importer_v1.py --dry-run
+          else
+            echo "=== IMPORT REEL ==="
+            python jobs/importer_v1.py
+          fi
