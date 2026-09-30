@@ -117,12 +117,16 @@ def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) ->
     unique quand la clé primaire n'est pas la bonne — cas de `pf2_transactions`,
     dont la clé primaire est `id` mais dont l'unicité réelle porte sur le tuple
     ticker/sens/date/quantite/cours.
+
+    ATTENTION à la forme de l'appel : dans postgrest-py (le client bas niveau de
+    supabase-py), `on_conflict` est un **paramètre mot-clé de `upsert()`**, pas
+    une méthode chaînable. `builder.upsert(...).on_conflict(...)` lève
+    `AttributeError: 'SyncQueryRequestBuilder' object has no attribute
+    'on_conflict'`. Il faut donc `upsert(lignes, on_conflict=...)`.
     """
     if not lignes:
         return
-    requete = client().table(table).upsert(lignes)
-    if on_conflict:
-        requete = requete.on_conflict(on_conflict)
+    requete = client().table(table).upsert(lignes, on_conflict=on_conflict or "")
     requete.execute()
 
 
