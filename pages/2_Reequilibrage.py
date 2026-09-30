@@ -131,7 +131,10 @@ with st.expander("➕ Nouvelle transaction"):
         cours = c5.number_input("Cours unitaire", min_value=0.0, format="%.6f")
         frais = c6.number_input("Frais", min_value=0.0, format="%.2f", value=0.0)
 
-        devise_defaut = devise_cotation_de(ticker) if ticker else "USD"
+        # On ne présélectionne une devise que si on la connaît vraiment. Sinon
+        # le champ reste sur USD, ce qui était une devinette déguisée.
+        devise_connue = devise_cotation_de(ticker) if ticker else None
+        devise_defaut = devise_connue or "USD"
         devise = st.selectbox(
             "Devise de cotation", ["USD", "EUR", "CHF", "JPY", "GBP", "CNY"],
             index=max(0, ["USD", "EUR", "CHF", "JPY", "GBP", "CNY"].index(devise_defaut))
@@ -150,10 +153,13 @@ with st.expander("➕ Nouvelle transaction"):
             if cours <= 0:
                 problemes.append("Le cours doit être positif.")
 
-            # Contrôle de cohérence devise/ticker.
-            if ticker and devise != devise_cotation_de(ticker):
+            # Contrôle de cohérence devise/ticker. On n'avertit que si on sait
+            # de quoi on parle : un ticker inconnu ne doit pas déclencher une
+            # mise en garde infondée.
+            devise_attendue = devise_cotation_de(ticker) if ticker else None
+            if ticker and devise_attendue and devise != devise_attendue:
                 st.warning(
-                    f"`{ticker}` est coté en **{devise_cotation_de(ticker)}** mais vous "
+                    f"`{ticker}` est coté en **{devise_attendue}** mais vous "
                     f"avez saisi **{devise}**. Vérifiez — c'est exactement l'erreur qui "
                     "a corrompu le PRU de XJSE.SW dans la v1."
                 )
@@ -171,7 +177,9 @@ with st.expander("➕ Nouvelle transaction"):
                         "Aucune valeur de repli n'a été utilisée."
                     )
                 else:
-                    net = quantite * cours + (frais if sens == "Achat" else -frais)
+                    # `montant_net` est une valeur dérivée : elle est recalculée
+                    # à la lecture, pas stockée. La table pf2_transactions n'a
+                    # pas cette colonne.
                     ligne = {
                         "ticker": ticker.upper().strip(),
                         "sens": sens.lower(),
@@ -181,7 +189,6 @@ with st.expander("➕ Nouvelle transaction"):
                         "frais": frais,
                         "devise": devise,
                         "source": source,
-                        "montant_net": round(net, 6),
                     }
                     try:
                         db.ecrire(db.T_TRANSACTIONS, [ligne])
