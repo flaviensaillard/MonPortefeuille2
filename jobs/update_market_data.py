@@ -44,10 +44,34 @@ def main() -> int:
             log.warning("Cours indisponible : %s", exc)
             echecs.append(t)
 
-    # Devise réelle de cotation.
-    from core.portfolio import devise_cotation_de
+    # --- Devise réelle de cotation -------------------------------------------
+    # Yahoo la connaît : c'est la source la plus fiable. `DEVISES_COTATION` ne
+    # sert que de repli. Et on ne devine JAMAIS : un ticker dont la devise est
+    # inconnue est écarté plutôt qu'écrit avec une devise fausse, parce qu'une
+    # devise erronée corrompt toute la valorisation de la position.
+    from core.portfolio import DEVISES_COTATION
+
+    cours_complets, sans_devise = [], []
     for l in lignes_cours:
-        l["devise"] = devise_cotation_de(l["ticker"])
+        devise = prices.devise_de(l["ticker"]) or DEVISES_COTATION.get(l["ticker"])
+        if not devise:
+            sans_devise.append(l["ticker"])
+            continue
+        cours_complets.append({**l, "devise": devise})
+    lignes_cours = cours_complets
+
+    if sans_devise:
+        log.warning(
+            "Devise de cotation introuvable pour %s : cours non écrits. "
+            "Ajoutez ces tickers à DEVISES_COTATION (core/portfolio.py).",
+            ", ".join(sans_devise),
+        )
+        db.ajouter_alerte(
+            "Devise de cotation inconnue",
+            f"Tickers sans devise : {', '.join(sans_devise)}. Leurs cours n'ont "
+            f"pas été enregistrés, pour éviter une valorisation fausse.",
+            niveau="attention",
+        )
 
     if lignes_cours:
         try:
