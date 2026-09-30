@@ -113,7 +113,11 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
         return len(lignes), corrections
 
     try:
-        db.ecrire(db.T_TRANSACTIONS, lignes)
+        # Upsert sur l'index unique : relancer l'import ne crée pas de doublons.
+        db.remplacer(
+            db.T_TRANSACTIONS, lignes,
+            on_conflict="ticker,sens,date,quantite,cours",
+        )
         log.info("%d transactions importées.", len(lignes))
     except Exception as exc:
         log.error("Import des transactions échoué : %s", exc)
@@ -160,7 +164,10 @@ def importer_apports(dry_run: bool = False) -> int:
         log.info("[dry-run] %d apports seraient importés.", len(lignes))
         return len(lignes)
 
+    # Idempotence : on repart d'une base propre pour les lignes issues de la v1.
+    # La table pf2_apports n'a pas de contrainte d'unicité exploitable en upsert.
     try:
+        db.client().table(db.T_APPORTS).delete().eq("compte", "import_v1").execute()
         db.ecrire(db.T_APPORTS, lignes)
         log.info("%d apports importés.", len(lignes))
     except Exception as exc:
