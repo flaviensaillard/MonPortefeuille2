@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import db  # noqa: E402
-from core.portfolio import devise_cotation_de  # noqa: E402
+from core.portfolio import DEVISES_COTATION  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("import")
@@ -58,38 +58,65 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
             continue
 
         devise_saisie = str(r.get("Devise", "") or "").upper().strip()
-        devise_reelle = devise_cotation_de(ticker)
+        row_date = r["Date"]
 
         quantite = float(r["Quantité"])
         cours = float(r["Cours"])
         frais = float(r["Frais"]) if pd.notna(r.get("Frais")) else 0.0
 
-        if devise_saisie and devise_saisie != devise_reelle:
-            # Ligne saisie dans une devise autre que celle de cotation du titre.
-            # On reconvertit le cours vers la devise de cotation réelle.
-            corrections.append(
-                f"{ticker} {r['Date']} : saisi en {devise_saisie}, coté en "
-                f"{devise_reelle} — cours {cours} converti"
-            )
-            # Le taux de change manuel de la v1 est la meilleure piste disponible.
-            taux = r.get("Taux change (EUR)")
-            if pd.notna(taux) and float(taux) > 0:
-                # taux = EUR par unité de devise_saisie.
-                # On veut : cours_reelle = cours_saisie / fx(devise_reelle->devise_saisie)
-                # Approximation : on suppose que la saisie a converti depuis la
-                # devise réelle, donc on divise par le ratio des deux taux.
-                log.warning(
-                    "  %s %s : conversion depuis %s vers %s à vérifier manuellement.",
-                    ticker, r["Date"], devise_saisie, devise_reelle,
+        # --- Devise : la saisie de l'utilisateur fait autorité -----------------
+        # `DEVISES_COTATION` ne connaît qu'une dizaine de tickers et renvoyait
+        # "USD" par défaut. Conséquence : tout titre européen absent de la table
+        # (ASML, MC.PA, SAP.DE...) était réétiqueté en USD, avec un cours en
+        # euro lu comme un cours en dollar. La valorisation de la ligne était
+        # alors fausse, et l'allocation avec elle.
+        #
+        # La règle est donc : ce que vous avez saisi dans la v1 est la vérité —
+        # c'est ce que dit votre relevé. La table ne sert que de repli quand la
+        # v1 a laissé la devise vide. Et si on ne sait pas, on n'invente pas :
+        # la ligne est écartée et signalée, plutôt qu'importée avec une devise
+        # devinée.
+        devise_connue = DEVISES_COTATION.get(ticker)
+        if devise_saisie:
+            devise = devise_saisie
+            if devise_connue and devise_connue != devise_saisie:
+                # Incohérence réelle (cas XJSE.SW dans la v1). On NE reconvertit
+                # PAS le cours : on n'a pas de taux fiable dans la ligne, et un
+                # taux inventé fausserait le PRU. On importe tel quel et on
+                # signale, pour que vous tranchiez sur votre relevé.
+                corrections.append(
+                    f"{ticker} {r['Date']} : saisi en {devise_saisie}, coté "
+                    f"habituellement en {devise_connue} — importé TEL QUEL, "
+                    f"cours {cours} non converti, À VÉRIFIER DANS VOTRE RELEVÉ"
                 )
+                log.warning(
+                    "  %s %s : devise saisie %s, cotation habituelle %s — "
+                    "aucune conversion appliquée, ligne à vérifier.",
+                    ticker, r["Date"], devise_saisie, devise_connue,
+                )
+        elif devise_connue:
+            devise = devise_connue
+        else:
+            corrections.append(
+                f"{ticker} {r['Date']} : devise absente dans la v1 et ticker "
+                f"inconnu de la table de cotation — ligne NON importée. "
+                f"Ajoutez {ticker} à DEVISES_COTATION ou ressaisissez la ligne."
+            )
+            log.error(
+                "  %s %s : devise indéterminable, ligne écartée.", ticker, r["Date"]
+            )
+            continue
 
-        d = pd.to_datetime(r["Date"], dayfirst=True, errors="coerce")
+        d = pd.to_datetime(row_date, dayfirst=True, errors="coerce", format="mixed")
         if pd.isna(d):
             corrections.append(f"{ticker} : date illisible ({r['Date']!r}), ignoré")
             continue
 
-        net = quantite * cours + (frais if sens == "achat" else -frais)
-
+        # `montant_net` n'est PAS stocké : c'est une valeur dérivée
+        # (quantite x cours, frais inclus), recalculée à la lecture par
+        # `charger_transactions()`. La table pf2_transactions n'a pas cette
+        # colonne, et l'envoyer faisait échouer l'import avec
+        # `PGRST204: Could not find the 'montant_net' column`.
         lignes.append({
             "ticker": ticker,
             "sens": sens,
@@ -97,9 +124,8 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
             "quantite": quantite,
             "cours": cours,
             "frais": frais,
-            "devise": devise_reelle,
+            "devise": devise,
             "source": "import_v1",
-            "montant_net": round(net, 6),
             "reference": f"v1:id{r.get('id')}",
         })
 
@@ -111,6 +137,11 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
     if dry_run:
         log.info("[dry-run] %d transactions seraient importées.", len(lignes))
         return len(lignes), corrections
+
+    if not lignes:
+        # Rien à écrire : on n'envoie pas une requête vide à PostgREST.
+        log.warning("Aucune transaction importable.")
+        return 0, corrections
 
     try:
         # Upsert sur l'index unique : relancer l'import ne crée pas de doublons.
