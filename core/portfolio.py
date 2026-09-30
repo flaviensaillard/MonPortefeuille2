@@ -1,0 +1,340 @@
+"""Construction du portefeuille depuis les transactions.
+
+CORRECTION PAR RAPPORT À LA V1
+------------------------------
+La v1 tenait les quantités dans une table `Donnees` mise à jour à la main, en
+parallèle d'une table `Transaction`. Les deux pouvaient diverger, et rien ne le
+détectait. On a vu le cas sur XJSE.SW : 9 achats saisis en JPY, un saisi en USD,
+et un PRU qui ne veut plus rien dire.
+
+Ici, **la table `Donnees` n'existe plus**. Les positions sont un résultat, pas une
+saisie : on les recalcule depuis l'historique des transactions. Une seule source
+de vérité, donc plus rien à réconcilier.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import logging
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from . import fx, prices
+from .models import (
+    ACTIF_VERS_POCHE,
+    POCHES_PAR_CLE,
+    Actif,
+    Classe,
+    Perimetre,
+    Poche,
+    poche_de,
+)
+
+log = logging.getLogger(__name__)
+
+
+# Classification d'un ticker. À étendre si de nouveaux actifs entrent.
+# La classe détermine le régime fiscal — c'est le seul endroit où elle est fixée.
+CLASSES: dict[str, Classe] = {
+    "IGLN.L": Classe.OR,                  # ETC or — régime valeurs mobilières
+    "BTCUSDT": Classe.CRYPTO,
+    "XDW0.L": Classe.ACTION_ETF,          # Xtrackers MSCI World Energy
+    "FLXC.L": Classe.ACTION_ETF,          # Franklin FTSE China
+    "RI.PA": Classe.ACTION_ETF,           # Ripcurl / action unitaire
+    "XJSE.SW": Classe.OBLIGATION_ETF,     # Xtrackers II Japan Government Bond
+}
+
+DEVISES_COTATION: dict[str, str] = {
+    "IGLN.L": "USD",
+    "BTCUSDT": "USD",
+    "XDW0.L": "USD",
+    "FLXC.L": "USD",
+    "RI.PA": "EUR",
+    "XJSE.SW": "JPY",
+    "CHF": "CHF",
+    "CNY": "CNY",
+    "EUR": "EUR",
+    "USD": "USD",
+}
+
+
+def classe_de(ticker: str) -> Classe:
+    t = str(ticker).upper().strip()
+    if t in CLASSES:
+        return CLASSES[t]
+    # Devises et espèces : pas de plus-value mobilière.
+    if t in ("EUR", "USD", "CHF", "CNY", "GBP", "JPY", "CAD", "AUD"):
+        return Classe.ESPECE
+    # Défaut prudent : tout ticker inconnu est traité comme une action/ETF.
+    log.warning("Ticker %s non classifié : traité comme action/ETF", t)
+    return Classe.ACTION_ETF
+
+
+def devise_cotation_de(ticker: str) -> str:
+    return DEVISES_COTATION.get(str(ticker).upper().strip(), "USD")
+
+
+# ---------------------------------------------------------------------------
+# Lecture des transactions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Transaction:
+    ticker: str
+    type: str                  # "achat" ou "vente"
+    date: dt.date
+    quantite: float
+    cours: float               # dans la devise de cotation
+    frais: float
+    devise: str                # devise de cotation du titre
+    montant_net: float         # dans la devise de cotation, frais inclus
+
+    @property
+    def est_achat(self) -> bool:
+        return "achat" in self.type.lower()
+
+    @property
+    def est_vente(self) -> bool:
+        return "vente" in self.type.lower()
+
+
+def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
+    """Convertit un DataFrame Supabase en objets Transaction.
+
+    Lève `ValueError` sur une ligne illisible plutôt que de l'ignorer.
+    """
+    if df is None or df.empty:
+        return []
+
+    requises = {"Ticker", "Type", "Date", "Quantité", "Cours", "Frais", "Devise"}
+    manquantes = requises - set(df.columns)
+    if manquantes:
+        raise ValueError(f"Colonnes manquantes dans Transaction : {sorted(manquantes)}")
+
+    sortie: list[Transaction] = []
+    for i, row in df.iterrows():
+        try:
+            d = pd.to_datetime(row["Date"], dayfirst=True, errors="coerce")
+            if pd.isna(d):
+                raise ValueError(f"date illisible : {row['Date']!r}")
+            ticker = str(row["Ticker"]).upper().strip()
+            typ = str(row["Type"]).strip().lower()
+            if not ticker:
+                raise ValueError("ticker vide")
+            if "achat" not in typ and "vente" not in typ:
+                raise ValueError(f"type inconnu : {row['Type']!r}")
+
+            quantite = float(row["Quantité"])
+            cours = float(row["Cours"])
+            frais = float(row["Frais"]) if pd.notna(row["Frais"]) else 0.0
+            if quantite <= 0 or cours <= 0:
+                raise ValueError(f"quantité ou cours non positif ({quantite}, {cours})")
+
+            devise = str(row.get("Devise", "") or "").upper().strip()
+            if not devise:
+                devise = devise_cotation_de(ticker)
+
+            net = quantite * cours
+            net = net + frais if "achat" in typ else net - frais
+
+            sortie.append(Transaction(
+                ticker=ticker, type=typ, date=d.date(), quantite=quantite,
+                cours=cours, frais=frais, devise=devise, montant_net=round(net, 6),
+            ))
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f"Transaction ligne {i} illisible : {exc}") from exc
+
+    return sorted(sortie, key=lambda t: (t.date, t.ticker))
+
+
+# ---------------------------------------------------------------------------
+# Calcul des positions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Position:
+    """Une position par ticker, avec son PRU et sa valorisation."""
+
+    ticker: str
+    classe: Classe
+    poche: str
+    devise_cotation: str
+    quantite: float = 0.0
+    cout_total_eur: float = 0.0     # coût total en euros
+    pru_eur: float = 0.0
+    prix: float = 0.0               # dans la devise de cotation
+    valeur_eur: float = 0.0
+    pv_latente_eur: float = 0.0
+
+    @property
+    def perf_globale(self) -> float | None:
+        if self.pru_eur <= 0:
+            return None
+        return (self.valeur_eur / (self.pru_eur * self.quantite)) - 1.0 if self.quantite else None
+
+    @property
+    def poche_obj(self) -> Poche | None:
+        return POCHES_PAR_CLE.get(self.poche)
+
+
+def calculer_positions(transactions: list[Transaction]) -> dict[str, Position]:
+    """PRU et quantités par ticker, en euros, FIFO sur la quantité.
+
+    Le PRU est calculé en euros : chaque ligne est convertie à sa date avec le
+    taux de change réel. Aucune conversion manuelle n'est acceptée en saisie —
+    c'est ce qui avait empoisonné XJSE.SW dans la v1.
+    """
+    positions: dict[str, Position] = {}
+
+    for t in transactions:
+        pos = positions.get(t.ticker)
+        if pos is None:
+            pos = Position(
+                ticker=t.ticker,
+                classe=classe_de(t.ticker),
+                poche=(poche_de(t.ticker).cle if poche_de(t.ticker) else "inconnu"),
+                devise_cotation=t.devise,
+            )
+            positions[t.ticker] = pos
+
+        montant_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
+
+        if t.est_achat:
+            pos.quantite += t.quantite
+            pos.cout_total_eur += montant_eur
+        else:  # vente
+            if pos.quantite <= 1e-9:
+                raise ValueError(
+                    f"Vente de {t.quantite} {t.ticker} le {t.date} sans position détenue."
+                )
+            if t.quantite > pos.quantite + 1e-6:
+                raise ValueError(
+                    f"Vente de {t.quantite} {t.ticker} le {t.date} supérieure à la "
+                    f"quantité détenue ({pos.quantite})."
+                )
+            pru_instant = pos.cout_total_eur / pos.quantite
+            pos.cout_total_eur -= pru_instant * t.quantite
+            pos.quantite -= t.quantite
+            if pos.quantite <= 1e-9:
+                pos.quantite = 0.0
+                pos.cout_total_eur = 0.0
+
+    for pos in positions.values():
+        pos.pru_eur = (pos.cout_total_eur / pos.quantite) if pos.quantite > 0 else 0.0
+
+    return positions
+
+
+def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[list[Actif], list[str]]:
+    """Valorise les positions. Retourne `(actifs, echecs)`.
+
+    Les échecs de cours sont renvoyés, pas masqués : l'appelant doit les afficher.
+    """
+    actifs: list[Actif] = []
+    echecs: list[str] = []
+
+    for pos in positions.values():
+        if pos.quantite <= 0:
+            continue
+        try:
+            prix = prices.cours(pos.ticker, date)
+            taux = fx.taux(pos.devise_cotation, date or dt.date.today().isoformat(), "EUR")
+            valeur_eur = pos.quantite * prix * taux
+            pos.prix = prix
+            pos.valeur_eur = valeur_eur
+            pos.pv_latente_eur = valeur_eur - pos.cout_total_eur
+            actifs.append(Actif(
+                ticker=pos.ticker, classe=pos.classe, devise_cotation=pos.devise_cotation,
+                poche=pos.poche, quantite=pos.quantite, prix=prix,
+                valeur_eur=valeur_eur, dernier_taux=taux,
+            ))
+        except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
+            log.warning("Valorisation impossible : %s", exc)
+            echecs.append(pos.ticker)
+
+    return actifs, echecs
+
+
+# ---------------------------------------------------------------------------
+# Agrégation par poche
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EtatPoche:
+    """État d'une poche : valeur, poids, écart à la cible."""
+
+    poche: Poche
+    valeur_eur: float = 0.0
+    poids_reel: float = 0.0
+    poids_cible: float = 0.0
+    actifs: list[Actif] = field(default_factory=list)
+
+    @property
+    def ecart(self) -> float:
+        """Écart en points de pourcentage (réel - cible)."""
+        return self.poids_reel - self.poids_cible
+
+    @property
+    def ecart_points(self) -> float:
+        """Écart en points de pourcentage, prêt à afficher."""
+        return (self.poids_reel - self.poids_cible) * 100.0
+
+    @property
+    def hors_bande(self) -> bool:
+        return abs(self.poids_reel - self.poids_cible) > self.poche.bande
+
+    @property
+    def en_dehors_bande(self) -> bool:
+        return self.hors_bande
+
+    @property
+    def valeur_cible_eur(self) -> float:
+        return self.poids_cible * (self.valeur_eur / self.poids_reel) if self.poids_reel else 0.0
+
+
+def agreger_par_poche(
+    actifs: list[Actif],
+    total_investi_eur: float,
+) -> dict[str, EtatPoche]:
+    """Répartit les actifs par poche et calcule les poids.
+
+    `total_investi_eur` est le dénominateur : **uniquement** le patrimoine investi.
+    L'épargne de précaution et le compte courant n'y entrent pas — leur pondération
+    n'a aucun sens. C'est exactement l'erreur de la v1, en sens inverse.
+    """
+    etats: dict[str, EtatPoche] = {}
+    for p in POCHES_PAR_CLE.values():
+        etats[p.cle] = EtatPoche(poche=p, poids_cible=p.cible)
+
+    for a in actifs:
+        etat = etats.get(a.poche)
+        if etat is None:
+            etat = etats.setdefault("inconnu", EtatPoche(poche=Poche(
+                cle="inconnu", nom="Non classé", cible=0.0, bande=0.0,
+                perimetre=Perimetre.INVESTI,
+            )))
+        etat.actifs.append(a)
+        etat.valeur_eur += a.valeur_eur
+
+    if total_investi_eur > 0:
+        for etat in etats.values():
+            # Une poche hors portefeuille n'a pas de poids d'allocation : lui en
+            # attribuer un serait revenir au bug de la v1, où l'épargne de
+            # précaution entrait dans l'assiette de rééquilibrage.
+            if etat.poche.perimetre == Perimetre.INVESTI:
+                etat.poids_reel = etat.valeur_eur / total_investi_eur
+            else:
+                etat.poids_reel = 0.0
+
+    return etats
+
+
+def patrimoine_total(actifs: list[Actif]) -> dict[str, float]:
+    """Ventilation du patrimoine : investi, précaution, courant."""
+    totaux = {p.value: 0.0 for p in Perimetre}
+    for a in actifs:
+        p = POCHES_PAR_CLE.get(a.poche)
+        cle = p.perimetre.value if p else Perimetre.INVESTI.value
+        totaux[cle] += a.valeur_eur
+    return totaux
