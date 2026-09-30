@@ -105,11 +105,25 @@ def ecrire(table: str, lignes: list[dict]) -> int:
     return len(rep.data or [])
 
 
-def remplacer(table: str, lignes: list[dict]) -> None:
-    """Vide puis réinsère une table de référence (inflation, cours du jour)."""
-    client().table(table).delete().neq("id", -1).execute()
-    if lignes:
-        ecrire(table, lignes)
+def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) -> None:
+    """Insère ou met à jour des lignes (upsert), de façon idempotente.
+
+    CORRECTION : la première version faisait `delete().neq("id", -1)` puis
+    réinsérait. Deux défauts. D'abord, `pf2_cours`, `pf2_fx` et `pf2_inflation`
+    n'ont pas de colonne `id`, donc le delete échouait. Ensuite, un delete suivi
+    d'un insert n'est pas idempotent : une panne entre les deux perd les données.
+
+    L'upsert règle les deux problèmes. `on_conflict` permet de cibler un index
+    unique quand la clé primaire n'est pas la bonne — cas de `pf2_transactions`,
+    dont la clé primaire est `id` mais dont l'unicité réelle porte sur le tuple
+    ticker/sens/date/quantite/cours.
+    """
+    if not lignes:
+        return
+    requete = client().table(table).upsert(lignes)
+    if on_conflict:
+        requete = requete.on_conflict(on_conflict)
+    requete.execute()
 
 
 def maj_ligne(table: str, id_ligne, champs: dict) -> None:
@@ -117,9 +131,15 @@ def maj_ligne(table: str, id_ligne, champs: dict) -> None:
 
 
 def existe(table: str) -> bool:
-    """Vrai si la table existe et est accessible."""
+    """Vrai si la table existe et est accessible.
+
+    CORRECTION : la v1 de cette fonction faisait `select("id")`, ce qui supposait
+    que toute table possède une colonne `id`. Ce n'est pas le cas de `pf2_cours`,
+    `pf2_fx` et `pf2_inflation`, dont la clé primaire est composite. On interroge
+    donc `*` avec une limite d'une ligne : ça marche quelle que soit la structure.
+    """
     try:
-        client().table(table).select("id").limit(1).execute()
+        client().table(table).select("*").limit(1).execute()
         return True
     except Exception as exc:
         log.warning("Table %s inaccessible : %s", table, exc)
@@ -156,13 +176,12 @@ def inflation() -> pd.DataFrame:
 
 
 def ajouter_snapshot(ligne: dict) -> None:
-    """Ajoute un snapshot daté. Évite les doublons sur la date."""
-    date = ligne["Date"]
-    rep = client().table(T_SNAPSHOTS).select("id").eq("Date", date).limit(1).execute()
-    if rep.data:
-        client().table(T_SNAPSHOTS).update(ligne).eq("id", rep.data[0]["id"]).execute()
-    else:
-        ecrire(T_SNAPSHOTS, [ligne])
+    """Ajoute un snapshot daté, de façon idempotente.
+
+    Utilise l'upsert sur la contrainte d'unicité de `date` : relancer le robot
+    deux fois le même jour met à jour la ligne au lieu d'en créer une deuxième.
+    """
+    client().table(T_SNAPSHOTS).upsert(ligne, on_conflict="date").execute()
 
 
 def ajouter_alerte(titre: str, message: str, niveau: str = "info") -> None:
