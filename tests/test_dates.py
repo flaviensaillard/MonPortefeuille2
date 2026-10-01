@@ -25,7 +25,10 @@ panneau, et aucun test ne couvrait cette branche.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
+import numpy as np
 import pytest
 
 from core import dates
@@ -233,3 +236,74 @@ def test_parser_sur_une_serie_entiere():
 
 def test_parser_renvoie_nat_sur_une_valeur_illisible():
     assert pd.isna(dates.parser("pas une date"))
+
+
+class TestLesDeuxEcrituresDonnentLeMemeJour:
+    """Le défaut de production, verrouillé.
+
+    La base écrit l'ISO (`2025-07-01`), la v1 écrit `jj/mm/aaaa` (`01/07/2025`).
+    Les deux désignent le 1er juillet 2025 et doivent donner le même jour.
+
+    Deux « correctifs » successifs ont échoué, chacun sur une des deux écritures :
+      * `dayfirst=True` seul lisait l'ISO à l'envers (2025-07-01 -> 7 janvier) ;
+      * `format="mixed"` + `dayfirst=True` réparait l'ISO mais faisait lire
+        `01/07/2025` comme le 7 janvier.
+
+    Et le comportement de `dayfirst` couplé à `format="mixed"` n'est pas le même
+    d'une version de pandas à l'autre : un code juste en local peut être faux sur
+    le serveur, sans qu'aucune ligne ne change. D'où un format IMPOSÉ d'après la
+    forme de la chaîne, sans aucune heuristique.
+    """
+
+    @pytest.mark.parametrize("iso, v1", [
+        ("2025-07-01", "01/07/2025"),   # 1er juillet — le cas FLXC.L
+        ("2025-10-01", "01/10/2025"),   # 1er octobre — le second cas FLXC.L
+        ("2026-01-05", "05/01/2026"),
+        ("2026-09-01", "01/09/2026"),
+        ("2025-03-18", "18/03/2025"),
+        ("2026-02-02", "02/02/2026"),
+    ])
+    def test_les_deux_ecritures_concordent(self, iso, v1):
+        assert dates.parser(iso).date() == dates.parser(v1).date()
+
+    @pytest.mark.parametrize("iso", ["2025-07-01", "2025-10-01", "2026-01-05"])
+    def test_l_iso_est_respecte(self, iso):
+        """Une date ISO ne doit jamais être inversée."""
+        assert dates.parser(iso).date().isoformat() == iso
+
+    @pytest.mark.parametrize("v1, attendu", [
+        ("01/07/2025", "2025-07-01"),   # 1er juillet, PAS le 7 janvier
+        ("01/10/2025", "2025-10-01"),   # 1er octobre, PAS le 10 janvier
+        ("07/01/2025", "2025-01-07"),   # 7 janvier
+        ("10/01/2025", "2025-01-10"),   # 10 janvier
+        ("05/01/2026", "2026-01-05"),
+        ("18/03/2025", "2025-03-18"),
+    ])
+    def test_le_jour_premier_de_la_v1_est_respecte(self, v1, attendu):
+        """En `jj/mm/aaaa`, le premier nombre est le JOUR."""
+        assert dates.parser(v1).date().isoformat() == attendu
+
+    @pytest.mark.parametrize("valeur", [
+        "2025-07-01",
+        "2025-07-01 00:00:00+00",
+        "2025-07-01T00:00:00+00:00",
+        dt.date(2025, 7, 1),
+        dt.datetime(2025, 7, 1),
+        pd.Timestamp("2025-07-01"),
+        pd.Timestamp("2025-07-01", tz="UTC"),
+        np.datetime64("2025-07-01"),
+    ])
+    def test_toutes_les_formes_de_la_base(self, valeur):
+        """Tout ce que Supabase peut renvoyer doit donner le 1er juillet."""
+        assert dates.parser(valeur).date() == dt.date(2025, 7, 1)
+
+    def test_une_serie_entiere(self):
+        serie = pd.Series(["2025-07-01", "01/10/2025", "18/03/2025"])
+        res = dates.parser(serie)
+        assert [d.date().isoformat() for d in res] == [
+            "2025-07-01", "2025-10-01", "2025-03-18",
+        ]
+
+    @pytest.mark.parametrize("valeur", ["", None, float("nan"), "abc", "2025-13-45"])
+    def test_valeurs_illisibles(self, valeur):
+        assert pd.isna(dates.parser(valeur))

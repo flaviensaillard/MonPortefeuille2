@@ -26,8 +26,15 @@ tombaient dans le panneau. Et aucun test ne couvrait cette branche.
 
 from __future__ import annotations
 
+import datetime as dt
+import re
+
 import numpy as np
 import pandas as pd
+
+# Une date ISO commence par quatre chiffres, un tiret, puis le mois et le jour.
+# C'est l'écriture de la base (`pf2_transactions.date`).
+_ISO = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}")
 
 
 def index_sans_fuseau(index):
@@ -51,33 +58,69 @@ def normaliser(instant) -> pd.Timestamp:
     return ts
 
 
+def _parser_un(valeur, erreurs: str = "coerce"):
+    """Parse une date isolee. Voir `parser` pour le contrat complet."""
+    # Objets deja dates : rien a deviner, on les rend tels quels.
+    if isinstance(valeur, (dt.date, dt.datetime, np.datetime64, pd.Timestamp)):
+        return pd.to_datetime(valeur, errors=erreurs)
+
+    if valeur is None:
+        return pd.NaT
+
+    texte = str(valeur).strip()
+    if not texte:
+        return pd.NaT
+
+    if _ISO.match(texte):
+        # ISO : la date occupe toujours les dix premiers caracteres, qu'une
+        # heure et un fuseau suivent ou non.
+        return pd.to_datetime(texte[:10], format="%Y-%m-%d", errors=erreurs)
+
+    # Ecriture de la v1 : jour puis mois. `dayfirst` reste la par securite pour
+    # les formes que `%d/%m/%Y` ne couvrirait pas, mais le format est impose.
+    return pd.to_datetime(texte, format="%d/%m/%Y", errors=erreurs, dayfirst=True)
+
+
 def parser(valeur, erreurs: str = "coerce"):
     """Parse une date venant soit de la base, soit d'un CSV de la v1.
 
-    Pourquoi `format="mixed"` est indispensable
-    -------------------------------------------
-    L'application stocke ses dates au format ISO (`2025-01-07`). La v1, elle,
-    écrit `jj/mm/aaaa`. Or un `pd.to_datetime(..., dayfirst=True)` sans plus de
-    précisions **interprète mal l'ISO** : `dayfirst` fait lire « 01 » comme le
-    JOUR et « 07 » comme le MOIS. Le 7 janvier devient donc le 1er juillet.
+    Deux écritures, deux formats imposés — on ne laisse JAMAIS pandas deviner
+    ----------------------------------------------------------------------
+    L'application stocke ses dates en ISO (`2025-07-01`). La v1, elle, écrit
+    `jj/mm/aaaa` (`01/07/2025` pour le 1er juillet). Les deux doivent donner le
+    1er juillet 2025.
 
-    Le défaut est silencieux et il frappe large : toute date dont le jour est
-    inférieur ou égal à 12 — environ 39 % des dates — est décalée. Les
-    conséquences sont concrètes : un taux de change ou un cours historique
-    recherché à la mauvaise date, donc une valorisation fausse. Et comme la
-    branche « aujourd'hui » ne parse rien, le problème ne se voyait que sur
-    l'historique.
+    Les deux « correctifs » successifs échouaient chacun sur une des deux
+    écritures :
 
-    `format="mixed"` laisse pandas reconnaître le format de chaque valeur ;
-    les deux écritures sont alors traitées correctement.
+    * `dayfirst=True` seul lisait l'ISO à l'envers : `2025-07-01` devenait le
+      7 janvier. C'est le défaut d'origine.
+    * `format="mixed"` + `dayfirst=True` réparait l'ISO, mais faisait lire
+      `01/07/2025` comme le **7 janvier** : `dayfirst` est ignoré quand pandas
+      devine le format, et il devine `%m/%d/%Y`.
+
+    Et surtout, le comportement de `dayfirst` couplé à `format="mixed"` n'est
+    pas le même d'une version de pandas à l'autre : un code juste ici peut
+    donc être faux sur le serveur, sans qu'aucune ligne ne change.
+
+    On devine donc le format à la FORME de la chaîne, puis on l'impose. Aucune
+    heuristique, aucune dépendance à la version de pandas.
     """
-    return pd.to_datetime(valeur, dayfirst=True, errors=erreurs, format="mixed")
+    # Une colonne entiere : on traite element par element, en conservant l'index.
+    # `pd.to_datetime` sur une Series melange les formats et retombe sur ses
+    # heuristicites — exactement ce qu'on veut eviter.
+    if isinstance(valeur, (pd.Series, pd.Index, np.ndarray, list, tuple)):
+        return pd.Series(
+            [_parser_un(v, erreurs) for v in valeur],
+            index=getattr(valeur, "index", None),
+        )
+    return _parser_un(valeur, erreurs)
 
 
 def dernier_avant(serie: pd.Series, limite) -> pd.Series:
     """Sous-ensemble d'une série datée dont l'index est au plus tard à `limite`.
 
-    Tolérant au fuseau horaire des deux côtés. C'est le remplaissant direct de
+    Tolérant au fuseau horaire des deux côtés. Le remplaçant direct de
     `serie[serie.index <= limite]`, qui plantait sur les données Yahoo.
 
     Le filtrage est positionnel (masque booléen), donc sûr même si l'index

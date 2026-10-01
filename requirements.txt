@@ -1,5 +1,9 @@
 streamlit>=1.32
-pandas>=2.0
+# pandas est épingle sur une bande etroite : le comportement de
+# `dayfirst` couple a `format="mixed"` n'est PAS le meme d'une version a
+# l'autre. `core/dates.py` n'en depend plus (formats imposes), mais on reduit
+# la variance entre l'environnement de test et le serveur.
+pandas>=2.2,<3
 numpy>=1.24
 plotly>=5.18
 yfinance>=0.2.28
