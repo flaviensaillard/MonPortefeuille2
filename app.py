@@ -43,6 +43,14 @@ with col_rafraichir:
 
 ctx = S.charger()
 
+# Fraicheur des donnees. Un bandeau d'anomalie qui survit a sa correction vient
+# presque toujours d'un serveur qui tourne sur une vieille version du code : la
+# date ci-dessous le montre immediatement.
+if ctx.importe_le:
+    st.caption(f"Données importées le {ctx.importe_le[:16].replace('T', ' ')} — "
+               f"si cette date est anterieure a votre dernier import, "
+               f"cliquez sur 🔄 Rafraîchir.")
+
 for err in ctx.erreurs:
     st.error(err)
 

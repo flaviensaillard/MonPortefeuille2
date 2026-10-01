@@ -58,6 +58,11 @@ class Contexte:
     tables_absentes: list[str] = field(default_factory=list)
     erreurs: list[str] = field(default_factory=list)
     anomalies_transactions: list[str] = field(default_factory=list)
+    # Date du dernier import, lue dans `cree_le`. Sert a voir d'un coup
+    # d'oeil si l'application regarde des donnees fraiches : un serveur qui
+    # tourne sur une vieille version du code affiche une date anterieure au
+    # dernier import, et le bandeau d'anomalie survit a sa correction.
+    importe_le: str | None = None
 
     @property
     def ecarts(self):
@@ -91,6 +96,23 @@ def _inflation_par_annee(df: pd.DataFrame) -> dict[int, float]:
     return out
 
 
+def _date_dernier_import(df) -> str | None:
+    """Date la plus recente de la colonne `cree_le`, ou None si absente.
+
+    Volontairement tolerant : une table sans `cree_le` (ou vide) ne doit pas
+    empecher l'application de demarrer.
+    """
+    try:
+        if df is None or df.empty or "cree_le" not in getattr(df, "columns", []):
+            return None
+        valeurs = pd.to_datetime(df["cree_le"], errors="coerce").dropna()
+        if valeurs.empty:
+            return None
+        return str(valeurs.max())
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def charger(rafraichir_cours: bool = False) -> Contexte:
     """Charge et calcule l'état complet. Mémoïsé 5 minutes."""
@@ -117,6 +139,7 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     # --- Transactions -> positions ---
     try:
         df_tx = db.transactions()
+        ctx.importe_le = _date_dernier_import(df_tx)
         ctx.transactions = charger_transactions(df_tx)
         # Une transaction incohérente ne doit pas vider l'écran : on la consigne
         # et on continue, pour que vous voyiez le reste du portefeuille.
