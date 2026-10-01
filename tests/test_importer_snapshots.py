@@ -342,3 +342,56 @@ class TestLaPurgeDeLaFenetre:
             n = imp.importer_snapshots(dry_run=False)
         assert n == 4
         assert "rien n'est purgé" in caplog.text
+
+
+class TestLaFenetreNeDependPasDeLOrdreDeLaReponse:
+    """PostgREST ne rend PAS les lignes dans l'ordre des dates.
+
+    Sur le premier lancement réel de l'import, la première ligne rendue portait
+    le 30/07/2024 alors que la plus ancienne de la table est le 01/04/2023. La
+    fenêtre de purge — calculée sur la première et la dernière ligne du lot —
+    partait donc dix-huit mois trop tard, et le journal annonçait
+    « 2024-07-30 -> 2026-10-01 » au lieu de « 2023-04-01 -> 2026-10-01 ».
+
+    Sans conséquence ce jour-là : le robot n'avait rien écrit avant mars 2025.
+    Mais c'était de la chance. Une ligne rendue dans un ordre différent aurait
+    pu laisser survivre des lignes de la v2 en début de fenêtre — exactement les
+    lignes fausses qu'on veut retirer.
+    """
+
+    DESORDRE = [
+        {"Date": "30/07/2024", "Capital investi": 49212,
+         "Actifs Stratégiques": 53941, "Total Global": 76631, "id": 3},
+        {"Date": "30/04/2024", "Capital investi": 28586,
+         "Actifs Stratégiques": 31779, "Total Global": 54469, "id": 2},
+        {"Date": "01/04/2023", "Capital investi": 10905,
+         "Actifs Stratégiques": 10905, "Total Global": 33668, "id": 1},
+        {"Date": "30/04/2023", "Capital investi": 10978,
+         "Actifs Stratégiques": 11101, "Total Global": 33791, "id": 4},
+    ]
+
+    def test_la_fenetre_annoncee_part_de_la_plus_ancienne_date(self, _v1, monkeypatch, caplog):
+        monkeypatch.setattr(imp, "lire_v1", lambda t: pd.DataFrame(self.DESORDRE))
+        with caplog.at_level("INFO"):
+            imp.importer_snapshots(dry_run=True)
+        assert "2023-04-01 -> 2024-07-30" in caplog.text
+        assert "(2024-07-30 -> " not in caplog.text.replace("2023-04-01 -> 2024-07-30", "")
+
+    def test_chaque_date_est_ecrite(self, _v1, monkeypatch):
+        monkeypatch.setattr(imp, "lire_v1", lambda t: pd.DataFrame(self.DESORDRE))
+        imp.importer_snapshots(dry_run=False)
+        assert {e["date"] for e in _v1} == {
+            "2023-04-01", "2023-04-30", "2024-04-30", "2024-07-30"}
+
+    def test_une_ligne_de_la_v2_au_debut_de_fenetre_est_bien_retiree(self, _v1, monkeypatch):
+        """Le cas que le désordre aurait laissé passer : une ligne de la v2
+        ANTÉRIEURE à la première ligne rendue par Supabase."""
+        monkeypatch.setattr(imp, "lire_v1", lambda t: pd.DataFrame(self.DESORDRE))
+        _v1.existants.extend([
+            {"date": "2023-06-15", "patrimoine_investi_eur": 1000.0},
+            {"date": "2024-05-15", "patrimoine_investi_eur": 1000.0},
+        ])
+        imp.importer_snapshots(dry_run=False)
+        assert "2023-06-15" in _v1.retires, \
+            "une ligne de la v2 entre avril 2023 et juillet 2024 doit partir"
+        assert "2024-05-15" in _v1.retires

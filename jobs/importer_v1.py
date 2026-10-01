@@ -510,10 +510,18 @@ def _purger_la_fenetre(debut: str, fin: str, conservees: set[str],
     if "patrimoine_investi_eur" in existants.columns and not dry_run:
         gardees = existants[existants["date"].astype(str).isin(conservees)]
         if not gardees.empty:
+            # Le libellé dit « dans la fenêtre » et non « la v2 en avait » :
+            # `dedans` compte les lignes de la FENÊTRE, et la série de la v1 peut
+            # commencer avant elle. Le premier lancement réel annonçait
+            # « la v2 en avait 571 » alors que la v2 en avait 563 — les 8 de
+            # trop étaient des lignes de la v1 dans la fenêtre. Le chiffre était
+            # juste, le mot était faux, et un mot faux dans un journal de
+            # migration coûte une heure d'enquête.
             log.info(
-                "Fenêtre %s -> %s : %d ligne(s) de la v2 remplacée(s) par "
-                "l'historique v1 (la v2 en avait %d au total).",
-                debut, fin, len(a_retirer), len(dedans),
+                "Fenêtre %s -> %s : %d ligne(s) retirée(s) sur les %d que "
+                "comptait la fenêtre ; %d conservée(s).",
+                debut, fin, len(a_retirer), len(dedans), len(conservees & set(
+                    dedans["date"].astype(str))),
             )
 
     if dry_run:
@@ -605,6 +613,16 @@ def importer_snapshots(dry_run: bool = False) -> int:
     if not lignes:
         log.info("Aucune valorisation exploitable dans %s.", V1_PROJECTIONS)
         return 0
+
+    # TRI PAR DATE. Ce n'est pas cosmétique : la fenêtre de purge est calculée
+    # sur `lignes[0]` et `lignes[-1]`, et PostgREST ne rend PAS les lignes dans
+    # l'ordre des dates. Sur le premier lancement réel, la première ligne rendue
+    # portait le 30/07/2024 alors que la plus ancienne de la table est le
+    # 01/04/2023 : la fenêtre annoncée partait donc dix-huit mois trop tard.
+    # Sans conséquence ce jour-là — le robot n'a rien écrit avant mars 2025 —
+    # mais c'était de la chance, pas de la correction. Un tri, et la question
+    # ne se pose plus.
+    lignes.sort(key=lambda l: l["date"])
 
     # `pf2_snapshots` a une contrainte d'unicite sur `date`, mais deux lignes de
     # meme date dans le lot la feraient echouer quand meme. On deduplique, et

@@ -28,6 +28,7 @@ import pandas as pd
 import pytest
 
 from _support import simuler_supabase
+from core.portfolio import charger_transactions
 
 RACINE = Path(__file__).resolve().parent.parent
 SQL = (RACINE / "migrations" / "001_init.sql").read_text(encoding="utf-8")
@@ -555,3 +556,63 @@ def test_ajouter_alerte_niveau_par_defaut(captures_ecriture, monkeypatch):
     ajouter_alerte("T", "M")
     _, lignes = captures_ecriture[0]
     assert lignes[0]["niveau"] == "info"
+
+
+# ---------------------------------------------------------------------------
+# La règle des frais, telle que la v1 l'écrit
+# ---------------------------------------------------------------------------
+class TestLeSigneDesFrais:
+    """`Montant Net` de la v1 est : quantité × cours PLUS frais à l'achat,
+    MOINS frais à la vente. Vérifié sur les 96 lignes réelles : le calcul tombe
+    juste au centime près sur 96 lignes, et les 34 lignes qui « échouaient »
+    étaient TOUTES des ventes, avec un écart d'exactement deux fois les frais.
+
+    Le CSV de la v1 ne porte pas cette règle : elle se déduit des chiffres. Un
+    import qui se tromperait de signe sur les ventes se tromperait de 2 000 $
+    sur l'ensemble du journal — et personne ne le verrait, parce que les deux
+    conventions donnent des montants plausibles.
+
+    Deux pièges de plus, vérifiés le même jour :
+
+    - la devise n'est PAS globale au fichier. `Cours`, `Frais` et `Montant Net`
+      sont dans la devise de la ligne, celle de la colonne `Devise` juste à
+      côté : 87 lignes en USD, et les 9 lignes XJSE.SW en JPY (cours ≈ 1 115,
+      pas 6,87) ;
+    - `Montant Or` de la table `Historique` donne le cours de l'or, ce qui
+      confirme que `Montant $` est bien en dollars : 1 955,73 $/oz en juillet
+      2023, 4 478,70 $/oz en septembre 2026.
+    """
+
+    def _tx(self, sens, qte, cours, frais, devise="USD"):
+        return pd.DataFrame([{
+            "Ticker": "IGLN.L", "Type": sens, "Date": "15/04/2025",
+            "Quantité": qte, "Cours": cours, "Frais": frais, "Devise": devise,
+        }])
+
+    def test_les_frais_s_ajoutent_a_l_achat(self):
+        tx = charger_transactions(self._tx("achat", 14, 62.6425, 5.85))
+        assert tx[0].montant_net == pytest.approx(14 * 62.6425 + 5.85)
+
+    def test_les_frais_se_deduisent_a_la_vente(self):
+        """La ligne réelle : vente de 14 IGLN.L à 62,6425, frais 5,85,
+        montant net 871,15 dans la table."""
+        tx = charger_transactions(self._tx("vente", 14, 62.6425, 5.85))
+        assert tx[0].montant_net == pytest.approx(871.15, abs=0.01)
+
+    def test_le_signe_ne_depend_pas_de_la_casse(self):
+        """La v1 mélange « vente » et « Vente »."""
+        minuscule = charger_transactions(self._tx("vente", 14, 74.0, 12.40))
+        majuscule = charger_transactions(self._tx("Vente", 14, 74.0, 12.40))
+        assert minuscule[0].montant_net == pytest.approx(majuscule[0].montant_net)
+
+    def test_aucune_course_aux_frais_manquants(self):
+        """Une ligne sans frais ne doit pas se retrouver en négatif."""
+        tx = charger_transactions(self._tx("vente", 10, 50.0, 0.0))
+        assert tx[0].montant_net == pytest.approx(500.0)
+
+    def test_la_devise_de_la_ligne_est_conservee(self):
+        """Une ligne XJSE.SW en JPY le reste : c'est la colonne `Devise` qui
+        commande, pas une supposition sur le titre."""
+        tx = charger_transactions(self._tx("achat", 338, 1115.6, 1764.0, "JPY"))
+        assert tx[0].devise == "JPY"
+        assert tx[0].montant_net == pytest.approx(338 * 1115.6 + 1764.0)

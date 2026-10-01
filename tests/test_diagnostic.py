@@ -302,3 +302,156 @@ class TestRequeteSql:
             diagnostic.requete_sql()
         assert "information_schema.tables" in caplog.text
         assert "Table Editor" in caplog.text
+
+
+class TestReconciliationDuCapital:
+    """`Projections.Capital investi` est le cumul que la v1 tenait elle-même,
+    en dollars. C'est un juge indépendant de chaque ligne du journal.
+
+    Sur les données réelles, ce contrôle trouve UNE période sur trois ans et
+    demi : du 30/03 au 30/04/2024, 11 848 $ d'apports sont enregistrés et le
+    capital RECULE de 500 $. Les autres gros versements le font bouger — +8 889 $
+    en mai 2024 pour 9 161 $, +11 019 $ en juillet 2024 pour 11 554 $.
+    """
+
+    def _hist(self, lignes):
+        """`lignes` : (date jj/mm/aaaa, type, montant $)."""
+        return pd.DataFrame([
+            {"Date": d, "Type": t, "Montant $": m, "Montant €": m / 1.08,
+             "Montant Or": m / 2000.0}
+            for d, t, m in lignes
+        ])
+
+    def _proj(self, lignes):
+        """`lignes` : (date jj/mm/aaaa, capital investi en $)."""
+        return pd.DataFrame([
+            {"Date": d, "Capital investi": c, "Actifs Stratégiques": c * 1.3,
+             "Total Global": c * 1.7}
+            for d, c in lignes
+        ])
+
+    def _brancher(self, monkeypatch, hist, proj):
+        diagnostic.connexion_ok = True
+        monkeypatch.setattr(
+            diagnostic, "lire_v1",
+            lambda t: hist if t == diagnostic.V1_HISTORIQUE else proj,
+        )
+
+    def test_le_trou_d_avril_2024_est_trouve(self, monkeypatch, caplog):
+        hist = self._hist([
+            ("29/02/2024", "Ajout fonds propres", 260.0),
+            ("11/04/2024", "Ajout fonds propres", 268.24),
+            ("29/04/2024", "Ajout fonds propres", 11579.85),
+            ("30/04/2024", "Ajout fonds propres", 200.0),
+        ])
+        proj = self._proj([
+            ("30/01/2024", 28184.0), ("28/02/2024", 27861.0),
+            ("30/03/2024", 29086.0), ("30/04/2024", 28586.0),
+        ])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+
+        assert "2024-04-30" in caplog.text
+        assert "2024-03-30" in caplog.text
+        # 268,24 + 11 579,85 + 200,00 = 12 048,09 $ d'apports en avril 2024,
+        # pour un capital qui recule de 500 $.
+        assert "12 048" in caplog.text
+        assert "-500" in caplog.text
+
+    def test_un_journal_qui_suit_le_capital_est_muet(self, monkeypatch, caplog):
+        """Chaque apport bouge le capital d'autant : rien à signaler."""
+        hist = self._hist([
+            ("11/04/2024", "Ajout fonds propres", 268.24),
+            ("02/05/2024", "Ajout fonds propres", 8676.79),
+            ("23/07/2024", "Ajout fonds propres", 11336.23),
+        ])
+        proj = self._proj([
+            ("30/03/2024", 29000.0), ("30/04/2024", 29268.24),
+            ("30/05/2024", 37945.03), ("30/07/2024", 49281.26),
+        ])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+        assert "Aucun écart" in caplog.text
+
+    def test_les_dates_jj_mm_aaaa_sont_lues_dans_le_bon_ordre(self, monkeypatch, caplog):
+        """REGRESSION. `pd.to_datetime` sur du jj/mm/aaaa sans `dayfirst` lit
+        le 29/04/2024 comme le 4 du 29ᵉ mois — c'est-à-dire jamais. Le défaut a
+        déjà été corrigé une fois dans ce projet (`_date_range`), et il est
+        revenu dans ce contrôle-ci ; il repart par la porte qu'il est entré."""
+        hist = self._hist([
+            ("11/04/2024", "Ajout fonds propres", 268.24),
+            ("29/04/2024", "Ajout fonds propres", 11579.85),
+        ])
+        proj = self._proj([
+            ("30/03/2024", 29086.0), ("30/04/2024", 28586.0),
+        ])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+
+        assert "2024-04-30" in caplog.text, \
+            "le 29/04/2024 doit tomber dans la période mars → avril 2024"
+        assert "2024-04-29" not in caplog.text.split("→")[0], \
+            "une date inversée donnerait une période absurde"
+
+    def test_un_petit_apport_ne_declenche_pas(self, monkeypatch, caplog):
+        """Sous 2 000 $ de flux, une absence de mouvement n'est pas concluante :
+        le capital de la v1 bougeait de ±1 000 $ tout seul avant 2025."""
+        hist = self._hist([("11/04/2024", "Ajout fonds propres", 500.0)])
+        proj = self._proj([("30/03/2024", 29000.0), ("30/04/2024", 29000.0)])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+        assert "Aucun écart" in caplog.text
+
+    def test_les_invest_prog_ne_sont_pas_des_mouvements(self, monkeypatch, caplog):
+        """Les 5 lignes « invest. prog. » ne sont ni des apports ni des retraits,
+        et le capital investi de la v1 ne les compte pas non plus. Le contrôle
+        doit donc rester muet — c'est une confirmation croisée de la règle
+        d'import."""
+        hist = self._hist([
+            ("05/08/2024", "invest. prog.", 54.76),
+            ("16/09/2024", "invest. prog.", 55.62),
+        ])
+        proj = self._proj([("30/07/2024", 49212.0), ("30/09/2024", 51178.0)])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+        assert "Aucun écart" in caplog.text
+
+    def test_un_retrait_compte_en_negatif(self, monkeypatch, caplog):
+        """Un retrait fait BAISSER le capital : le signe doit suivre."""
+        hist = self._hist([("22/05/2024", "Retrait", 53.48)])
+        proj = self._proj([("30/04/2024", 29000.0), ("30/05/2024", 29000.0)])
+        self._brancher(monkeypatch, hist, proj)
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(hist)
+        assert "Aucun écart" in caplog.text
+
+    def test_projections_absente(self, monkeypatch, caplog):
+        self._brancher(monkeypatch, self._hist([("11/04/2024", "Ajout", 5000.0)]),
+                       pd.DataFrame())
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(self._hist([("11/04/2024", "Ajout", 5000.0)]))
+        assert "Contrôle sauté" in caplog.text
+
+    def test_historique_illisible(self, monkeypatch, caplog):
+        with caplog.at_level("INFO"):
+            diagnostic.reconcilier_capital(pd.DataFrame())
+        assert "illisible" in caplog.text
+
+    def test_le_verdict_nomme_la_periode_et_le_montant(self, monkeypatch):
+        hist = self._hist([
+            ("29/04/2024", "Ajout fonds propres", 11579.85),
+            ("11/04/2024", "Ajout fonds propres", 268.24),
+        ])
+        proj = self._proj([("30/03/2024", 29086.0), ("30/04/2024", 28586.0)])
+        self._brancher(monkeypatch, hist, proj)
+        diagnostic.verdicts.clear()
+        diagnostic.reconcilier_capital(hist)
+        assert diagnostic.verdicts
+        assert "2024" in diagnostic.verdicts[0]
+        assert "12 348" in diagnostic.verdicts[0] or "12348" in diagnostic.verdicts[0]
+        diagnostic.verdicts.clear()

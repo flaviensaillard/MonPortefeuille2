@@ -248,6 +248,27 @@ def _date_range(df: pd.DataFrame, colonnes=("Date", "date")) -> str:
     return "dates illisibles"
 
 
+# Les tables de la v1 que le diagnostic interroge.
+V1_HISTORIQUE = "Historique"        # journal de trésorerie (apports, retraits)
+V1_PROJECTIONS = "Projections"      # valorisations : 180 lignes, 04/2023 -> 10/2026
+
+
+def lire_v1(table: str) -> pd.DataFrame:
+    """Lit une table de la v1, sans rien journaliser ni conclure.
+
+    `examiner_v1` raconte ce qu'elle voit ; celle-ci se contente de rendre les
+    lignes, pour les contrôles qui ont besoin des deux tables en même temps.
+    """
+    if not connexion_ok:
+        return pd.DataFrame()
+    try:
+        rep = db.client().table(table).select("*").execute()
+        donnees = getattr(rep, "data", None)
+        return donnees if isinstance(donnees, pd.DataFrame) else pd.DataFrame(donnees or [])
+    except Exception:
+        return pd.DataFrame()
+
+
 def examiner_v1(table: str) -> pd.DataFrame:
     """Inspecte une table de la v1 : colonnes, types distincts, lignes brutes."""
     if not connexion_ok:
@@ -648,6 +669,110 @@ def reconcilier_apports(hist: pd.DataFrame, apports: pd.DataFrame) -> None:
         )
 
 
+def reconcilier_capital(hist: pd.DataFrame) -> None:
+    """Chaque apport a-t-il fait bouger le capital investi de la v1 ?
+
+    `Projections.Capital investi` est le cumul que la v1 tenait elle-même, en
+    dollars — la même unité que la colonne `Montant $` de `Historique`. C'est
+    donc un juge indépendant de chaque ligne du journal : si le capital ne bouge
+    pas alors qu'un versement est enregistré, c'est que le versement n'a pas eu
+    lieu, ou qu'il est noté deux fois.
+
+    CE QUE CE CONTRÔLE A TROUVÉ, sur les données réelles : le 29/04/2024, un
+    apport de 10 800 € (11 579,85 $) est enregistré — et le capital investi
+    RECULE de 500 $ ce mois-là. Les autres gros versements, eux, le font bien
+    bouger : +8 889 $ en mai 2024 pour 9 161 $ d'apports, +11 019 $ en juillet
+    2024 pour 11 554 $. Le signal est donc net, pas noyé dans le bruit.
+
+    Et pour cause : c'est la même conclusion que trois autres mesures — la valeur
+    du portefeuille ne bouge pas de 11 848 $ en avril 2024, la trésorerie reste
+    figée à 22 690 $, et le TWR que la v1 affiche pour 2024 (+15,21 %) est
+    incompatible avec ce flux (il donnerait −24,9 %).
+
+    Le contrôle est générique : il ne sait rien d'avril 2024, il compare deux
+    colonnes et signale les écarts. C'est ce qui manquait aux deux rounds
+    précédents, où je cherchais la bonne ligne à la main.
+    """
+    _titre("CHAQUE APPORT A-T-IL BOUGÉ LE CAPITAL INVESTI ?")
+
+    if hist is None or hist.empty or "Montant $" not in hist.columns:
+        log.info("  Historique v1 illisible.")
+        return
+
+    try:
+        proj = lire_v1(V1_PROJECTIONS)
+    except Exception as exc:
+        log.info("  Table « Projections » illisible (%s). Contrôle sauté.", exc)
+        return
+    if proj is None or proj.empty or "Capital investi" not in proj.columns:
+        log.info("  Pas de colonne « Capital investi ». Contrôle sauté.")
+        return
+
+    j = hist.copy()
+    # `dates.parser`, jamais `pd.to_datetime` : le journal v1 est en jj/mm/aaaa,
+    # et l'appel direct a déjà produit deux bugs de diagnostic dans ce projet.
+    j["_d"] = dates.parser(j["Date"])
+    j = j.dropna(subset=["_d"])
+    types = j["Type"].fillna("").astype(str).str.lower()
+    signe = pd.Series(0.0, index=j.index)
+    signe[types.str.contains("ajout|apport")] = 1.0
+    signe[types.str.contains("retrait")] = -1.0
+    j["flux"] = pd.to_numeric(j["Montant $"], errors="coerce").fillna(0.0) * signe
+    j = j[j["flux"] != 0.0]
+
+    p = proj.copy()
+    p["_d"] = dates.parser(p["Date"])
+    p = p.dropna(subset=["_d"]).sort_values("_d")
+    p["_d"] = p["_d"].dt.normalize()
+    p = p.drop_duplicates(subset=["_d"], keep="last").reset_index(drop=True)
+    p["cap"] = pd.to_numeric(p["Capital investi"], errors="coerce")
+    p = p.dropna(subset=["cap"]).reset_index(drop=True)
+
+    if len(p) < 2:
+        log.info("  Trop peu de points pour comparer.")
+        return
+
+    lignes = []
+    for i in range(1, len(p)):
+        deb, fin = p.loc[i - 1, "_d"], p.loc[i, "_d"]
+        ecart_jours = (fin - deb).days
+        if ecart_jours < 20 and i != len(p) - 1:
+            continue
+        flux = float(j.loc[(j["_d"] > deb) & (j["_d"] <= fin), "flux"].sum())
+        if abs(flux) < 2000.0:
+            continue                      # trop petit pour conclure quoi que ce soit
+        delta = float(p.loc[i, "cap"] - p.loc[i - 1, "cap"])
+        residuel = delta - flux
+        if abs(residuel) < 2000.0:
+            continue
+        lignes.append({
+            "periode": f"{deb.date()} → {fin.date()}",
+            "flux_apports": flux,
+            "capital_bouge_de": delta,
+            "non_enregistre": residuel,
+        })
+
+    if not lignes:
+        log.info("  Aucun écart : chaque apport a fait bouger le capital. ✓")
+        return
+
+    log.info("  %d période(s) où un apport enregistré n'a pas bougé le capital :",
+             len(lignes))
+    log.info("")
+    _montre(pd.DataFrame(lignes), max_lignes=20)
+    log.info("")
+    log.info("  Un apport qui n'augmente pas le capital investi n'a pas eu lieu —")
+    log.info("  ou il figure deux fois. C'est ce chiffre qu'il faut corriger dans")
+    log.info("  🪙 Mouvements de fonds, pas le total de l'année.")
+    for l in lignes:
+        verdicts.append(
+            f"Entre {l['periode'].replace(' → ', ' et ')}, {l['flux_apports']:,.0f} $ "
+            f"d'apports sont enregistrés mais le capital investi varie de "
+            f"{l['capital_bouge_de']:,.0f} $ : un versement de "
+            f"{abs(l['non_enregistre']):,.0f} $ n'a pas eu lieu.".replace(",", " ")
+        )
+
+
 def requete_sql() -> None:
     """La question à laquelle seul le tableau de bord peut répondre."""
     _titre("LA LISTE DES TABLES — une requête, quinze secondes")
@@ -822,6 +947,7 @@ def main() -> int:
 
         examiner_sauts(snaps, apports)
         reconcilier_apports(hist, apports)
+        reconcilier_capital(hist)
         recalculer_twr(snaps)
         requete_sql()
         bloc_a_envoyer(tables, hist, tr, snaps, apports)

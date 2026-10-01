@@ -1,6 +1,12 @@
 # Méthode pas à pas
 
-Sept étapes. Comptez **trente minutes** en tout, à faire dans cet ordre.
+> **Réponse à votre question : non, rien ne change. Vous pouvez commencer.**
+> Vos trois règles sont exactes, je les ai vérifiées sur vos 319 lignes réelles,
+> et le code faisait déjà ce qu'il fallait. Mais elles m'ont fait trouver un
+> **contrôle** que j'aurais dû écrire depuis longtemps — voir l'encadré en fin de
+> document. Il confirme, preuve indépendante à l'appui, la ligne du 29/04/2024.
+
+Neuf étapes. Comptez **trente minutes** en tout, à faire dans cet ordre.
 
 Chaque étape a un **repère** : ce que vous devez voir à l'écran. Si vous voyez
 autre chose, arrêtez-vous et écrivez-moi — ne continuez pas « au cas où ».
@@ -110,35 +116,80 @@ vient de votre table `Historique`, c'est la mensualité de février. Supprimez
 [dry-run] 94 transactions seraient importées.
 [dry-run] 38 apports seraient importés.
 [dry-run] 179 snapshots seraient importés (2023-04-01 -> 2026-10-01).
-[dry-run] XXX ligne(s) seraient retirées de la fenêtre (2023-04-01 -> 2026-10-01). Exemples : ...
+[dry-run] 408 ligne(s) seraient retirées de la fenêtre (2023-04-01 -> 2026-10-01). Exemples : ...
 ```
 
 **Envoyez-moi ces quatre lignes.** Je vérifie le compte avant que vous n'écriviez
 quoi que ce soit.
 
-**Le quatrième chiffre va vous surprendre : de l'ordre de 530.** Le chiffre
-exact dépend des jours où votre v1 et votre robot ont un point commun. Je préfère
-vous prévenir plutôt que de vous laisser découvrir un gros nombre tout seul —
-voici ce qu'il veut dire.
+### ✅ Votre dry-run est validé — les quatre chiffres sont les bons
 
-Votre robot écrivait **un point par nuit** depuis le 18/03/2025 : 563 lignes.
-Votre historique v1 porte **179 points** sur la même période et avant elle. Là
-où les deux ont un point au même jour, celui de la v1 remplace l'autre. Partout
-ailleurs — les 530 autres nuits — la ligne du robot est **retirée**, parce
-qu'elle était **9 900 € trop basse** avant le 02/02/2026.
+| Ligne du journal | Ce qu'elle dit | Verdict |
+|---|---|---|
+| `94 transactions` | vos 96 lignes moins 2 fusions | ✅ exact |
+| `38 apports` | 37 apports + 1 retrait | ✅ exact |
+| `179 snapshots` | vos 180 lignes moins 1 doublon | ✅ exact |
+| `408 lignes retirées` | le trou qui disparaît | ✅ **vérifié, voir ci-dessous** |
 
-Ce n'est pas une perte : c'est le trou qui disparaît.
+**Les 408, en détail — l'arithmétique se referme à l'unité près.** Votre v1
+porte **179 dates**. Combien tombent dans la période de votre robot, qui va du
+18/03/2025 au 01/10/2026 ? **155**, ni une de plus ni une de moins. Donc :
 
-**Le prix à payer, et je le dis franchement :** votre série redevient mensuelle
-là où elle était quotidienne. Le robot rajoutera un point chaque nuit à partir
-de ce soir, donc la finesse revient par l'avant. Mais pour les huit derniers
-mois, vous aurez un point toutes les deux semaines au lieu d'un par jour.
+```
+563 lignes du robot  −  408 retirées  =  155 lignes survivantes
+                                         = les 155 dates de la v1
+179 dates de la v1   −  155 communes  =  24 dates nouvelles
+                                         (avril 2023 → mars 2025)
+```
 
-L'alternative — garder les deux séries — produirait ceci : 65 534 € le 31/01,
-puis 55 640 € le 01/02, puis 64 809 € le 02/02. Une scie de 9 900 € en trois
-jours, que le TWR lirait comme trois mouvements de marché au lieu d'un défaut de
-données. C'est exactement le défaut qu'on vient de passer trois semaines à
-comprendre.
+Les 24 dates nouvelles, ce sont **les dix-huit mois d'historique qui n'ont
+jamais existé dans l'application** : votre courbe partait de mars 2025, elle
+partira d'avril 2023.
+
+> **Pourquoi je vous avais annoncé « de l'ordre de 530 » : c'était une
+> estimation, et elle était fausse.** J'avais supposé que votre robot avait un
+> point presque chaque nuit depuis mars 2025, alors qu'il en manque environ 350 —
+> les jours où le robot a échoué, et il y en a eu beaucoup. Votre chiffre réel
+> est le bon. Le mien était le mauvais. Je vous le dis parce qu'un écart entre
+> ce qu'on annonce et ce qu'on lit, ça se signale.
+
+**Ce n'est pas une perte, c'est le trou qui disparaît.** Ces 408 lignes sont
+celles qui portaient les 9 900 € manquants avant le 02/02/2026. Les garder avec
+les nouvelles produirait ceci : 65 534 € le 31/01, puis 55 640 € le 01/02, puis
+64 809 € le 02/02 — une scie de 9 900 € en trois jours, que le TWR lirait comme
+trois mouvements de marché au lieu d'un défaut de données. C'est exactement le
+défaut qu'on vient de passer trois semaines à comprendre.
+
+**Le prix à payer, et il est réel :** votre série redevient **mensuelle** jusqu'en
+avril 2026, là où elle était quotidienne. Le robot rajoute un point chaque nuit à
+partir de ce soir, donc la finesse revient par l'avant. Mais entre mars 2025 et
+avril 2026, vous aurez un point par mois au lieu d'un point par jour.
+
+### ⚠️ Un défaut trouvé dans mon code, grâce à votre rapport
+
+Le journal annonçait la fenêtre de retrait comme ceci :
+
+```
+2024-07-30 -> 2026-10-01      <- ce que vous avez lu
+2023-04-01 -> 2026-10-01      <- la vérité
+```
+
+**`PostgREST` ne rend pas les lignes dans l'ordre des dates.** La première ligne
+que Supabase a renvoyée portait le 30/07/2024, alors que la plus ancienne de
+votre table est le 01/04/2023. Mon code prenait la première et la dernière ligne
+de la réponse comme bornes de la fenêtre : elle partait donc dix-huit mois trop
+tard.
+
+**Sans conséquence cette fois** — votre robot n'a rien écrit avant mars 2025, donc
+la liste des 408 lignes est identique. Mais c'était de la chance, pas de la
+correction : une réponse ordonnée autrement aurait pu laisser survivre des lignes
+fausses. C'est corrigé, avec un test qui reproduit exactement votre cas — la
+ligne du 30/07/2024 en tête de réponse.
+
+**Ce que ça implique pour vous :** réuploadez le zip (**2 minutes**) avant de
+lancer l'étape 5, pour que le journal annonce la bonne fenêtre. **Inutile de
+refaire le dry-run** : j'ai vérifié que la liste des lignes retirées est
+identique, à la ligne près.
 
 **Si vous lisez autre chose :** arrêtez-vous et envoyez-moi tout le journal.
 Les cas les plus probables sont listés en fin de document.
@@ -164,14 +215,47 @@ Les cas les plus probables sont listés en fin de document.
 38 apports importés.
 === Import de l'historique de valorisation (Projections) ===
 179 snapshots importés (2023-04-01 -> 2026-10-01).
-Fenêtre 2023-04-01 -> 2026-10-01 : 530 ligne(s) de la v2 remplacée(s) par l'historique v1 (la v2 en avait 563 au total).
-530 ligne(s) de la v2 retirées de la fenêtre.
+Fenêtre 2023-04-01 -> 2026-10-01 : 408 ligne(s) de la v2 remplacée(s) par l'historique v1 (la v2 en avait 563 au total).
+408 ligne(s) de la v2 retirées de la fenêtre.
 ```
 
 **Ce que fait cet import, en une phrase :** il remplace la série du robot par
 votre historique de la v1 sur la période qu'elle couvre, parce que le robot
 était court de 9 900 € avant le 02/02/2026 — c'est toute l'origine du
 +26,2 %.
+
+---
+
+## ✅ Étape 5 — FAITE, et vérifiée à l'unité près
+
+Votre import a réussi. Voici la reconstruction complète, à partir des chiffres
+de votre propre journal :
+
+```
+La table contenait            563 lignes   (le robot, 2025-03-18 → 2026-10-01)
+L'import a écrit              179 lignes   de la v1
+   dont 155 écrasent une ligne du robot (même date)
+   et   24 sont neuves
+Table juste avant la purge    563 + 24 = 587
+La fenêtre annoncée           « 2024-07-30 → 2026-10-01 »  (16 lignes v1 avant)
+   lignes dans cette fenêtre    571          <- votre « la v2 en avait 571 »
+Lignes retirées               408
+ÉTAT FINAL                    179 lignes = les 179 de la v1
+```
+
+**179. Exactement votre série historique, du 01/04/2023 au 01/10/2026.** L'import
+a fait ce qu'il devait faire.
+
+**Deux libellés de moi étaient faux, et ils vous ont fait douter — à juste titre :**
+
+| Ce que le journal a dit | La vérité |
+|---|---|
+| `179 snapshots importés (2024-07-30 -> 2026-10-01)` | la série va de **2023-04-01** à 2026-10-01. Le 2024-07-30 était la **première ligne rendue par Supabase**, dans un ordre quelconque — le défaut corrigé depuis |
+| `la v2 en avait 571 au total` | la v2 en avait **563**. Les 571, c'était le nombre de lignes **dans la fenêtre annoncée** (563 du robot + 24 lignes v1 neuves − 16 lignes v1 antérieures à la fenêtre) |
+
+Corrigé tous les deux dans le code que je vous ai envoyé depuis. **Vous pouvez
+réuploader le zip quand vous voulez**, mais rien ne presse : ces deux phrases
+sont de l'affichage, elles n'ont écrit aucune donnée. Le résultat est bon.
 
 ---
 
@@ -185,12 +269,24 @@ votre historique de la v1 sur la période qu'elle couvre, parce que le robot
 
 **Repère — vous devez voir :**
 
-| Année | TWR |
+| Année | TWR attendu |
 |---|---|
 | 2023 | **+11,02 %** |
 | 2024 | **−24,90 %** ← provisoire, voyez l'étape 7 |
 | 2025 | **+4,12 %** |
-| 2026 | **+8,39 %** |
+| 2026 | **+8,66 %** |
+| **Total depuis avril 2023** | **−5,68 %** |
+
+Ces cinq chiffres sont calculés sur vos données réelles, avec le taux EUR/USD
+de chaque jour. Si `2026` sort à **−5,92 %** au lieu de +8,66 %, c'est que
+l'apport fantôme du 02/02/2026 est encore là — retournez à l'étape 2.
+
+> **Une petite chose à ne pas confondre.** Le robot quotidien reprend ce soir et
+> réécrira la ligne du 01/10/2026 avec **sa** valeur, environ **69 795 €**, quand
+> la v1 affiche **70 470 €** ce jour-là. Il y aura donc un creux d'environ
+> **−1 %** sur cette journée-là. Ce n'est pas une erreur : c'est la dernière
+> trace du désaccord de 0,97 % entre les deux séries. Il s'effacera de
+> lui-même au fil des semaines, et il est très en dessous du seuil d'alerte.
 
 Et **une alerte rouge** doit apparaître, écrite par l'application elle-même :
 
@@ -221,8 +317,14 @@ erronée) : supprimez-la, exactement comme à l'étape 2.
 - Ligne avec **`date = 2024-04-29`** et **`montant_eur = 10800`**
 - Cocher → **Delete row**
 
-**Après ça, 2024 passe de −24,90 % à +18,68 %** — et votre propre table v1
-affichait +15,21 % pour cette année. On retombe sur nos pieds.
+**Après ça, 2024 passe de −24,90 % à +18,68 %**, et votre performance totale
+depuis avril 2023 de **−5,68 % à +49,06 %**. C'est beaucoup pour une ligne —
+mais c'est la bonne mesure : un versement fantôme de 12 000 $ pèse plus lourd
+qu'une année entière de rendement sur un portefeuille de 30 000 $.
+
+Votre propre table v1 affichait +15,21 % pour 2024. Les +18,68 % retombent dans
+la même région — l'écart de 3 points est la différence de convention entre deux
+façons de dater les flux.
 
 **Cas B — le versement a bien eu lieu** : ne touchez à rien, et dites-le-moi.
 C'est alors la valorisation d'avril 2024 qui manque dans la v1, et c'est une
@@ -298,3 +400,82 @@ tranche) et la 9. Pour tout le reste, vous avancez seul.
 Et à la fin de l'étape 6, votre courbe de performance partira d'**avril 2023** —
 trois ans et demi d'historique qui existaient déjà dans votre v1 et n'avaient
 jamais trouvé le chemin de l'application.
+
+---
+
+## Ce que vos trois règles ont changé (la réponse complète)
+
+Vos trois règles sont **justes**, vérifiées sur les données :
+
+| Table | Votre règle | Ce que disent les chiffres |
+|---|---|---|
+| `Historique` | trois colonnes, trois unités | ✅ `Montant $` / `Montant Or` = **1 955,73 $/oz** en juillet 2023, **4 478,70 $/oz** en septembre 2026 : ce sont les cours réels de l'or |
+| `Transaction` | l'unité est celle de la colonne `Devise` voisine | ✅ vérifié sur 96 lignes : `quantité × cours ± frais = Montant Net`, écart médian **0,001 %** |
+| `Projections` | `Capital investi` en $ | ✅ 59 629,92 $ au 01/10/2026, quand le cumul du journal donne 59 630,04 $ |
+
+**Ce que j'ai trouvé en vérifiant la deuxième règle.** Le `Montant Net` des
+**ventes** ne s'obtient pas de la même façon que celui des achats : les frais se
+**déduisent**. Trente-quatre lignes tombaient « faux » de mon calcul, toutes des
+ventes, avec un écart d'exactement deux fois les frais. Exemple réel :
+`14 × 62,6425 − 5,85 = 871,15`, le montant net de votre table.
+
+Bonne nouvelle : **mon importateur faisait déjà ça.** Il ne le faisait pas par
+hasard — la règle était écrite — mais **aucun test ne la protégeait**. Il y en a
+cinq maintenant, sur vos valeurs réelles.
+
+**Et une précision, parce qu'elle compte.** La devise n'est pas globale au
+fichier : elle change de ligne en ligne. 87 de vos lignes sont en USD, les
+**9 lignes XJSE.SW en JPY** (cours ≈ 1 115, pas 6,87). Votre règle « regardez la
+colonne `Devise` juste à côté » est donc exactement la bonne — et c'est celle que
+le code applique. La dixième ligne XJSE.SW, celle du 05/06/2026, est saisie en
+USD : c'est la seule incohérence qui reste dans le fichier, elle vaut environ
+**7 €**, ce n'est pas la peine d'y toucher maintenant.
+
+### Le contrôle que vos règles m'ont fait écrire
+
+Puisque `Capital investi` est en dollars, comme `Montant $`, les deux colonnes
+sont **comparables**. J'ai donc ajouté au diagnostic un contrôle qui, pour chaque
+mois, demande : *ce versement a-t-il fait bouger le capital investi ?*
+
+Résultat sur vos trois ans et demi, sans que le contrôle sache rien d'avril 2024 :
+
+```
+1 période(s) où un apport enregistré n'a pas bougé le capital :
+
+    periode                  flux_apports  capital_bouge_de  non_enregistre
+    -----------------------  ------------  ----------------  --------------
+    2024-03-30 → 2024-04-30     12 048.09              -500      -12 548.09
+```
+
+**Une seule période signalée sur les 180 points. La bonne.**
+
+Et les autres gros versements, eux, bougent bien : +8 889 $ en mai 2024 pour
+9 161 $ d'apports, +11 019 $ en juillet 2024 pour 11 554 $. Le signal est donc
+net — 12 048 $ d'un côté, −500 $ de l'autre. Ce n'est pas du bruit.
+
+Vous avez maintenant **cinq mesures indépendantes** qui disent la même chose sur
+cette ligne :
+
+| Mesure | Résultat |
+|---|---|
+| La valeur investie, en $ | 31 988 → 31 779 : elle **recule** |
+| La trésorerie | figée à **22 690 $** d'août 2023 à août 2024 |
+| Le capital investi de la v1 | **−500 $** ce mois-là |
+| Le TWR affiché par la v1 en 2024 | **+15,21 %** — ce flux donnerait −24,90 % |
+| Votre relevé | à regarder à l'étape 7 |
+
+Le contrôle est maintenant dans le diagnostic, donc il tournera tout seul à
+chaque fois. C'est ce qui manquait : les deux rounds précédents, je cherchais la
+bonne ligne à la main.
+
+### Un dernier aveu, parce qu'il vaut la peine
+
+En écrivant ce contrôle, j'ai réintroduit **exactement** le bug de dates corrigé
+au round précédent : `pd.to_datetime` sur du `jj/mm/aaaa` sans `dayfirst`, qui lit
+le 29/04/2024 comme le 4 du 29ᵉ mois. Une date impossible, donc jamais trouvée.
+Le contrôle a d'abord répondu « 1 période : 2023-01-04 → 2026-01-06 » — un
+résultat absurde qui m'a mis sur la piste.
+
+C'est corrigé, et **un test le protège maintenant nommément**, avec le commentaire
+qui explique par où le défaut est entré. Dans ce projet, les bugs de dates sont
+revenus trois fois ; ils ne reviendront pas une quatrième sans qu'un test crie.
