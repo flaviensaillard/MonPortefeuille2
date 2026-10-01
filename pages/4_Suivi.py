@@ -93,6 +93,44 @@ if "equivalent_or_oz" in df.columns and df["equivalent_or_oz"].notna().any():
         )
 
 # ---------------------------------------------------------------------------
+# Allocation par poche dans le temps
+# ---------------------------------------------------------------------------
+POCHES = {
+    "poche_rv_eur": "Réserve de valeur",
+    "poche_energie_eur": "Énergie",
+    "poche_asie_eur": "Asie / Chine",
+    "poche_jgb_eur": "Obligations japonaises",
+}
+presentes = [c for c in POCHES if c in df.columns and df[c].notna().any()]
+if len(presentes) >= 2:
+    st.divider()
+    st.subheader("Allocation par poche")
+    st.caption(
+        "Les parts relatives de chaque poche. Une poche qui grossit sans que "
+        "vous ayez rien décidé, c'est le marché qui vous fait dériver de votre "
+        "pondération — c'est exactement ce que la page Rééquilibrage corrige."
+    )
+    part = df[presentes].div(df[presentes].sum(axis=1), axis=0).fillna(0.0) * 100.0
+    part["Date"] = df["Date"].values
+    fig_poches = px.area(
+        part,
+        x="Date",
+        y=presentes,
+        labels={"value": "Part du portefeuille", "variable": ""},
+        color_discrete_map={
+            "poche_rv_eur": "#f1c40f",
+            "poche_energie_eur": "#e74c3c",
+            "poche_asie_eur": "#e67e22",
+            "poche_jgb_eur": "#3498db",
+        },
+    )
+    fig_poches.for_each_trace(
+        lambda t: t.update(name=POCHES.get(t.name, t.name))
+    )
+    fig_poches.update_layout(yaxis_ticksuffix=" %")
+    st.plotly_chart(fig_poches, use_container_width=True)
+
+# ---------------------------------------------------------------------------
 # Tableau des snapshots
 # ---------------------------------------------------------------------------
 st.divider()

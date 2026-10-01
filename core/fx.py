@@ -93,21 +93,10 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
                 raise FXIndisponible(devise, contre, str(date), "aucune clôture exploitable")
             brut = float(fermetures.iloc[-1])
         else:
-            h = yf.Ticker(symbole).history(
-                start=(d - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
-                end=(d + pd.Timedelta(days=2)).strftime("%Y-%m-%d"),
-            )
-            if h.empty:
-                raise FXIndisponible(devise, contre, str(date), "série vide")
-            # Dernier cours connu au plus tard à la date demandée — et pas un
-            # jour de plus. La version précédente ajoutait `+ 1 jour` au seuil,
-            # ce qui faisait utiliser le taux du LENDEMAIN pour une opération
-            # datée : un biais d'anticipation, qui flatte légèrement la
-            # performance et contredit ce commentaire.
-            #
-            # `dates.dernier_avant` et non `serie[serie.index <= ...]` : l'index
-            # de Yahoo porte un fuseau horaire, la comparaison directe lève un
-            # TypeError. Voyez core/dates.py.
+            # Une seule requete pour toute l'histoire de la paire, puis
+            # recherche dedans. Un appel par date rendait la reconstitution
+            # de l'historique impraticable.
+            h = yf.Ticker(symbole).history(period="max")
             serie = dates.dernier_avant(h["Close"].dropna(), d)
             if serie.empty:
                 raise FXIndisponible(devise, contre, str(date), "aucun cours antérieur")

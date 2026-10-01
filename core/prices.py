@@ -41,6 +41,11 @@ class CoursIndisponible(Exception):
 
 
 _cache: dict[tuple[str, str], float] = {}
+
+# Histoire entiere par ticker, chargee en UNE requete. Indexee sur le ticker
+# d'origine, comme `_cache` : c'est celui qui figure dans les donnees.
+# Reconstituer 500 jours fait alors 500 recherches en memoire, pas 500 appels.
+_series: dict[str, object] = {}
 _cache_devise: dict[str, str | None] = {}
 
 # Symbole retenu pour l'or. Yahoo a supprimé le spot (`XAUUSD=X`, `XAU=X` et
@@ -101,6 +106,37 @@ def devise_de(ticker: str) -> str | None:
     return devise
 
 
+def serie(ticker: str):
+    """Toute l'histoire de cloture d'un titre, en une seule requete Yahoo.
+
+    Pourquoi
+    --------
+    `cours()` appelait Yahoo une fois par date. Reconstiturer un historique de
+    500 jours sur 5 titres, c'etait 2 500 requetes : le robot aurait mis des
+    heures et se serait fait blacklister. On charge donc la serie une fois, et
+    chaque journee devient une recherche en memoire.
+
+    La serie est nettoyee (`dropna`) : Yahoo renvoie une ligne de queue sans
+    cours pour IGLN.L, XDW0.L, FLXC.L et RI.PA, et NaN traverse tous les tests
+    usuels. Le fuseau est retire au moment de la recherche, par
+    `dates.dernier_avant`.
+    """
+    ticker = str(ticker).upper().strip()
+    if ticker in _series:
+        return _series[ticker]
+
+    symbole = ALIAS_YAHOO.get(ticker, ticker)
+    try:
+        h = yf.Ticker(symbole).history(period="max")
+    except Exception as exc:
+        raise CoursIndisponible(ticker, "", str(exc)) from exc
+
+    fermetures = h["Close"].dropna() if not h.empty else h["Close"]
+    _series[ticker] = fermetures
+    return fermetures
+
+
+
 def cours(ticker: str, date: str | None = None) -> float:
     """Cours de clôture d'un titre.
 
@@ -128,21 +164,21 @@ def cours(ticker: str, date: str | None = None) -> float:
         return _cache[cle]
 
     try:
-        tk = yf.Ticker(symbole)
         if cle_date:
-            h = tk.history(
-                start=(pd.Timestamp(cle_date) - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
-                end=(pd.Timestamp(cle_date) + pd.Timedelta(days=2)).strftime("%Y-%m-%d"),
-            )
-            if h.empty:
-                raise CoursIndisponible(ticker, cle_date, "série vide")
-            # Au plus tard à la date demandée, jamais au lendemain : prendre le
-            # cours du jour suivant serait un biais d'anticulation.
-            serie = dates.dernier_avant(h["Close"].dropna(), pd.Timestamp(cle_date))
-            if serie.empty:
-                raise CoursIndisponible(ticker, cle_date, "aucun cours antérieur")
-            valeur = float(serie.iloc[-1])
+            # Une seule requete pour toute l'histoire, puis recherche dedans.
+            # Un appel par date rendait la reconstitution de l'historique
+            # impraticable : 5 titres x 500 jours, c'est 2 500 requetes.
+            fermetures = serie(demande)
+            if fermetures.empty:
+                raise CoursIndisponible(ticker, cle_date, "serie vide")
+            # Au plus tard a la date demandee, jamais au lendemain : prendre le
+            # cours du jour suivant serait un biais d'anticipation.
+            filtrees = dates.dernier_avant(fermetures, pd.Timestamp(cle_date))
+            if filtrees.empty:
+                raise CoursIndisponible(ticker, cle_date, "aucun cours anterieur")
+            valeur = float(filtrees.iloc[-1])
         else:
+            tk = yf.Ticker(symbole)
             h = tk.history(period="5d")
             if h.empty:
                 raise CoursIndisponible(ticker, "", "série vide")
