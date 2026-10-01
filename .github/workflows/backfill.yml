@@ -1,0 +1,39 @@
+# Reconstitution de l'historique — MonPortefeuille 2
+#
+# À LANCER UNE SEULE FOIS, À LA MAIN. Il remplit `pf2_snapshots` depuis le
+# premier jour de votre grand livre jusqu'à hier, pour que les pages « Suivi »
+# et « Performance » aient enfin quelque chose à tracer.
+#
+# Pourquoi c'est nécessaire : le robot nocturne n'écrit qu'un snapshot par soir.
+# Un portefeuille ouvert depuis un an aurait mis un an à avoir un an
+# d'historique — et pendant tout ce temps, aucun graphique.
+#
+# Les secrets SUPABASE_URL et SUPABASE_KEY doivent être définis dans
+# Settings > Secrets and variables > Actions du repo.
+
+name: Reconstitution de l'historique
+
+on:
+  workflow_dispatch:
+    inputs:
+      jours:
+        description: "Nombre de jours à reconstituer (vide = tout l'historique)"
+        required: false
+        default: ""
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Reconstitution des snapshots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BACKFILL_JOURS: ${{ github.event.inputs.jours }}
+        run: python jobs/backfill_snapshots.py
