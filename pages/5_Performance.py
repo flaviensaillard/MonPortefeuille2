@@ -66,6 +66,43 @@ jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days
 twr_ann = metrics.annualiser(twr_total, jours)
 
 # ---------------------------------------------------------------------------
+# Le TWR n'est juste que si les flux sont enregistrés
+# ---------------------------------------------------------------------------
+# Un TWR neutralise les versements — à condition de les connaître. Quand aucun
+# apport n'est enregistré, le calcul se réduit à « fin / début » et l'épargne
+# apparaît comme du rendement. On ne peut pas savoir qu'un versement a été
+# oublié, mais on peut repérer le cas où c'est le plus probable, et le dire.
+for alerte in metrics.controle_apports(valeurs, flux, jours):
+    st.error("⚠️ " + alerte)
+
+with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=False):
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Snapshots", len(snaps))
+    t2.metric("Période", f"{(jours / 365.25):.1f} ans")
+    t3.metric("Apports enregistrés", ui.eur(sum(abs(f) for f in flux)))
+    annees_couvertes = sorted({int(a) for a in snaps["Date"].dt.year})
+    inflation_dict = S.inflation_dict(ctx)
+    manquantes = [a for a in annees_couvertes if a not in inflation_dict]
+    t4.metric("Inflation connue", f"{len(annees_couvertes) - len(manquantes)}/{len(annees_couvertes)} ans")
+
+    if not ctx.apports.empty:
+        st.caption(
+            f"{len(ctx.apports)} ligne(s) dans pf2_apports, "
+            f"du {dates.parser(ctx.apports['date']).min().date()} "
+            f"au {dates.parser(ctx.apports['date']).max().date()}."
+        )
+    else:
+        st.caption(
+            "**pf2_apports est vide.** Le TWR ne peut pas corriger vos "
+            "versements : il les compte comme du rendement. C'est la cause la "
+            "plus fréquente d'un chiffre trop flatteur."
+        )
+        st.caption(
+            "Lancez « Import des données v1 » (onglet Actions) avec "
+            "`dry_run = false`, puis « Diagnostic » pour vérifier."
+        )
+
+# ---------------------------------------------------------------------------
 # Indicateurs principaux
 # ---------------------------------------------------------------------------
 st.subheader("Ce que la stratégie a produit")

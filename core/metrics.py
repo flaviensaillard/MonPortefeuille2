@@ -376,3 +376,66 @@ def twr_en_or(
 ) -> float:
     """Performance cumulée en onces d'or, corrigée des apports."""
     return twr(rendements_en_or(valeurs, flux, onces))
+
+# ===========================================================================
+# Garde-fou : un TWR n'est juste que si les flux sont enregistrés
+# ===========================================================================
+
+# Au-delà de ce taux sur la période, une absence totale d'apports enregistrés
+# n'est plus vraisemblable : elle signale une saisie manquante, pas une
+# performance.
+SEUIL_SUSPICION_SANS_FLUX = 0.15
+
+# En dessous, la période est trop courte pour que le contrôle ait un sens :
+# une semaine de hausse ne prouve rien.
+JOURS_MINIMUM_POUR_CONTROLE = 45
+
+
+def controle_apports(
+    valeurs: list[float],
+    flux: list[float],
+    jours: int,
+) -> list[str]:
+    """Signale les périodes où le TWR ne peut pas être juste.
+
+    POURQUOI CE CONTRÔLE EXISTE
+    ---------------------------
+    Un TWR neutralise les versements — à condition de les connaître. Quand
+    aucun apport n'est enregistré sur la période, le calcul se réduit à
+    « valeur finale / valeur initiale », et votre épargne apparaît comme du
+    rendement.
+
+    C'est exactement le symptôme rapporté : +26,2 % affichés pour 2026 là où
+    Swissquote donne +4,10 % en TWR. Un écart de 22 points ne vient pas d'un
+    arrondi : il vient de versements comptés comme du gain.
+
+    L'application ne peut pas savoir qu'un versement a été oublié — elle n'a
+    aucun moyen de le deviner. Mais elle peut repérer la situation où c'est le
+    plus probable, et le DIRE au lieu d'afficher un chiffre confiant.
+    """
+    alertes: list[str] = []
+    if len(valeurs) < 2 or len(flux) != len(valeurs):
+        return alertes
+
+    total_flux = sum(flux)
+    if total_flux != 0:
+        return alertes                       # des flux sont enregistrés : rien à dire
+
+    if jours < JOURS_MINIMUM_POUR_CONTROLE:
+        return alertes
+
+    depart, arrivee = float(valeurs[0]), float(valeurs[-1])
+    if depart <= 0:
+        return alertes
+
+    variation = arrivee / depart - 1.0
+    if variation > SEUIL_SUSPICION_SANS_FLUX:
+        alertes.append(
+            f"Aucun apport ni retrait n'est enregistré sur ces {jours} jours, "
+            f"alors que la valeur passe de {depart:,.0f} € à {arrivee:,.0f} € "
+            f"({variation:+.1%}). Si vous avez versé de l'argent sur la période, "
+            "il n'est PAS dans la base : la performance ci-dessus compte donc "
+            "vos versements comme du rendement. Lancez le diagnostic (onglet "
+            "Actions).".replace(",", " ")
+        )
+    return alertes

@@ -67,8 +67,14 @@ class TestPlusValuesTitres:
         r = tax.pv_titres(lignes, 2025)
         assert r.regime == "150-0 A"
         assert r.plus_value_brute == pytest.approx(200.0)
-        # 30,8 % de 200 = 61,60
-        assert r.total_du == pytest.approx(61.60)
+        # Cession 2025 : 12,8 % d'IR + 17,2 % de PS = 30 % de 200 = 60,00.
+        #
+        # Ce test attendait 61,60 (30,8 %). L'ancien taux venait d'une
+        # soustraction : `PFU_TAUX - PRELEVEMENTS_SOCIAUX` = 0,308 - 0,172 =
+        # 0,136 d'IR, au lieu des 12,8 % de l'article 200 A du CGI.
+        assert r.impot_ir == pytest.approx(25.60)
+        assert r.prelevements_sociaux == pytest.approx(34.40)
+        assert r.total_du == pytest.approx(60.00)
 
     def test_seule_l_annee_demandee(self):
         lignes = [
@@ -94,8 +100,15 @@ class TestPlusValuesTitres:
 
 
 class TestCrypto:
-    def test_abattement_305(self):
-        """La v1 oubliait l'abattement de 305 € sur la PV globale crypto."""
+    def test_cessions_au_dessus_du_seuil_tout_est_imposable(self):
+        """Le seuil de 305 EUR porte sur les PRIX DE CESSION, pas sur le gain.
+
+        DÉFAUT CORRIGÉ. Ce test s'appelait `test_abattement_305` et attendait
+        305 EUR retirés du gain. L'article 150 VH bis du CGI ne prévoit aucun
+        abattement : il prévoit une FRANCHISE, assise sur le total des prix de
+        cession de l'année. Au-delà de 305 EUR de cessions, la plus-value est
+        imposable dès le premier euro.
+        """
         lignes = [{
             "actif": "BTCUSDT", "date": dt.date(2025, 3, 1), "quantite": 1,
             "prix_cession_eur": 1_000.0,
@@ -106,11 +119,20 @@ class TestCrypto:
         }]
         r = tax.pv_crypto(lignes, 2025)
         assert r.plus_value_brute == pytest.approx(500.0)
-        assert r.abattement == pytest.approx(305.0)
-        assert r.plus_value_imposable == pytest.approx(195.0)
-        assert r.total_du == pytest.approx(195.0 * 0.308)
+        assert r.total_cessions == pytest.approx(1_000.0)
+        assert r.exonere_par_franchise is False
+        # Aucun abattement : la totalite du gain est imposable.
+        assert r.abattement == pytest.approx(0.0)
+        assert r.plus_value_imposable == pytest.approx(500.0)
+        assert r.total_du == pytest.approx(150.0)      # 500 x 30 % en 2025
 
-    def test_abattement_plafonne_a_la_pv(self):
+    def test_sous_le_seuil_de_305_tout_est_exonere(self):
+        """200 EUR de cessions : sous le seuil, la plus-value est exonérée.
+
+        Le gain est entier — 200 EUR, soit 100 % de la cession — mais le total
+        cédé ne franchit pas 305 EUR. Rien à payer. La 2086 reste due : c'est
+        elle qui prouve qu'on est sous le seuil.
+        """
         lignes = [{
             "actif": "BTCUSDT", "date": dt.date(2025, 3, 1), "quantite": 1,
             "prix_cession_eur": 200.0, "valeur_globale_eur": 200.0,
@@ -118,8 +140,48 @@ class TestCrypto:
             "sens": "vente",
         }]
         r = tax.pv_crypto(lignes, 2025)
-        assert r.abattement == pytest.approx(200.0)
-        assert r.total_du == 0.0
+        assert r.total_cessions == pytest.approx(200.0)
+        assert r.exonere_par_franchise is True
+        assert r.plus_value_imposable == pytest.approx(0.0)
+        assert r.total_du == pytest.approx(0.0)
+
+    def test_le_seuil_se_franchit_au_centime_pres(self):
+        """306 EUR de cessions : le gain devient imposable dès le premier euro.
+
+        C'est le point que l'ancien code ratait. 20 EUR de gain sur 400 EUR de
+        cessions : l'ancien `abattement = min(305, 20)` ramenait l'impôt à zéro.
+        Le seuil est pourtant franchi.
+        """
+        lignes = [{
+            "actif": "BTCUSDT", "date": dt.date(2025, 3, 1), "quantite": 1,
+            "prix_cession_eur": 400.0, "valeur_globale_eur": 400.0,
+            "cout_total_acquisition_eur": 380.0, "fractions_deja_prises": 0.0,
+            "sens": "vente",
+        }]
+        r = tax.pv_crypto(lignes, 2025)
+        assert r.plus_value_brute == pytest.approx(20.0)
+        assert r.exonere_par_franchise is False
+        assert r.plus_value_imposable == pytest.approx(20.0)
+        assert r.total_du == pytest.approx(6.0)        # 20 x 30 %
+
+    def test_le_seuil_porte_sur_les_cessions_pas_sur_le_gain(self):
+        """Deux cessions de 200 EUR : 400 EUR cédés, donc imposable.
+
+        Prises séparément, chaque cession est sous 305 EUR. C'est le TOTAL de
+        l'année qui compte — et il se calcule au niveau du foyer fiscal.
+        """
+        base = {
+            "actif": "BTCUSDT", "quantite": 1, "valeur_globale_eur": 400.0,
+            "cout_total_acquisition_eur": 380.0, "fractions_deja_prises": 0.0,
+            "sens": "vente",
+        }
+        lignes = [
+            {**base, "date": dt.date(2025, 3, 1), "prix_cession_eur": 200.0},
+            {**base, "date": dt.date(2025, 9, 1), "prix_cession_eur": 200.0},
+        ]
+        r = tax.pv_crypto(lignes, 2025)
+        assert r.total_cessions == pytest.approx(400.0)
+        assert r.exonere_par_franchise is False
 
     def test_valeur_globale_manquante_leve(self):
         """La v1 forçait valeur_globale = prix_cession, masquant le problème."""
@@ -185,7 +247,8 @@ class TestOrPhysique:
         }]
         r = tax.pv_titres(lignes, 2025)
         assert r.regime == "150-0 A"
-        assert r.total_du == pytest.approx(61.60)
+        # 30 % pour une cession 2025, pas 30,8 %.
+        assert r.total_du == pytest.approx(60.00)
 
 
 class TestPfuOuBareme:
@@ -213,5 +276,34 @@ class TestBaremeTable:
         with pytest.raises(ValueError):
             fb.bareme_de(1999)
 
-    def test_pfu_complet(self):
-        assert fb.PFU_TAUX == pytest.approx(0.308)
+    def test_pfu_par_annee(self):
+        """Le PFU n'est pas un chiffre fixe : il suit les prélèvements sociaux.
+
+        DÉFAUT CORRIGÉ. Ce test verrouillait 0,308 pour toutes les années.
+        L'ancien code composait ce taux en soustrayant — 0,308 - 0,172 = 0,136
+        d'IR — au lieu de lire les 12,8 % de l'article 200 A du CGI.
+
+        La LFSS 2026 (art. 12) porte la CSG capital de 9,2 % à 10,6 %, donc les
+        PS de 17,2 % à 18,6 % : le PFU passe de 30 % à 31,4 %.
+        """
+        assert fb.IR_FORFAITAIRE == pytest.approx(0.128)
+        assert fb.taux_ps(2024) == pytest.approx(0.172)
+        assert fb.taux_pfu(2024) == pytest.approx(0.300)
+        assert fb.taux_ps(2025) == pytest.approx(0.172)
+        assert fb.taux_pfu(2025) == pytest.approx(0.300)
+        assert fb.taux_ps(2026) == pytest.approx(0.186)
+        assert fb.taux_pfu(2026) == pytest.approx(0.314)
+
+    def test_annee_sans_taux_leve_au_lieu_de_deviner(self):
+        """Une année inconnue doit crier, pas retomber sur un taux par défaut."""
+        with pytest.raises(ValueError):
+            fb.taux_ps(2017)
+        with pytest.raises(ValueError):
+            fb.taux_ps(2027)
+
+    def test_la_csg_deductible_ne_suit_pas_la_hausse(self):
+        """Les 1,4 point de LFSS 2026 sont entierement non deductibles.
+
+        La CSG deductible reste figee a 6,8 points (CGI art. 154 quinquies).
+        """
+        assert fb.CSG_DEDUCTIBLE == pytest.approx(0.068)

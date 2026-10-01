@@ -189,6 +189,10 @@ class ResultatFiscal:
     prelevements_sociaux: float
     total_du: float
     detail: list[PlusValue] = field(default_factory=list)
+    # Renseignes uniquement pour l'article 150 VH bis : le seuil de 305 EUR
+    # porte sur les prix de cession, pas sur le gain.
+    total_cessions: float | None = None
+    exonere_par_franchise: bool | None = None
 
     @property
     def taux_effectif(self) -> float:
@@ -224,8 +228,12 @@ def pv_titres(lignes: list[dict], annee: int) -> ResultatFiscal:
     pv_brute = sum(x.plus_value_eur for x in details)
     pv_nette = max(0.0, pv_brute)
 
-    ir = pv_nette * (fb.PFU_TAUX - fb.PRELEVEMENTS_SOCIAUX)
-    ps = pv_nette * fb.PRELEVEMENTS_SOCIAUX
+    # DÉFAUT CORRIGÉ — les deux composantes étaient fausses.
+    # `fb.PFU_TAUX - fb.PRELEVEMENTS_SOCIAUX` donnait 0,308 - 0,172 = 0,136,
+    # soit 13,6 % d'IR au lieu de 12,8 % : un taux sorti d'une soustraction,
+    # jamais d'un texte. Et 17,2 % de PS ne valent plus pour 2026 (18,6 %).
+    ir = pv_nette * fb.IR_FORFAITAIRE
+    ps = pv_nette * fb.taux_ps(annee)
 
     return ResultatFiscal(
         regime="150-0 A", annee=annee, plus_value_brute=pv_brute, abattement=0.0,
@@ -301,16 +309,31 @@ def pv_crypto(lignes: list[dict], annee: int,
             regime="150 VH bis",
         ))
 
-    abattement = min(fb.CRYPTO_ABATTEMENT, max(0.0, pv_globale))
-    pv_imposable = max(0.0, pv_globale - abattement)
+    # DÉFAUT CORRIGÉ — le seuil de 305 EUR est une FRANCHISE assise sur le
+    # total des PRIX DE CESSION, pas un abattement sur le gain.
+    #
+    #   total des cessions <= 305 EUR : plus-value exonérée, case 3AN vide,
+    #                                   la 2086 reste due ;
+    #   total des cessions >  305 EUR : imposable DÈS LE PREMIER EURO.
+    #
+    # L'ancien code retirait jusqu'à 305 EUR du gain. Sur 20 EUR de gain pour
+    # 400 EUR de cessions — seuil franchi — il n'imposait rien. C'est faux.
+    total_cessions = sum(x.prix_cession_eur for x in details)
+    exonere = total_cessions <= fb.CRYPTO_FRANCHISE_CESSIONS
 
-    ir = pv_imposable * (fb.PFU_TAUX - fb.PRELEVEMENTS_SOCIAUX)
-    ps = pv_imposable * fb.PRELEVEMENTS_SOCIAUX
+    pv_imposable = 0.0 if exonere else max(0.0, pv_globale)
+    abattement = 0.0          # il n'y a pas d'abattement : le champ reste, la valeur est nulle
+
+    ir = pv_imposable * fb.IR_FORFAITAIRE
+    ps = pv_imposable * fb.taux_ps(annee)
 
     return ResultatFiscal(
         regime="150 VH bis", annee=annee, plus_value_brute=pv_globale,
         abattement=abattement, plus_value_imposable=pv_imposable,
         impot_ir=ir, prelevements_sociaux=ps, total_du=ir + ps, detail=details,
+        # Champs d'affichage : ce sont eux qui alimentent la ligne 2086 et le
+        # controle du seuil sur la page Fiscalite.
+        total_cessions=total_cessions, exonere_par_franchise=exonere,
     )
 
 
@@ -416,9 +439,12 @@ def comparer_pfu_bareme(
     if plus_value_nette <= 0:
         return {"choix": "PFU", "gain": 0.0, "detail": "Aucune plus-value imposable."}
 
-    # --- Option PFU : 12,8 % d'IR + 17,2 % de PS.
-    pfu_ir = plus_value_nette * (fb.PFU_TAUX - fb.PRELEVEMENTS_SOCIAUX)
-    pfu_ps = plus_value_nette * fb.PRELEVEMENTS_SOCIAUX
+    # --- Option PFU : 12,8 % d'IR + les PS de l'annee de cession.
+    # Le taux de PS depend de l'annee (LFSS 2026, art. 12) : 17,2 % jusqu'en
+    # 2025, 18,6 % en 2026. Un taux fige comparait deux regimes sur des bases
+    # differentes selon l'exercice.
+    pfu_ir = plus_value_nette * fb.IR_FORFAITAIRE
+    pfu_ps = plus_value_nette * fb.taux_ps(annee)
     pfu_total = pfu_ir + pfu_ps
 
     # --- Option barème : la PV s'ajoute au revenu, PS dus par ailleurs.
@@ -428,7 +454,7 @@ def comparer_pfu_bareme(
     ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut)
     ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
     ir_marginal = max(0.0, ir_avec.impot_net - ir_sans.impot_net)
-    ps = plus_value_nette * fb.PRELEVEMENTS_SOCIAUX
+    ps = plus_value_nette * fb.taux_ps(annee)
     bareme_total = ir_marginal + ps
 
     avantage = pfu_total - bareme_total

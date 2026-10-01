@@ -274,7 +274,47 @@ def snapshots() -> pd.DataFrame:
 
 
 def inflation() -> pd.DataFrame:
-    return lire(T_INFLATION)
+    """Lit `pf2_inflation`, colonnes renommées en `Annee` / `Inflation`.
+
+    DÉFAUT TROUVÉ À L'AUDIT — c'est LUI qui vidait la page Performance.
+
+    La table stocke `annee` et `inflation` en minuscules (voyez
+    migrations/001_init.sql). Toutes les pages, elles, lisent `Annee` et
+    `Inflation`, en majuscules. `snapshots()` faisait déjà ce pont pour `date`
+    -> `Date` ; `inflation()` ne le faisait pas.
+
+    Conséquence : `session._inflation_par_annee` cherchait `Annee`, ne la
+    trouvait pas, et retournait un dictionnaire VIDE — sans erreur, sans
+    message. Le robot écrivait bien les chiffres en base ; l'application ne les
+    voyait jamais. La page Performance affichait « ⚠️ non renseignée » pour
+    chaque année, et la performance réelle était incalculable.
+
+    Le défaut a survécu parce qu'il était SILENCIEUX. Une table vide et une
+    table illisible produisaient exactement le même résultat. C'est pourquoi
+    cette fonction lève maintenant une erreur explicite quand elle trouve des
+    lignes qu'elle ne sait pas nommer.
+    """
+    df = lire(T_INFLATION)
+    if df.empty:
+        return df
+
+    renommage = {}
+    for attendu, candidats in (
+        ("Annee", ("Annee", "annee")),
+        ("Inflation", ("Inflation", "inflation")),
+    ):
+        colonne = next((c for c in candidats if c in df.columns), None)
+        if colonne is None:
+            raise ValueError(
+                f"La table pf2_inflation n'a pas de colonne « {attendu} ». "
+                f"Colonnes trouvées : {', '.join(map(str, df.columns))}. "
+                "Exécutez migrations/001_init.sql dans Supabase."
+            )
+        if colonne != attendu:
+            renommage[colonne] = attendu
+    if renommage:
+        df = df.rename(columns=renommage)
+    return df
 
 
 def ajouter_snapshot(ligne: dict) -> None:

@@ -59,21 +59,37 @@ def main() -> int:
             )
             alertes += 1
 
-    # --- 2. Crypto : l'abattement de 305 € ---
+    # --- 2. Crypto : la franchise de 305 € sur les PRIX DE CESSION ---
+    # DÉFAUT CORRIGÉ : l'alerte parlait d'un « abattement » s'appliquant « sur
+    # la plus-value GLOBALE ». C'est l'inverse. Le seuil de 305 € (art. 150 VH
+    # bis) porte sur le TOTAL DES PRIX DE CESSION de l'année, et il exonère
+    # tout ou rien : au-delà, la plus-value est imposable dès le premier euro.
+    # Une alerte qui décrit mal la règle est pire qu'une alerte absente : elle
+    # fait croire à une déduction qui n'existe pas.
     ventes_crypto = [
         t for t in transactions
         if t.est_vente and t.date.year == annee and classe_de(t.ticker) == Classe.CRYPTO
     ]
     if ventes_crypto:
         total = sum(t.montant_net for t in ventes_crypto)
-        db.ajouter_alerte(
-            "Abattement crypto",
-            f"{len(ventes_crypto)} cession(s) crypto en {annee} pour {total:,.0f} €. "
-            f"L'abattement de {fb.CRYPTO_ABATTEMENT:.0f} € s'applique sur la "
-            "plus-value GLOBALE de l'année, pas cession par cession. Vérifiez que "
-            "votre déclaration 2086-SD le prend bien en compte une seule fois.",
-            niveau="info",
-        )
+        franchise = fb.CRYPTO_FRANCHISE_CESSIONS
+        if total <= franchise:
+            message = (
+                f"{len(ventes_crypto)} cession(s) crypto en {annee} pour "
+                f"{total:,.0f} €. Vous êtes SOUS le seuil de {franchise:.0f} € de "
+                "prix de cession : la plus-value de l'année est exonérée. "
+                "Le formulaire 2086 reste à déposer — c'est lui qui prouve que "
+                "vous êtes sous le seuil. Rien à reporter en case 3AN."
+            )
+        else:
+            message = (
+                f"{len(ventes_crypto)} cession(s) crypto en {annee} pour "
+                f"{total:,.0f} €. Vous DÉPASSEZ le seuil de {franchise:.0f} € de "
+                "prix de cession : la plus-value est imposable dès le premier "
+                "euro. Il n'y a aucun abattement à déduire — le seuil n'enlève "
+                "rien, il déclenche. Report en case 3AN (ou 3BN si moins-value)."
+            )
+        db.ajouter_alerte("Seuil crypto de 305 €", message, niveau="info")
         alertes += 1
 
     # --- 3. Barème disponible pour l'année en cours ? ---

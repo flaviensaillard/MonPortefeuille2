@@ -232,7 +232,13 @@ class TestCalculCryptoNominal:
         # ligne 223 = 300 x (800 / 600) = 400 ; ligne 224 = 800 - 400 = 400
         assert r.detail[0].plus_value_eur == pytest.approx(400.0)
 
-    def test_l_abattement_de_305_est_applique(self, monkeypatch):
+    def test_la_franchise_de_305_porte_sur_les_cessions(self, monkeypatch):
+        """800 EUR de cessions : bien au-dessus du seuil, donc rien à déduire.
+
+        Ce test s'appelait `test_l_abattement_de_305_est_applique` et attendait
+        `min(305, pv_brute)` retirés du gain. Il n'y a pas d'abattement crypto :
+        le seuil de 305 EUR est une franchise assise sur les prix de cession.
+        """
         monkeypatch.setattr("core.fx.taux", _faux_fx(1.0))
         monkeypatch.setattr("core.prices.cours", _faux_cours(100.0))
         transactions = [
@@ -241,4 +247,7 @@ class TestCalculCryptoNominal:
         ]
         cessions = tax.cessions_de_lannee(transactions, {}, 2025)
         r = tax.pv_crypto(cessions[Classe.CRYPTO], 2025)
-        assert r.abattement == pytest.approx(min(305.0, r.plus_value_brute))
+        assert r.total_cessions == pytest.approx(800.0)
+        assert r.exonere_par_franchise is False
+        assert r.abattement == pytest.approx(0.0)
+        assert r.plus_value_imposable == pytest.approx(r.plus_value_brute)

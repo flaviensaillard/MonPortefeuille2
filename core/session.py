@@ -74,14 +74,48 @@ class Contexte:
 
 
 def _inflation_par_annee(df: pd.DataFrame) -> dict[int, float]:
-    if df.empty or "Annee" not in df.columns:
+    """Inflation annuelle, en fraction (2 % -> 0.02).
+
+    DÉFAUT CORRIGÉ. Cette fonction faisait `if df.empty or "Annee" not in
+    df.columns: return {}`. Elle confondait « pas de données » et « données que
+    je ne sais pas lire » : `db.inflation()` rendait `annee`/`inflation` en
+    minuscules, la colonne `Annee` était donc absente, et la fonction retournait
+    un dictionnaire vide — pour toujours, et sans le dire.
+
+    C'était le pire des deux mondes : la performance réelle de chaque année
+    s'affichait « non calculable » alors que les chiffres étaient en base.
+
+    Maintenant : une table ABSENTE ou VIDE reste silencieuse (au démarrage,
+    c'est normal) ; une table PLEINE dont aucune ligne n'est exploitable lève.
+    """
+    if df is None or df.empty:
         return {}
-    out = {}
+
+    if "Annee" not in df.columns or "Inflation" not in df.columns:
+        # `db.inflation()` fait le pont de noms et leve deja si c'est
+        # impossible. Si on arrive ici, c'est que la table a ete lue par un
+        # autre chemin — un test, un robot. On le dit.
+        raise ValueError(
+            f"Table d'inflation illisible : colonnes {list(df.columns)}. "
+            "Attendu : Annee et Inflation. La performance reelle ne peut pas "
+            "etre calculee — mieux vaut une erreur visible qu'un zero."
+        )
+
+    out: dict[int, float] = {}
+    lignes_ignorees = 0
     for _, r in df.iterrows():
         try:
             out[int(r["Annee"])] = float(r["Inflation"]) / 100.0
         except (TypeError, ValueError):
+            lignes_ignorees += 1
             continue
+
+    if not out and lignes_ignorees:
+        raise ValueError(
+            f"{lignes_ignorees} ligne(s) d'inflation presentes, aucune "
+            "exploitable. Les colonnes Annee/Inflation sont peut-etre "
+            "inversees — verifiez la table pf2_inflation."
+        )
     return out
 
 
@@ -307,8 +341,16 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
             # Equivalent en onces du patrimoine investi, converti en USD.
             taux_usd = fx.taux("EUR", dt.date.today().isoformat(), "USD")
             ctx.equivalent_or_oz = (ctx.total_investi_eur * taux_usd) / ctx.cours_or
-    except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
+    except prices.CoursIndisponible:
+        # Le cours de l'or manque : c'est LUI qui manque, la conversion est
+        # peut-etre valide. On le dit dans la bonne liste.
         ctx.echecs_cours.append(prices.TICKER_OR)
+    except fx.FXIndisponible:
+        # Le defaut separe : avant, l'echec du taux de change etait rapporte
+        # comme un cours manquant. `exc` etait capture puis jete — l'exception
+        # nommait pourtant la paire et la date fautives. L'utilisateur voyait
+        # « GC=F » alors que le probleme etait l'EUR/USD.
+        ctx.echecs_fx.append("EUR/USD (pour l'équivalent-or)")
 
     # --- Historiques ---
     try:
