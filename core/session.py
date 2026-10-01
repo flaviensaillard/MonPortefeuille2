@@ -57,6 +57,7 @@ class Contexte:
     echecs_fx: list[str] = field(default_factory=list)
     tables_absentes: list[str] = field(default_factory=list)
     erreurs: list[str] = field(default_factory=list)
+    anomalies_transactions: list[str] = field(default_factory=list)
 
     @property
     def ecarts(self):
@@ -117,7 +118,11 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     try:
         df_tx = db.transactions()
         ctx.transactions = charger_transactions(df_tx)
-        ctx.positions = calculer_positions(ctx.transactions)
+        # Une transaction incohérente ne doit pas vider l'écran : on la consigne
+        # et on continue, pour que vous voyiez le reste du portefeuille.
+        anomalies: list[str] = []
+        ctx.positions = calculer_positions(ctx.transactions, anomalies)
+        ctx.anomalies_transactions = anomalies
     except ValueError as exc:
         ctx.erreurs.append(f"Transactions illisibles : {exc}")
         return ctx

@@ -213,7 +213,20 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError(f"Transaction ligne {i} illisible : {exc}") from exc
 
-    return sorted(sortie, key=lambda t: (t.date, t.ticker))
+    # Achats AVANT ventes à date égale.
+    #
+    # Le tri précédent était `(date, ticker)`. Pour un achat et une vente du
+    # même titre le même jour, la clé était donc identique, et le tri stable de
+    # Python conservait l'ordre de la table d'origine. Si la vente était rangée
+    # avant son achat dans la v1 — ce qui arrive, rien ne l'interdit — le
+    # calcul des positions échouait avec :
+    #
+    #     Vente de 22.0 FLXC.L le 2025-01-07 sans position détenue.
+    #
+    # La donnée était pourtant correcte : elle était simplement dans le
+    # désordre. Traiter les achats d'abord est la convention usuelle, et c'est
+    # la seule qui rende l'arithmétique du PRU possible.
+    return sorted(sortie, key=lambda t: (t.date, 0 if t.est_achat else 1, t.ticker))
 
 
 # ---------------------------------------------------------------------------
@@ -246,12 +259,21 @@ class Position:
         return POCHES_PAR_CLE.get(self.poche)
 
 
-def calculer_positions(transactions: list[Transaction]) -> dict[str, Position]:
+def calculer_positions(
+    transactions: list[Transaction],
+    anomalies: list[str] | None = None,
+) -> dict[str, Position]:
     """PRU et quantités par ticker, en euros, FIFO sur la quantité.
 
     Le PRU est calculé en euros : chaque ligne est convertie à sa date avec le
     taux de change réel. Aucune conversion manuelle n'est acceptée en saisie —
     c'est ce qui avait empoisonné XJSE.SW dans la v1.
+
+    `anomalies` : si vous passez une liste, une transaction incohérente (vente
+    sans position détenue, ou vente supérieure au détenu) y est consignée et la
+    ligne est ignorée, au lieu de faire échouer tout le calcul. L'application
+    reste utilisable et vous dit ce qui ne va pas. Sans liste, on lève
+    `ValueError` — comportement des robots, où mieux vaut s'arrêter.
     """
     positions: dict[str, Position] = {}
 
@@ -273,14 +295,23 @@ def calculer_positions(transactions: list[Transaction]) -> dict[str, Position]:
             pos.cout_total_eur += montant_eur
         else:  # vente
             if pos.quantite <= 1e-9:
-                raise ValueError(
-                    f"Vente de {t.quantite} {t.ticker} le {t.date} sans position détenue."
+                message = (
+                    f"Vente de {t.quantite} {t.ticker} le {t.date} sans position "
+                    f"détenue. Vérifiez l'achat correspondant dans la v1."
                 )
+                if anomalies is None:
+                    raise ValueError(message)
+                anomalies.append(message)
+                continue
             if t.quantite > pos.quantite + 1e-6:
-                raise ValueError(
+                message = (
                     f"Vente de {t.quantite} {t.ticker} le {t.date} supérieure à la "
                     f"quantité détenue ({pos.quantite})."
                 )
+                if anomalies is None:
+                    raise ValueError(message)
+                anomalies.append(message)
+                continue
             pru_instant = pos.cout_total_eur / pos.quantite
             pos.cout_total_eur -= pru_instant * t.quantite
             pos.quantite -= t.quantite

@@ -37,6 +37,21 @@ ui.appareil({"tables": not ctx.tables_absentes})
 ui.bandeau_erreurs(ctx.echecs_cours, "cours")
 ui.bandeau_erreurs(ctx.echecs_fx, "taux de change")
 
+# Transactions incohérentes : on prévient sans bloquer. Une ligne douteuse ne
+# doit pas vous priver de la vue d'ensemble de votre patrimoine.
+if ctx.anomalies_transactions:
+    with st.expander(
+        f"⚠️ {len(ctx.anomalies_transactions)} transaction(s) incohérente(s) "
+        f"dans vos données", expanded=True
+    ):
+        st.warning(
+            "Ces lignes ont été ignorées dans le calcul des positions. "
+            "Vos chiffres sont donc partiels — corrigez-les dans la v1 "
+            "puis relancez l'import."
+        )
+        for a in ctx.anomalies_transactions:
+            st.markdown(f"- {a}")
+
 if ctx.erreurs:
     st.stop()
 
