@@ -142,12 +142,12 @@ else:
 
 perf_or = None
 if not ctx.snapshots.empty and "equivalent_or_oz" in ctx.snapshots.columns:
-    oz0 = ctx.snapshots["equivalent_or_oz"].iloc[0]
-    oz1 = ctx.snapshots["equivalent_or_oz"].iloc[-1]
-    if oz0 and oz0 > 0:
-        perf_or = oz1 / oz0 - 1.0
+    perf_or = S.twr_en_or_portefeuille(ctx)
 
-perf_eur = ctx.perf_globale_pct
+# `perf_eur` : le TWR, PAS `derniere / premiere - 1`. Ce dernier comptait vos
+# versements comme du rendement — +628 % cumule sur le portefeuille reel, la
+# ou la strategie en avait produit une fraction. Voyez `twr_portefeuille`.
+perf_eur = S.twr_portefeuille(ctx)
 if perf_or is not None:
     g3.metric("Performance en or", ui.pct(perf_or, signe=True),
               delta=ui.pct(perf_eur, signe=True) if perf_eur is not None else None,

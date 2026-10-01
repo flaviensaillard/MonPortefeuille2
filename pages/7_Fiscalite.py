@@ -198,6 +198,22 @@ st.warning(
 st.divider()
 st.subheader("🔔 Points de vigilance")
 
+
+
+def _gain_latent_reel(ctx) -> float:
+    """Plus-value latente réelle : ce que vous gagneriez à tout vendre aujourd'hui.
+
+    C'est la somme des `pv_latente_eur` des positions — valeur de marché moins
+    prix de revient, chaque ligne convertie à son propre taux de change.
+
+    L'ancien calcul faisait `dernier snapshot - premier snapshot`, ce qui
+    comptait vos VERSEMENTS comme du gain. Sur le portefeuille réel, il
+    annonçait 68 489 EUR de plus-value là où une grande partie est de
+    l'épargne versée — et l'alerte fiscale chiffrait un impôt dessus.
+    """
+    return sum(
+        p.pv_latente_eur for p in ctx.positions.values() if p.quantite > 0
+    )
 vigilance = []
 
 if not ctx.snapshots.empty:
@@ -207,8 +223,14 @@ if not ctx.snapshots.empty:
     if len(snaps) >= 2:
         jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days
         if jours > 0:
-            gain = float(snaps["patrimoine_investi_eur"].iloc[-1]) - \
-                float(snaps["patrimoine_investi_eur"].iloc[0])
+            # La plus-value latente, corrigee des apports.
+            #
+            # `derniere - premiere` comptait vos VERSEMENTS comme du gain.
+            # Sur le portefeuille reel, 79 394 - 10 905 = 68 489 EUR de
+            # « plus-value » alors qu une grande partie est de l epargne
+            # versee. L alerte fiscale annoncait donc un impot sur un gain
+            # que vous n aviez pas.
+            gain = _gain_latent_reel(ctx, snaps)
             if gain > 0:
                 vigilance.append(
                     f"**PFU vs barème** : votre plus-value latente atteint "

@@ -50,19 +50,14 @@ snaps = snaps.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 # ---------------------------------------------------------------------------
 # Flux externes : apports et retraits du jour
 # ---------------------------------------------------------------------------
-apports = ctx.apports.copy()
-flux_par_date: dict = {}
-if not apports.empty:
-    apports["Date_DT"] = pd.to_datetime(apports["date"], errors="coerce")
-    for _, r in apports.iterrows():
-        if pd.isna(r["Date_DT"]):
-            continue
-        signe = 1.0 if r["sens"] == "apport" else -1.0
-        flux_par_date[r["Date_DT"].date()] = flux_par_date.get(r["Date_DT"].date(), 0.0) \
-            + signe * float(r["montant_eur"])
+# Une seule implementation du decoupage des flux, partagee avec la page
+# d'accueil et la projection retraite. Voyez `session.flux_par_date`.
+flux_jour = S.flux_par_date(ctx.apports)
+
+
+flux = [flux_jour.get(d.date(), 0.0) for d in snaps["Date"]]
 
 valeurs = snaps["patrimoine_investi_eur"].astype(float).tolist()
-flux = [flux_par_date.get(d.date(), 0.0) for d in snaps["Date"]]
 
 rendements = metrics.rendements_periode(valeurs, flux)
 twr_total = metrics.twr(rendements)
@@ -99,21 +94,16 @@ perf_eur = twr_total
 
 # 2. En euros réels (pouvoir d'achat).
 inflation = S.inflation_dict(ctx)
-annees = [d.year for d in snaps["Date"]]
-infl_periode = 1.0
-for a in sorted(set(annees)):
-    if a in inflation:
-        nb = sum(1 for x in annees if x == a)
-        infl_periode *= (1.0 + inflation[a]) ** (nb / 12.0)
+d0, d1 = snaps["Date"].iloc[0].date(), snaps["Date"].iloc[-1].date()
+# Pondere par les jours, pas par le nombre de lignes : voir
+# `metrics.inflation_cumulee`, ou le defaut est documente.
+infl_periode = metrics.inflation_cumulee(inflation, d0, d1)
 perf_reel = (1.0 + perf_eur) / infl_periode - 1.0 if infl_periode > 0 else None
 
-# 3. En onces d'or.
-perf_or = None
-if "equivalent_or_oz" in snaps.columns and snaps["equivalent_or_oz"].notna().all():
-    oz0 = float(snaps["equivalent_or_oz"].iloc[0])
-    oz1 = float(snaps["equivalent_or_oz"].iloc[-1])
-    if oz0 > 0:
-        perf_or = oz1 / oz0 - 1.0
+# 3. En onces d'or — corrigee des apports, comme les deux autres lectures.
+# `oz_final / oz_initial` avait le meme defaut que `fin / debut` : il montait
+# avec vos versements.
+perf_or = S.twr_en_or_portefeuille(ctx)
 
 d1, d2, d3 = st.columns(3)
 d1.metric("En euros", ui.pct(perf_eur, signe=True))
@@ -160,20 +150,26 @@ st.divider()
 st.subheader("Par année")
 
 snaps["Annee"] = snaps["Date"].dt.year
-par_annee = snaps.groupby("Annee").agg(
-    debut=("patrimoine_investi_eur", "first"),
-    fin=("patrimoine_investi_eur", "last"),
-).reset_index()
+
+# Le rendement de chaque sous-période, corrigé des flux. `rendements_periode`
+# renvoie n-1 valeurs pour n valeurs : la i-ème est le rendement qui MÈNE à la
+# ligne i. On la range donc dans la ligne d'arrivée.
+snaps["Rendement"] = [0.0] + metrics.rendements_periode(valeurs, flux)
+
+# Rendement de chaque annee = chainage des sous-periodes qui se terminent
+# dans cette annee. C'est la definition standard, et la seule qui neutralise
+# les apports. Le calcul precedent faisait `derniere / premiere - 1` : il
+# comptait vos versements comme du rendement.
+rendements_annuels = metrics.twr_par_annee(
+    [d.date() for d in snaps["Date"]], snaps["Rendement"].tolist()
+)
 
 lignes = []
-for _, r in par_annee.iterrows():
-    if r["debut"] <= 0:
-        continue
-    perf = r["fin"] / r["debut"] - 1.0
-    infl = inflation.get(int(r["Annee"]))
+for annee, perf in rendements_annuels.items():
+    infl = inflation.get(annee)
     reel = (1 + perf) / (1 + infl) - 1.0 if infl is not None else None
     lignes.append({
-        "Année": int(r["Annee"]),
+        "Année": int(annee),
         "Performance": ui.pct(perf, signe=True),
         "Inflation": ui.pct(infl, signe=True) if infl is not None else "⚠️ non renseignée",
         "Réelle": ui.pct(reel, signe=True) if reel is not None else "—",
@@ -183,7 +179,7 @@ if lignes:
     ui.tableau(pd.DataFrame(lignes))
 
     annees_sans_inflation = [
-        int(r["Annee"]) for _, r in par_annee.iterrows() if int(r["Annee"]) not in inflation
+        a for a in sorted({int(x) for x in snaps["Annee"]}) if a not in inflation
     ]
     if annees_sans_inflation:
         st.warning(

@@ -61,16 +61,13 @@ taux_pv = c3.number_input(
 ) / 100.0
 
 # Scénario A : le CAGR historique du portefeuille.
-perf_hist = None
-if not ctx.snapshots.empty and len(ctx.snapshots) >= 2:
-    snaps = ctx.snapshots.copy()
-    snaps["Date"] = dates.parser(snaps["Date"])
-    snaps = snaps.dropna(subset=["Date"]).sort_values("Date")
-    v0 = float(snaps["patrimoine_investi_eur"].iloc[0])
-    v1 = float(snaps["patrimoine_investi_eur"].iloc[-1])
-    jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days
-    if v0 > 0 and jours > 0:
-        perf_hist = metrics.annualiser(v1 / v0 - 1.0, jours)
+# Le CAGR historique, corrigé des apports.
+#
+# L'ancien calcul faisait `v1 / v0 - 1` puis annualisait : sur le portefeuille
+# reel, +628 % cumule soit **76 % par an**, et c'est ce chiffre qui preremplissait
+# ce champ. Une grande partie de cet ecart est vos versements, pas du rendement.
+# La valeur par defaut de la projection de retraite etait donc un conte de fees.
+perf_hist = S.twr_annualise_portefeuille(ctx)
 
 st.divider()
 cA, cB, cC = st.columns(3)

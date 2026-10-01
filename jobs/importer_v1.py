@@ -487,6 +487,31 @@ def importer_snapshots(dry_run: bool = False) -> int:
 
     # Idempotence : `pf2_snapshots` a une contrainte d'unicite sur `date`, donc
     # l'upsert met a jour au lieu de dupliquer. Relancer l'import est sans risque.
+    # --- Equivalent-or de chaque valuation ---------------------------------
+    # La v1 ne l'a pas, et sans lui la seule courbe qui compte pour Gave — le
+    # portefeuille en onces d'or — reste vide sur trois ans et demi. On la
+    # calcule depuis le cours reel de l'or et le taux de change reel du jour,
+    # exactement comme `jobs/daily_snapshot.py`.
+    #
+    # Ce n'est PAS une invention : c'est la meme formule, appliquee a des prix
+    # historiques veritables. Un jour sans prix disponible est signale, et sa
+    # ligne reste sans equivalent-or plutot que de recevoir un zero.
+    from core import fx as _fx
+    from core import prices as _prices
+
+    or_manquant: list[str] = []
+    for ligne in lignes:
+        try:
+            cours_or = _prices.cours_or(ligne["date"])
+            taux_usd = _fx.taux("EUR", ligne["date"], "USD")
+            ligne["cours_or_usd"] = round(cours_or, 2)
+            ligne["equivalent_or_oz"] = round(
+                ligne["patrimoine_investi_eur"] * taux_usd / cours_or, 4
+            )
+        except Exception as exc:
+            or_manquant.append(ligne["date"])
+            log.warning("  - equivalent-or indisponible le %s (%s)", ligne["date"], exc)
+
     ecrits = 0
     for ligne in lignes:
         try:
@@ -499,6 +524,13 @@ def importer_snapshots(dry_run: bool = False) -> int:
         "%d snapshots importés (%s -> %s).",
         ecrits, lignes[0]["date"], lignes[-1]["date"],
     )
+    if or_manquant:
+        log.warning(
+            "%d date(s) sans equivalent-or : %s. La performance en or ne sera "
+            "pas calculable sur toute la période — c'est honnête, mieux vaut "
+            "qu'un prix inventé.",
+            len(or_manquant), ", ".join(or_manquant[:10]),
+        )
     return ecrits
 
 

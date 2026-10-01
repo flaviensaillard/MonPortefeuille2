@@ -48,11 +48,28 @@ def vider_cache() -> None:
 
 
 def _ticker_fx(devise: str, contre: str) -> str:
+    """Symbole Yahoo de la paire `devise` -> `contre`, ou "" si triviaux.
+
+    CORRECTION — le taux partait dans le MAUVAIS SENS.
+
+    L'ancien code renvoyait `f"{contre}{devise}=X"` quand `devise == "EUR"`,
+    en supposant que Yahoo « inverse certaines paires rares ». Vérifié en direct :
+    Yahoo cote **les deux sens** de toutes les paires usuelles.
+
+    | Paire demandée | Ancien symbole | Ancienne valeur | Valeur correcte |
+    |---|---|---|---|
+    | EUR -> USD | `USDEUR=X` | 0,8858 | **1,1289** |
+    | EUR -> JPY | `JPYEUR=X` | 0,0056 | **178,35** |
+    | USD -> EUR | `USDEUR=X` | 0,8858 | 0,8858 (juste) |
+
+    Donc `taux("EUR", ..., "USD")` renvoyait l'INVERSE du taux attendu. Toutes
+    les conversions depuis l'euro étaient fausses — et notamment
+    `equivalent_or_oz`, la mesure que Gave retient, sous-estimée de 22 %.
+
+    Le symbole direct `f"{devise}{contre}=X"` est correct dans les deux sens.
+    """
     if devise == contre:
         return ""
-    # Yahoo inverse certaines paires rares : on demande EUR/JPY et non JPY/EUR.
-    if devise == "EUR":
-        return f"{contre}{devise}=X"
     return f"{devise}{contre}=X"
 
 

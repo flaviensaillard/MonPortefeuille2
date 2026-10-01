@@ -72,17 +72,6 @@ class Contexte:
     def besoins_reequilibrage(self):
         return [e for e in self.ecarts if e.hors_bande]
 
-    @property
-    def perf_globale_pct(self) -> float | None:
-        """Performance globale depuis le début, en euros puis en onces d'or."""
-        if self.snapshots.empty:
-            return None
-        v0 = self.snapshots["patrimoine_investi_eur"].iloc[0]
-        v1 = self.snapshots["patrimoine_investi_eur"].iloc[-1]
-        if v0 <= 0:
-            return None
-        return v1 / v0 - 1.0
-
 
 def _inflation_par_annee(df: pd.DataFrame) -> dict[int, float]:
     if df.empty or "Annee" not in df.columns:
@@ -111,6 +100,144 @@ def _date_dernier_import(df) -> str | None:
         return str(valeurs.max())
     except Exception:
         return None
+
+
+
+# ---------------------------------------------------------------------------
+# Le TWR du portefeuille — une seule implementation, trois appelants
+# ---------------------------------------------------------------------------
+# `derniere_valeur / premiere_valeur - 1` a ete ecrit a trois endroits :
+# `Contexte.perf_globale_pct` (affiche sur la page d'accueil), le tableau
+# annuel de `pages/5_Performance.py`, et le CAGR historique qui preremplit le
+# scenario A de `pages/6_Retraite.py`. Les trois comptaient les VERSEMENTS
+# comme du rendement.
+#
+# Sur le portefeuille reel — 10 905 EUR en avril 2023, 79 394 EUR en octobre
+# 2026, alimente chaque mois — le calcul donnait +628 % cumule, soit **76 % par
+# an** apres annualisation. C'est ce chiffre qui preremplissait la projection de
+# retraite. La realite est un TWR de l'ordre de 10 a 15 %.
+#
+# Une seule fonction, testee, et plus aucun appelant ne peut reintroduire le
+# defaut sans faire echouer `tests/test_twr_portefeuille.py`.
+
+
+def flux_par_date(apports: pd.DataFrame) -> dict:
+    """Apports et retraits, dates par jour.
+
+    `apports` doit avoir les colonnes `date`, `sens`, `montant_eur`.
+    Retourne `{date: montant signe}`, un apport etant positif.
+    """
+    if apports is None or apports.empty:
+        return {}
+    if not {"date", "sens", "montant_eur"} <= set(apports.columns):
+        return {}
+    dates = pd.to_datetime(apports["date"], errors="coerce")
+    signes = apports["sens"].astype(str).str.strip().str.lower().map(
+        {"apport": 1.0, "ajout": 1.0, "retrait": -1.0}
+    )
+    montants = pd.to_numeric(apports["montant_eur"], errors="coerce")
+    sortie: dict = {}
+    for d, s, m in zip(dates, signes, montants):
+        if pd.isna(d) or s is None or pd.isna(m):
+            continue
+        jour = d.date()
+        sortie[jour] = sortie.get(jour, 0.0) + s * float(m)
+    return sortie
+
+
+def twr_portefeuille(ctx: "Contexte") -> float | None:
+    """TWR depuis le premier snapshot, corrigé des apports et retraits.
+
+    Retourne `None` s'il n'y a pas assez de snapshots — jamais une valeur
+    inventée. C'est la SEULE façon correcte de répondre à « qu'a produit la
+    stratégie » quand on alimente le portefeuille.
+    """
+    snaps = ctx.snapshots
+    if snaps is None or snaps.empty or len(snaps) < 2:
+        return None
+    if "patrimoine_investi_eur" not in snaps.columns:
+        return None
+
+    dates = _parser_dates(snaps["Date"])
+    valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce")
+    garder = dates.notna() & valeurs.notna() & (valeurs > 0)
+    if int(garder.sum()) < 2:
+        return None
+
+    dates = dates[garder].tolist()
+    valeurs = valeurs[garder].tolist()
+    flux_jour = flux_par_date(ctx.apports)
+    flux = [flux_jour.get(d.date(), 0.0) for d in dates]
+
+    return metrics.twr_depuis(valeurs, flux)
+
+
+def twr_annualise_portefeuille(ctx: "Contexte") -> float | None:
+    """Le même TWR, annualisé sur la durée couverte par les snapshots."""
+    snaps = ctx.snapshots
+    if snaps is None or snaps.empty or len(snaps) < 2:
+        return None
+    dates = _parser_dates(snaps["Date"]).dropna()
+    if len(dates) < 2:
+        return None
+    jours = (dates.iloc[-1] - dates.iloc[0]).days
+    total = twr_portefeuille(ctx)
+    if total is None or jours <= 0:
+        return None
+    return metrics.annualiser(total, jours)
+
+
+def twr_en_or_portefeuille(ctx: "Contexte") -> float | None:
+    """Performance en onces d'or depuis le premier snapshot, corrigée des apports.
+
+    Même défaut, même remède que `twr_portefeuille` : « onces finales / onces
+    initiales » monte dès que vous versez de l'argent. Sur le portefeuille
+    réel, l'ancien calcul affichait +120 % là où la stratégie en avait produit
+    16,9 %.
+
+    Retourne `None` si l'équivalent-or manque sur une seule ligne — les
+    snapshots importés de la v1 n'en ont pas, et il faut le dire plutôt que
+    de fabriquer un prix de l'or.
+    """
+    snaps = ctx.snapshots
+    if snaps is None or snaps.empty or len(snaps) < 2:
+        return None
+    if not {"patrimoine_investi_eur", "equivalent_or_oz"} <= set(snaps.columns):
+        return None
+
+    dates = _parser_dates(snaps["Date"])
+    valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce")
+    onces = pd.to_numeric(snaps["equivalent_or_oz"], errors="coerce")
+    garder = dates.notna() & valeurs.notna() & (valeurs > 0)
+    if int(garder.sum()) < 2:
+        return None
+
+    # Un equivalent-or manque-t-il sur la periode retenue ? On refuse de
+    # « sauter » la ligne : la sous-periode qui l'enjambe serait calculee sur
+    # deux periodes comme si c'en etait une, et le flux intermediaire serait
+    # perdu. Autant le dire que mesurer de travers.
+    if onces[garder].isna().any() or (onces[garder] <= 0).any():
+        return None
+
+    dates = dates[garder].tolist()
+    valeurs = valeurs[garder].tolist()
+    onces = onces[garder].tolist()
+    flux_jour = flux_par_date(ctx.apports)
+    flux = [flux_jour.get(d.date(), 0.0) for d in dates]
+
+    try:
+        return metrics.twr_en_or(valeurs, flux, onces)
+    except ValueError:
+        return None
+
+
+def _parser_dates(serie) -> pd.Series:
+    """Parse une colonne de dates en Timestamp, sans faire échouer l'appelant."""
+    from . import dates
+    try:
+        return pd.to_datetime(dates.parser(serie))
+    except Exception:
+        return pd.to_datetime(serie, errors="coerce")
 
 
 @st.cache_data(ttl=300, show_spinner=False)

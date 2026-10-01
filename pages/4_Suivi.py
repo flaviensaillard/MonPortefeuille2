@@ -82,14 +82,16 @@ if "equivalent_or_oz" in df.columns and df["equivalent_or_oz"].notna().any():
     fig_or.update_layout(yaxis_title="Onces d'or")
     st.plotly_chart(fig_or, use_container_width=True)
 
-    oz0 = df["equivalent_or_oz"].iloc[0]
-    oz1 = df["equivalent_or_oz"].iloc[-1]
-    if oz0 and oz0 > 0:
-        variation = oz1 / oz0 - 1.0
+    # La variation en or, corrigee des apports.
+    #
+    # `oz_final / oz_initial` montait avec vos versements : +120 % la ou la
+    # strategie en avait produit 16,9 %. Meme defaut, meme remede — une
+    # seule fonction, dans `core.session`.
+    variation = S.twr_en_or_portefeuille(ctx)
+    if variation is not None:
         st.metric(
             "Variation depuis le premier snapshot",
             ui.pct(variation, signe=True),
-            delta=f"{oz1 - oz0:+.2f} oz",
         )
 
 # ---------------------------------------------------------------------------
