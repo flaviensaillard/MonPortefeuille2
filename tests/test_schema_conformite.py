@@ -446,3 +446,109 @@ def test_devise_de_yahoo_renvoie_none_sans_reseau(monkeypatch):
     assert prices.devise_de("ASML") is None
     assert prices.devise_de("") is None
     prices._cache_devise.clear()
+
+
+# ---------------------------------------------------------------------------
+# La migration doit couvrir la sécurité de toutes les tables
+# ---------------------------------------------------------------------------
+# Le défaut qui a coûté le plus de tours : les tables `pf2_` ont été créées avec
+# RLS actif et ma migration ne contenait AUCUNE politique. Les écritures étaient
+# refusées (42501) alors que les lectures aboutissaient en renvoyant zéro ligne —
+# donc `existe()` répondait « la table est là » et l'échec n'apparaissait qu'au
+# premier INSERT.
+
+def test_chaque_table_a_une_politique_rls():
+    """Les 7 tables doivent avoir une politique, sinon l'écriture est refusée."""
+    policies = set(re.findall(r"create policy \w+ on (\w+)", SQL))
+    assert policies == set(SCHEMA), (
+        f"tables sans politique : {sorted(set(SCHEMA) - policies)} — "
+        f"l'écriture y sera refusée avec l'erreur 42501"
+    )
+
+
+def test_les_politiques_autorisent_l_ecriture():
+    """Une politique en lecture seule ne suffit pas : il faut `with check`."""
+    blocs = re.findall(
+        r"create policy \w+ on (\w+)\s+for all\s+to ([^;]+?)\s+using \(true\)"
+        r"\s+with check \(true\);",
+        SQL,
+        re.S,
+    )
+    trouvees = {t for t, _ in blocs}
+    assert trouvees == set(SCHEMA), (
+        f"politiques incomplètes : {sorted(set(SCHEMA) - trouvees)}"
+    )
+    for _table, roles in blocs:
+        assert "anon" in roles and "authenticated" in roles
+
+
+def test_rls_est_active_sur_chaque_table():
+    activees = set(re.findall(r"alter table (\w+) enable row level security", SQL))
+    assert activees == set(SCHEMA)
+
+
+def test_le_fichier_002_existe_et_est_complet():
+    """L'utilisateur doit pouvoir corler un seul fichier dans Supabase."""
+    chemin = RACINE / "migrations" / "002_rls.sql"
+    assert chemin.exists(), (
+        "002_rls.sql manquant : sans lui, l'utilisateur devrait relancer toute "
+        "la migration pour obtenir les politiques"
+    )
+    contenu = chemin.read_text(encoding="utf-8")
+    assert "create policy" in contenu
+    assert "drop policy if exists" in contenu   # idempotent
+    assert len(re.findall(r"create policy", contenu)) == 7
+
+
+def test_la_migration_principale_contient_aussi_les_politiques():
+    """Une installation neuve ne doit pas dépendre de 002 pour être complète."""
+    assert len(re.findall(r"create policy", SQL)) == 7
+
+
+def test_les_tables_v1_ne_sont_pas_touchees():
+    """Les politiques ne doivent porter que sur `pf2_`, pas sur les tables v1."""
+    policies = set(re.findall(r"create policy \w+ on (\w+)", SQL))
+    assert all(t.startswith("pf2_") for t in policies), policies
+
+
+# ---------------------------------------------------------------------------
+# Les clés écrites doivent correspondre EXACTEMENT au schéma
+# ---------------------------------------------------------------------------
+# `ajouter_alerte` écrivait `Date`, `Titre`, `Message`, `Niveau` là où la table
+# déclare `date`, `titre`, `message`, `niveau`. PostgreSQL replie les
+# identifiants non quotés, donc ça passait souvent — mais c'est fragile, et ça
+# cassait dès qu'une vue ou une politique intervenait.
+
+def test_ajouter_alerte_ecrit_les_colonnes_exactes(captures_ecriture, monkeypatch):
+    from core.db import ajouter_alerte
+
+    ajouter_alerte("Titre de test", "Message de test", niveau="attention")
+
+    table, lignes = captures_ecriture[0]
+    assert table == "pf2_alertes"
+    ligne = lignes[0]
+    assert set(ligne) <= SCHEMA[table], (
+        f"colonnes inconnues : {sorted(set(ligne) - SCHEMA[table])}"
+    )
+    # Les trois champs métier, avec la casse du schéma.
+    assert ligne["titre"] == "Titre de test"
+    assert ligne["message"] == "Message de test"
+    assert ligne["niveau"] == "attention"
+
+
+def test_ajouter_alerte_ne_fournit_pas_la_date(captures_ecriture, monkeypatch):
+    """`date` est `timestamptz default now()` : l'horodatage appartient à la base."""
+    from core.db import ajouter_alerte
+
+    ajouter_alerte("T", "M")
+    _, lignes = captures_ecriture[0]
+    assert "date" not in lignes[0]
+    assert "Date" not in lignes[0]
+
+
+def test_ajouter_alerte_niveau_par_defaut(captures_ecriture, monkeypatch):
+    from core.db import ajouter_alerte
+
+    ajouter_alerte("T", "M")
+    _, lignes = captures_ecriture[0]
+    assert lignes[0]["niveau"] == "info"

@@ -163,3 +163,88 @@ def test_ecrire_liste_vide(client_supabase):
     db, captures = client_supabase
     assert db.ecrire(db.T_ALERTES, []) == 0
     assert captures == []
+
+
+# ---------------------------------------------------------------------------
+# Traduction des erreurs PostgREST
+# ---------------------------------------------------------------------------
+# Une table verrouillée par RLS se comporte comme une table VIDE en lecture :
+# `existe()` la déclare présente, et l'échec n'arrive qu'au premier INSERT.
+# D'où l'intérêt de dire à l'utilisateur quoi faire, plutôt que de lui montrer
+# un objet `APIError`.
+
+def _api_error(message, code):
+    from postgrest.exceptions import APIError
+    return APIError({"message": message, "code": code, "hint": None, "details": None})
+
+
+def test_erreur_rls_devient_un_message_actionnable():
+    from core.db import _traduire_erreur
+
+    exc = _api_error(
+        'new row violates row-level security policy for table "pf2_transactions"',
+        "42501",
+    )
+    res = _traduire_erreur("pf2_transactions", exc)
+
+    assert isinstance(res, PermissionError)
+    assert "Row Level Security" in str(res)
+    assert "002_rls.sql" in str(res)      # le mode d'emploi est dans le message
+    assert "SQL Editor" in str(res)
+
+
+def test_erreur_colonne_inconnue_est_expliquee():
+    from core.db import _traduire_erreur
+
+    exc = _api_error(
+        "Could not find the 'montant_net' column of 'pf2_transactions' "
+        "in the schema cache",
+        "PGRST204",
+    )
+    res = _traduire_erreur("pf2_transactions", exc)
+
+    assert isinstance(res, ValueError)
+    assert "montant_net" in str(res)
+    assert "001_init.sql" in str(res)
+
+
+def test_erreur_inconnue_est_lassee_telle_quelle():
+    """On ne masque pas une vraie panne réseau derrière un message rassurant."""
+    from core.db import _traduire_erreur
+
+    originale = _api_error("connection reset", "500")
+    assert _traduire_erreur("pf2_transactions", originale) is originale
+
+
+def test_erreur_sans_attribut_code_est_geree():
+    """Certaines exceptions n'ont ni `code` ni `message`."""
+    from core.db import _traduire_erreur
+
+    assert isinstance(_traduire_erreur("pf2_transactions", RuntimeError("boom")),
+                      RuntimeError)
+
+
+def test_remplacer_traduit_l_erreur_rls(client_supabase, monkeypatch):
+    """Le chemin complet : `remplacer()` doit lever `PermissionError`, pas APIError."""
+    db, _ = client_supabase
+
+    class FauxUpsert:
+        def execute(self):
+            raise _api_error(
+                'new row violates row-level security policy for table "pf2_transactions"',
+                "42501",
+            )
+
+    class FauxTable:
+        def upsert(self, *_a, **_k):
+            return FauxUpsert()
+
+    class FauxClient:
+        def table(self, _n):
+            return FauxTable()
+
+    monkeypatch.setattr(db, "client", lambda: FauxClient())
+
+    with pytest.raises(PermissionError, match="002_rls.sql"):
+        db.remplacer(db.T_TRANSACTIONS, [{"ticker": "ASML"}],
+                     on_conflict="ticker")

@@ -91,6 +91,70 @@ def reinitialiser() -> None:
 # Lecture / écriture générique
 # ---------------------------------------------------------------------------
 
+def _traduire_erreur(table: str, exc: Exception) -> Exception:
+    """Transforme une erreur PostgREST en message exploitable.
+
+    Le cas qui compte : `42501`, la violation de Row Level Security. Les tables
+    `pf2_` ont été créées avec RLS actif et, sans politique, PostgreSQL refuse
+    toute écriture avec la clé publique — alors que les lectures aboutissent en
+    renvoyant zéro ligne. Le contrôle d'existence concluait donc « la table est
+    là », et l'échec n'apparaissait qu'au premier INSERT, sous forme d'un objet
+    `APIError` que personne ne peut déchiffrer.
+
+    On renvoie une exception qui dit quoi faire. Le correctif est dans
+    `migrations/002_rls.sql`.
+    """
+    code = str(getattr(exc, "code", None) or "")
+    message = str(getattr(exc, "message", "") or exc)
+
+    if code == "42501" or "row-level security" in message:
+        return PermissionError(
+            f"Écriture refusée sur `{table}` par la sécurité de Supabase "
+            f"(Row Level Security).\n"
+            f"Vos tables existent et sont lisibles, mais aucune politique "
+            f"n'autorise l'écriture avec votre clé.\n"
+            f"Correctif : Supabase > SQL Editor > New query, collez le contenu "
+            f"de `migrations/002_rls.sql`, puis Run.\n"
+            f"(détail technique : {message})"
+        )
+    if code == "PGRST204" or "schema cache" in message:
+        return ValueError(
+            f"Colonne inconnue dans `{table}` : {message}\n"
+            f"Le code écrit une colonne que la table n'a pas. Vérifiez que "
+            f"`migrations/001_init.sql` a bien été exécuté en entier."
+        )
+    return exc
+
+
+def verifier_ecriture() -> None:
+    """Vérifie qu'une écriture est possible, AVANT de lancer l'opération.
+
+    Pourquoi un contrôle séparé : l'échec RLS est **muet en lecture**. Une table
+    verrouillée en écriture se comporte comme une table vide — le contrôle
+    d'existence la déclare présente, et la catastrophe n'arrive qu'au premier
+    INSERT, après des minutes de traitement.
+
+    On sonde donc `pf2_alertes`, la table la plus simple (tous ses champs ont
+    une valeur par défaut sauf titre et message), puis on supprime la sonde.
+    Si l'écriture est refusée, on lève tout de suite une erreur qui dit quoi
+    faire.
+    """
+    try:
+        rep = client().table(T_ALERTES).insert({
+            "titre": "Sonde d'écriture",
+            "message": "Ligne de contrôle, supprimée immédiatement.",
+        }).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_ALERTES, exc) from exc
+
+    for ligne in rep.data or []:
+        try:
+            client().table(T_ALERTES).delete().eq("id", ligne["id"]).execute()
+        except Exception:
+            # La sonde reste : sans importance, elle est inoffensive et visible.
+            log.warning("Sonde d'écriture non supprimée (id=%s).", ligne.get("id"))
+
+
 def lire(table: str) -> pd.DataFrame:
     """Lit une table entière."""
     rep = client().table(table).select("*").execute()
@@ -101,7 +165,10 @@ def ecrire(table: str, lignes: list[dict]) -> int:
     """Insère des lignes. Retourne le nombre inséré."""
     if not lignes:
         return 0
-    rep = client().table(table).insert(lignes).execute()
+    try:
+        rep = client().table(table).insert(lignes).execute()
+    except Exception as exc:
+        raise _traduire_erreur(table, exc) from exc
     return len(rep.data or [])
 
 
@@ -126,8 +193,11 @@ def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) ->
     """
     if not lignes:
         return
-    requete = client().table(table).upsert(lignes, on_conflict=on_conflict or "")
-    requete.execute()
+    try:
+        requete = client().table(table).upsert(lignes, on_conflict=on_conflict or "")
+        requete.execute()
+    except Exception as exc:
+        raise _traduire_erreur(table, exc) from exc
 
 
 def maj_ligne(table: str, id_ligne, champs: dict) -> None:
@@ -189,9 +259,20 @@ def ajouter_snapshot(ligne: dict) -> None:
 
 
 def ajouter_alerte(titre: str, message: str, niveau: str = "info") -> None:
+    """Écrit une alerte dans `pf2_alertes`.
+
+    CORRECTION : cette fonction écrivait `Date`, `Titre`, `Message`, `Niveau`
+    avec une majuscule, alors que la table déclare `date`, `titre`, `message`,
+    `niveau`. PostgreSQL replie les identifiants non quotés, donc ça passait
+    souvent — mais c'est fragile, incohérent avec le reste du code, et ça
+    cassait dès qu'une politique ou une vue intervenait.
+
+    On écrit donc les noms exacts du schéma. Et on ne fournit plus `date` : la
+    colonne est `timestamptz default now()`, l'horodatage appartient à la base,
+    pas au client.
+    """
     ecrire(T_ALERTES, [{
-        "Date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Titre": titre,
-        "Message": message,
-        "Niveau": niveau,
+        "titre": titre,
+        "message": message,
+        "niveau": niveau,
     }])

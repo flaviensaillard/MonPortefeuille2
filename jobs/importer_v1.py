@@ -223,6 +223,15 @@ def main() -> int:
             log.error("Table v1 '%s' introuvable.", table)
             return 1
 
+    # Contrôle d'écriture AVANT de traiter quoi que ce soit. Une table
+    # verrouillée par RLS se comporte comme une table vide en lecture : sans
+    # cette sonde, l'échec n'apparaîtrait qu'au premier INSERT.
+    try:
+        db.verifier_ecriture()
+    except PermissionError as exc:
+        log.error("%s", exc)
+        return 1
+
     log.info("=== Import des transactions ===")
     importer_transactions(dry_run=args.dry_run)
     log.info("=== Import des apports ===")
