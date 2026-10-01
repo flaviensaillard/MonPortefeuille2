@@ -239,9 +239,36 @@ def apports() -> pd.DataFrame:
 
 
 def snapshots() -> pd.DataFrame:
+    """Lit `pf2_snapshots`, colonne de date renommee en `Date`.
+
+    La table stocke `date` en snake_case (voyez migrations/001_init.sql) ; les
+    pages, elles, lisent `Date` — comme pour les transactions, ou
+    `ALIAS_COLONNES` fait le meme pont. Sans ce renommage, la PREMIERE ligne de
+    `pf2_snapshots` faisait sauter toute l'application avec `KeyError: 'Date'`.
+
+    Le defaut est reste invisible des mois parce que la table etait vide : le
+    `if df.empty` court-circuitait avant la ligne fautive. Il a surgi le jour ou
+    la reconstitution de l'historique a enfin ecrit des lignes. Un garde-fou
+    contre une table vide ne prouve rien sur une table pleine.
+    """
     df = lire(T_SNAPSHOTS)
     if df.empty:
         return df
+
+    # La colonne de date s'appelle `date` dans le schéma pf2, mais `Date` dans
+    # un import v1. On accepte les deux. Si elle n'a aucun des deux noms, on le
+    # DIT au lieu de laisser un `KeyError: 'Date'` muet : l'utilisateur ne peut
+    # pas corriger ce qu'il ne peut pas voir.
+    colonne = next((c for c in ("Date", "date") if c in df.columns), None)
+    if colonne is None:
+        raise ValueError(
+            "La table pf2_snapshots n'a aucune colonne de date. Colonnes "
+            f"trouvées : {', '.join(map(str, df.columns))}. Exécutez "
+            "migrations/001_init.sql dans Supabase."
+        )
+    if colonne != "Date":
+        df = df.rename(columns={colonne: "Date"})
+
     df["Date_DT"] = dates.parser(df["Date"])
     return df.dropna(subset=["Date_DT"]).sort_values("Date_DT").reset_index(drop=True)
 

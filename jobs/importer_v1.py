@@ -382,6 +382,126 @@ def importer_apports(dry_run: bool = False) -> int:
     return len(lignes)
 
 
+
+# ---------------------------------------------------------------------------
+# Historique mensuel de la v1 -> pf2_snapshots
+# ---------------------------------------------------------------------------
+# La table `Historique` de la v1 porte deux choses dans la meme table : les
+# mouvements de tresorerie (colonne `Type` = « Ajout » / « Retrait »), que
+# `importer_apports` traite, et les valuations mensuelles. Ces dernieres
+# n'avaient aucune destination : seuls les snapshots quotidiens du robot
+# remplissaient `pf2_snapshots`, un soir a la fois.
+#
+# Consequence : un portefeuille suivi depuis 2023 dans la v1 repartait de zero
+# cote graphiques. Ces 180 lignes mensuelles sont trois ans et demi d'histoire,
+# et elles existent deja — il suffisait de les prendre.
+#
+# Ce qui N'est PAS importe : les colonnes de performance (`Score TWR %`,
+# `Evolution cumulee %`...). pf2 calcule le TWR a la demande depuis les
+# snapshots, il ne le stocke jamais. C'est le principe meme de
+# `jobs/daily_snapshot.py` : une seule source de verite, impossible a
+# desynchroniser.
+ALIAS_SNAPSHOT = {
+    "Date": "date",
+    "Actifs Stratégiques": "patrimoine_investi_eur",
+    "Actifs Strategiques": "patrimoine_investi_eur",
+    "Total Global": "patrimoine_total_eur",
+}
+
+
+def _nombre(valeur) -> float | None:
+    try:
+        if valeur is None or pd.isna(valeur):
+            return None
+        return float(valeur)
+    except (TypeError, ValueError):
+        return None
+
+
+def importer_snapshots(dry_run: bool = False) -> int:
+    """Importe les valuations mensuelles de la v1 dans `pf2_snapshots`."""
+    df = lire_v1(V1_HISTORIQUE)
+    if df.empty:
+        log.info("Aucun historique à importer.")
+        return 0
+
+    # On ne garde que les lignes de valorisation. Une ligne de tresorerie porte
+    # un `Type` (« Ajout » / « Retrait ») ; une valuation n'en porte aucun.
+    #
+    # PIEGE : `df["Type"].astype(str)` transforme un absent en la CHAINE "nan".
+    # Exclure "nan" jetait donc aussi toutes les valuations — c'est-a-dire
+    # l'integralite de l'historique. On teste donc l'absence avec `notna()`,
+    # jamais par la valeur que donne `astype(str)`.
+    if "Type" in df.columns:
+        types = df["Type"].astype(str).str.strip().str.lower()
+        tresorerie = df["Type"].notna() & types.isin(("ajout", "retrait", "apport"))
+        df = df[~tresorerie]
+
+    lignes = []
+    for _, r in df.iterrows():
+        d = parser(r.get("Date"))
+        if pd.isna(d):
+            continue
+        date_iso = d.date().isoformat()
+
+        investi = _nombre(r.get("Actifs Stratégiques"))
+        total = _nombre(r.get("Total Global"))
+        if investi is None and total is None:
+            continue          # ni valorisation ni tresorerie exploitable
+        if investi is None:
+            investi = total
+        if total is None:
+            total = investi
+
+        ligne = {
+            "date": date_iso,
+            "patrimoine_total_eur": round(total, 2),
+            "patrimoine_investi_eur": round(investi, 2),
+            # La v1 ne distingue pas epargne de precaution et compte courant :
+            # tout l'ecart va dans la precaution, et on le dit.
+            "precaution_eur": round(max(total - investi, 0.0), 2),
+            "courant_eur": 0.0,
+            # La repartition par poche n'existe pas dans la v1 : on laisse NULL
+            # plutot que d'inventer. La courbe d'allocation ignorera ces lignes.
+        }
+        lignes.append(ligne)
+
+    if not lignes:
+        log.info("Aucune valuation mensuelle trouvée dans %s.", V1_HISTORIQUE)
+        return 0
+
+    # `pf2_snapshots` a une contrainte d'unicite sur `date`, mais deux lignes de
+    # meme date dans le lot la feraient echouer quand meme. On deduplique, et
+    # on DIT ce qu'on ecarte : la v1 peut porter deux valuations le meme jour
+    # (une saisie, puis une re-saisie), et choisir a votre place serait inventer.
+    lignes, doublons = _dedupliquer(lignes, cle=("date",), fusionner=False)
+    for d in doublons:
+        log.warning("  - %s", d)
+
+    if dry_run:
+        log.info(
+            "[dry-run] %d snapshots seraient importés (%s -> %s).",
+            len(lignes), lignes[0]["date"], lignes[-1]["date"],
+        )
+        return len(lignes)
+
+    # Idempotence : `pf2_snapshots` a une contrainte d'unicite sur `date`, donc
+    # l'upsert met a jour au lieu de dupliquer. Relancer l'import est sans risque.
+    ecrits = 0
+    for ligne in lignes:
+        try:
+            db.ajouter_snapshot(ligne)
+            ecrits += 1
+        except Exception as exc:
+            log.error("%s : écriture échouée (%s)", ligne["date"], exc)
+            raise
+    log.info(
+        "%d snapshots importés (%s -> %s).",
+        ecrits, lignes[0]["date"], lignes[-1]["date"],
+    )
+    return ecrits
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Import des données de la v1 vers la v2.")
     ap.add_argument("--dry-run", action="store_true",
@@ -411,6 +531,8 @@ def main() -> int:
     importer_transactions(dry_run=args.dry_run)
     log.info("=== Import des apports ===")
     importer_apports(dry_run=args.dry_run)
+    log.info("=== Import de l'historique mensuel ===")
+    importer_snapshots(dry_run=args.dry_run)
     return 0
 
 

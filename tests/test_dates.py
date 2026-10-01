@@ -307,3 +307,25 @@ class TestLesDeuxEcrituresDonnentLeMemeJour:
     @pytest.mark.parametrize("valeur", ["", None, float("nan"), "abc", "2025-13-45"])
     def test_valeurs_illisibles(self, valeur):
         assert pd.isna(dates.parser(valeur))
+
+
+class TestDateAvecHeure:
+    """La v1 écrit parfois une date AVEC son heure.
+
+    `11/05/2026 12:38:33` doit donner le 11 mai 2026. Imposer `%d/%m/%Y` sur la
+    chaîne entière échoue, et la journée serait perdue en silence — 180 lignes
+    d'historique en comptaient une exactement comme ça.
+    """
+
+    @pytest.mark.parametrize("valeur, attendu", [
+        ("11/05/2026 12:38:33", "2026-05-11"),
+        ("11/05/2026 00:00:00", "2026-05-11"),
+        ("01/07/2025 23:59:59", "2025-07-01"),
+        ("2025-07-01 12:38:33", "2025-07-01"),
+        ("2025-07-01T12:38:33+00:00", "2025-07-01"),
+    ])
+    def test_l_heure_est_ignoree(self, valeur, attendu):
+        assert dates.parser(valeur).date().isoformat() == attendu
+
+    def test_date_sans_heure_inchangee(self):
+        assert dates.parser("01/07/2025").date().isoformat() == "2025-07-01"

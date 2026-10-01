@@ -78,7 +78,11 @@ def _parser_un(valeur, erreurs: str = "coerce"):
 
     # Ecriture de la v1 : jour puis mois. `dayfirst` reste la par securite pour
     # les formes que `%d/%m/%Y` ne couvrirait pas, mais le format est impose.
-    return pd.to_datetime(texte, format="%d/%m/%Y", errors=erreurs, dayfirst=True)
+    # La v1 ecrit parfois une date AVEC son heure : `11/05/2026 12:38:33`.
+    # Imposer `%d/%m/%Y` sur la chaine entiere echoue, et la journee serait
+    # perdue. On ne garde donc que la partie date.
+    partie_date = texte.split(" ")[0].split("T")[0]
+    return pd.to_datetime(partie_date, format="%d/%m/%Y", errors=erreurs, dayfirst=True)
 
 
 def parser(valeur, erreurs: str = "coerce"):
