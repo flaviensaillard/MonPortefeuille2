@@ -29,12 +29,10 @@ import pandas as pd
 import streamlit as st
 
 from core import fiscal_bars as fb
-from core import session as S
-from core import tax
+from core import session as S, tax
 from core import dates
 from core import ui
 from core.models import Classe
-from core.portfolio import classe_de
 
 st.set_page_config(page_title="Fiscalité", page_icon="🏛️", layout="wide")
 st.title("🏛️ Fiscalité")
@@ -72,23 +70,8 @@ st.caption(f"Barème {annee} — source : {fb.source_de(annee)}")
 # ---------------------------------------------------------------------------
 # Reconstituer les cessions de l'année depuis les transactions
 # ---------------------------------------------------------------------------
-cessions: dict[Classe, list[dict]] = {}
+cessions = tax.cessions_de_lannee(ctx.transactions, ctx.positions, annee)
 
-for t in ctx.transactions:
-    if not t.est_vente or t.date.year != annee:
-        continue
-    classe = classe_de(t.ticker)
-    pos = ctx.positions.get(t.ticker)
-    pru = pos.pru_eur if pos else 0.0
-    ligne = {
-        "actif": t.ticker,
-        "date": t.date,
-        "quantite": t.quantite,
-        "pru_eur": pru,
-        "prix_cession_eur": t.montant_net,
-        "sens": "vente",
-    }
-    cessions.setdefault(classe, []).append(ligne)
 
 if not any(cessions.values()):
     st.info(
@@ -100,7 +83,14 @@ if not any(cessions.values()):
 # ---------------------------------------------------------------------------
 # Calcul par régime
 # ---------------------------------------------------------------------------
-resultat = tax.calculer(cessions, annee, autres_revenus, parts, statut)
+anomalies: list[str] = []
+resultat = tax.calculer(cessions, annee, autres_revenus, parts, statut, anomalies)
+
+if anomalies:
+    st.warning(
+        "**Calcul incomplet.** " + " ".join(anomalies) +
+        " Le chiffre affiché ne porte donc pas sur toutes vos cessions."
+    )
 
 st.divider()
 st.subheader(f"Résultat pour {annee}")
@@ -112,7 +102,7 @@ for r in resultat["regimes"]:
         c1.metric("Plus-value brute", ui.eur(r.get("pv_brute", 0.0)))
         if "abattement" in r:
             c2.metric("Abattement", ui.eur(r["abattement"]),
-                      aide="305 € pour les actifs numériques (art. 150 VH bis).")
+                      help="305 € pour les actifs numériques (art. 150 VH bis).")
         else:
             c2.metric("Cessions", r.get("nb_cessions", 0))
         c3.metric("Impôt dû", ui.eur(r.get("total_du", 0.0)))
@@ -137,7 +127,7 @@ if "comparaison" in resultat:
         st.metric("IR marginal", ui.eur(comp["bareme"]["ir_marginal"]))
         st.metric("Prélèvements sociaux", ui.eur(comp["bareme"]["ps"]))
         st.metric("CSG déductible", ui.eur(-comp["bareme"]["csg_deductible"]),
-                  aide="6,8 % de la CSG viennent en déduction du revenu imposable.")
+                  help="6,8 % de la CSG viennent en déduction du revenu imposable.")
         st.metric("Total", ui.eur(comp["bareme"]["total"]))
 
     if comp["choix"] == "Barème progressif":

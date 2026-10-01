@@ -234,7 +234,8 @@ def pv_titres(lignes: list[dict], annee: int) -> ResultatFiscal:
 # Régime 150 VH bis — actifs numériques (crypto), calcul global
 # ===========================================================================
 
-def pv_crypto(lignes: list[dict], annee: int) -> ResultatFiscal:
+def pv_crypto(lignes: list[dict], annee: int,
+              anomalies: list[str] | None = None) -> ResultatFiscal:
     """Plus-values d'actifs numériques, méthode du calcul global.
 
     Formulaires 2086-SD. Pour chaque cession de l'année :
@@ -265,12 +266,22 @@ def pv_crypto(lignes: list[dict], annee: int) -> ResultatFiscal:
         valeur_globale = float(l.get("valeur_globale_eur", 0.0))
         # Garde-fou explicite : la v1 forçait valeur_globale = prix_cession quand
         # le calcul donnait moins, ce qui masquait les prix historiques manquants.
+        #
+        # Lever une exception ici faisait sauter toute la page Fiscalité pour une
+        # seule cession. On garde la même exigence — pas de chiffre approximatif —
+        # mais on la consigne dans `anomalies` quand l'appelant en fournit une,
+        # comme pour `calculer_positions`. Sans liste, on lève toujours : les
+        # robots, eux, doivent s'arrêter.
         if valeur_globale <= 0:
-            raise ValueError(
+            message = (
                 f"Valeur globale du portefeuille crypto indisponible au {d}. "
                 "Impossible de calculer la fraction du capital. "
                 "Renseignez le prix de chaque actif détenu à cette date."
             )
+            if anomalies is None:
+                raise ValueError(message)
+            anomalies.append(message)
+            continue
 
         ligne_220 = float(l["cout_total_acquisition_eur"])
         ligne_221 = float(l.get("fractions_deja_prises", 0.0))
@@ -433,9 +444,124 @@ def comparer_pfu_bareme(
 # Point d'entrée
 # ===========================================================================
 
+def cessions_de_lannee(
+    transactions: list["Transaction"],
+    positions: dict[str, "Position"],
+    annee: int,
+) -> dict[Classe, list[dict]]:
+    """Cessions de l'année, au format attendu par `calculer`.
+
+    CORRECTION : `prix_cession_eur` était rempli avec `t.montant_net`, qui est
+    dans la devise de COTATION — dollars pour FLXC.L et BTCUSDT, yen pour
+    XJSE.SW. Le PRU, lui, est en euros. La plus-value mélangeait donc deux
+    monnaies, et était fausse pour tout actif non coté en euro. Chaque ligne est
+    désormais convertie à sa date avec le taux de change réel.
+    """
+    from . import fx
+    from .portfolio import classe_de
+
+    cessions: dict[Classe, list[dict]] = {}
+    for t in transactions:
+        if not t.est_vente or t.date.year != annee:
+            continue
+        classe = classe_de(t.ticker)
+        pos = positions.get(t.ticker)
+        try:
+            montant_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
+        except fx.FXIndisponible:
+            # Pas de taux à cette date : on garde le montant brut plutôt que
+            # d'inventer une conversion. La plus-value sera fausse, mais au moins
+            # elle ne sera pas faussement précise.
+            montant_eur = t.montant_net
+        cessions.setdefault(classe, []).append({
+            "actif": t.ticker,
+            "date": t.date,
+            "quantite": t.quantite,
+            "pru_eur": pos.pru_eur if pos else 0.0,
+            "prix_cession_eur": montant_eur,
+            "sens": "vente",
+        })
+
+    crypto = cessions.get(Classe.CRYPTO)
+    if crypto:
+        enrichir_crypto(crypto, transactions)
+    return cessions
+
+
+def enrichir_crypto(lignes: list[dict], transactions: list["Transaction"]) -> None:
+    """Complète les cessions crypto des trois chiffres de l'article 150 VH bis.
+
+    La plus-value d'une cession de biens numériques ne se calcule **pas** actif
+    par actif : on fractionne le capital d'acquisition du portefeuille ENTIER au
+    prorata de la valeur cédée (formulaire 2086-SD, lignes 212 à 224). D'où :
+
+      - ligne 212 `valeur_globale_eur` : valeur de **tout** le portefeuille
+        crypto détenu au moment de la cession ;
+      - ligne 220 `cout_total_acquisition_eur` : prix total d'acquisition de ce
+        même portefeuille ;
+      - ligne 221 `fractions_deja_prises` : fractions du capital déjà déduites
+        lors de cessions antérieures.
+
+    Ces trois grandeurs sont au niveau du portefeuille, jamais de la ligne :
+    c'est pourquoi elles ne peuvent pas venir de la transaction elle-même. La
+    version précédente ne les fournissait pas, `pv_crypto` les lisait donc à zéro
+    et son garde-fou faisait sauter la page entière.
+    """
+    from . import fx, prices
+    from .portfolio import calculer_positions, classe_de
+
+    crypto = sorted(
+        (t for t in transactions if classe_de(t.ticker) is Classe.CRYPTO),
+        key=lambda t: t.date,
+    )
+    fractions_prises = 0.0
+
+    for l in sorted(lignes, key=lambda x: x["date"]):
+        d = l["date"]
+        iso = d.isoformat()
+
+        # Positions détenues à la date de cession : tout ce qui précède, d compris.
+        positions = calculer_positions(
+            [t for t in crypto if t.date <= d], anomalies=[]
+        )
+
+        # ligne 220 — coût d'acquisition du portefeuille crypto
+        cout_total = sum(p.cout_total_eur for p in positions.values())
+
+        # ligne 212 — valeur globale du portefeuille crypto à la date de cession
+        valeur_globale = 0.0
+        manquants: list[str] = []
+        for p in positions.values():
+            if p.quantite <= 0:
+                continue
+            try:
+                prix = prices.cours(p.ticker, iso)
+                taux = fx.taux(p.devise_cotation, iso, "EUR")
+            except (prices.CoursIndisponible, fx.FXIndisponible):
+                manquants.append(f"{p.ticker} au {d:%d/%m/%Y}")
+                continue
+            valeur_globale += p.quantite * prix * taux
+
+        # Un prix manquant rend la fraction fausse. On remet à zéro plutôt que de
+        # livrer un chiffre approximatif : le garde-fou de `pv_crypto` le dira.
+        if manquants:
+            valeur_globale = 0.0
+
+        l["valeur_globale_eur"] = valeur_globale
+        l["cout_total_acquisition_eur"] = cout_total
+        l["fractions_deja_prises"] = fractions_prises
+
+        # Fraction consommée par cette cession, répercutée sur les suivantes.
+        if valeur_globale > 0 and cout_total > 0:
+            ligne_222 = max(0.0, cout_total - fractions_prises)
+            ligne_223 = ligne_222 * (l["prix_cession_eur"] / valeur_globale)
+            fractions_prises += ligne_223
+
+
 def calculer(transactions_par_classe: dict[Classe, list[dict]], annee: int,
-             autres_revenus: float = 0.0, parts: float = 2.0,
-             statut: str = "Marié(e) / Pacsé(e)") -> dict:
+             autres_revenus: float = 0.0, parts: float = 1.0,
+             statut: str = "Célibataire",
+             anomalies: list[str] | None = None) -> dict:
     """Calcule l'ensemble des régimes pour une année d'imposition."""
     resultats: dict = {"annee": annee, "regimes": []}
 
@@ -455,7 +581,7 @@ def calculer(transactions_par_classe: dict[Classe, list[dict]], annee: int,
         resultats["pv_titres"] = r
 
     if Classe.CRYPTO in transactions_par_classe:
-        r = pv_crypto(transactions_par_classe[Classe.CRYPTO], annee)
+        r = pv_crypto(transactions_par_classe[Classe.CRYPTO], annee, anomalies)
         resultats["regimes"].append({
             "regime": r.regime,
             "pv_brute": r.plus_value_brute,

@@ -77,11 +77,11 @@ st.subheader("Ce que la stratégie a produit")
 
 c1, c2, c3 = st.columns(3)
 c1.metric("TWR cumulé", ui.pct(twr_total, signe=True),
-          aide="Time-Weighted Return : neutralise l'effet de vos apports.")
+          help="Time-Weighted Return : neutralise l'effet de vos apports.")
 c2.metric("TWR annualisé", ui.pct(twr_ann, signe=True),
-          aide=f"Sur {jours} jours ({jours / 365.25:.1f} ans).")
+          help=f"Sur {jours} jours ({jours / 365.25:.1f} ans).")
 c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements), signe=True),
-          aide="Écart-type des rendements de sous-période annualisé.")
+          help="Écart-type des rendements de sous-période annualisé.")
 
 # ---------------------------------------------------------------------------
 # Les trois lectures de la même performance
@@ -118,9 +118,9 @@ if "equivalent_or_oz" in snaps.columns and snaps["equivalent_or_oz"].notna().all
 d1, d2, d3 = st.columns(3)
 d1.metric("En euros", ui.pct(perf_eur, signe=True))
 d2.metric("En euros réels", ui.pct(perf_reel, signe=True) if perf_reel is not None else "—",
-          aide="Déflaté par l'inflation officielle.")
+          help="Déflaté par l'inflation officielle.")
 d3.metric("En onces d'or", ui.pct(perf_or, signe=True) if perf_or is not None else "—",
-          aide="L'étalon de Gave.")
+          help="L'étalon de Gave.")
 
 if perf_or is not None and perf_or < perf_eur:
     st.warning(
@@ -147,10 +147,10 @@ for i, d in enumerate(snaps["Date"]):
 taux_irr = metrics.irr(flux_irr)
 c1, c2 = st.columns(2)
 c1.metric("IRR (rendement pondéré)", ui.pct(taux_irr, signe=True) if taux_irr is not None else "—",
-          aide="Tient compte de votre calendrier d'apports réel.")
+          help="Tient compte de votre calendrier d'apports réel.")
 c2.metric("Écart TWR / IRR",
           ui.points((taux_irr - twr_ann) * 100, 2) if taux_irr is not None else "—",
-          aide="Positif : vos apports ont été bien placés. Négatif : vous avez "
+          help="Positif : vos apports ont été bien placés. Négatif : vous avez "
                "alimenté le portefeuille au mauvais moment.")
 
 # ---------------------------------------------------------------------------

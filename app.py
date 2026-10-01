@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pandas as pd
 import streamlit as st
 
 from core import prices
@@ -41,6 +42,12 @@ ui.bandeau_erreurs(ctx.echecs_fx, "taux de change")
 # Transactions incohérentes : on prévient sans bloquer. Une ligne douteuse ne
 # doit pas vous priver de la vue d'ensemble de votre patrimoine.
 if ctx.anomalies_transactions:
+    # Tickers concernés, déduits des messages. Une vente sans position ne dit pas
+    # ce qui manque : montrer les lignes du titre permet de le voir tout de suite.
+    tickers_concernes = sorted({
+        mot for a in ctx.anomalies_transactions for mot in a.split()
+        if any(mot == t.ticker for t in ctx.transactions)
+    })
     with st.expander(
         f"⚠️ {len(ctx.anomalies_transactions)} transaction(s) incohérente(s) "
         f"dans vos données", expanded=True
@@ -53,6 +60,30 @@ if ctx.anomalies_transactions:
         for a in ctx.anomalies_transactions:
             st.markdown(f"- {a}")
 
+        if tickers_concernes:
+            st.markdown("---")
+            st.markdown(
+                "**Ce que contient votre base pour ce(s) titre(s).** "
+                "Une vente ne peut aboutir que si un achat la précède, et en "
+                "quantité suffisante. Comparez les dates."
+            )
+            detail = pd.DataFrame([{
+                "Ticker": t.ticker,
+                "Sens": t.type,
+                "Date": t.date.strftime("%d/%m/%Y"),
+                "Quantité": t.quantite,
+                "Cours": t.cours,
+                "Devise": t.devise,
+            } for t in sorted(
+                (t for t in ctx.transactions if t.ticker in tickers_concernes),
+                key=lambda t: (t.date, 0 if t.est_achat else 1),
+            )])
+            st.dataframe(detail, hide_index=True, width="stretch")
+            st.caption(
+                "Trié par date, achats avant ventes. Si un achat apparaît après "
+                "une vente, c'est la date qu'il faut corriger dans la v1."
+            )
+
 if ctx.erreurs:
     st.stop()
 
@@ -63,13 +94,13 @@ st.caption(f"Au {dt.date.today().strftime('%d/%m/%Y')}")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Patrimoine total", ui.eur(ctx.patrimoine_total_eur),
-          aide="Investi + épargne de précaution + compte courant.")
+          help="Investi + épargne de précaution + compte courant.")
 c2.metric("Portefeuille investi", ui.eur(ctx.total_investi_eur),
-          aide="Seul montant soumis à l'allocation cible.")
+          help="Seul montant soumis à l'allocation cible.")
 c3.metric("Épargne de précaution", ui.eur(ctx.total_precaution_eur),
-          aide="Livret CHF, disponible en 5 minutes. Jamais rééquilibrée.")
+          help="Livret CHF, disponible en 5 minutes. Jamais rééquilibrée.")
 c4.metric("Compte courant", ui.eur(ctx.total_courant_eur),
-          aide="Revolut. Hors portefeuille d'investissement.")
+          help="Revolut. Hors portefeuille d'investissement.")
 
 # ---------------------------------------------------------------------------
 # L'étalon de Gave
@@ -80,13 +111,13 @@ st.subheader("🪙 La mesure qui compte", help="Performance exprimée en onces d
 g1, g2, g3 = st.columns(3)
 if ctx.cours_or:
     g1.metric("Cours de l'or", f"{ctx.cours_or:,.0f} $/oz",
-              aide=f"Contrat à terme {prices.TICKER_OR} (COMEX) : Yahoo ne fournit plus le spot.")
+              help=f"Contrat à terme {prices.TICKER_OR} (COMEX) : Yahoo ne fournit plus le spot.")
 else:
     g1.metric("Cours de l'or", "—")
 
 if ctx.equivalent_or_oz is not None:
     g2.metric("Portefeuille investi en or", f"{ctx.equivalent_or_oz:,.2f} oz",
-              aide="Combien d'onces d'or votre portefeuille investi achète aujourd'hui.")
+              help="Combien d'onces d'or votre portefeuille investi achète aujourd'hui.")
 else:
     g2.metric("Portefeuille investi en or", "—")
 
@@ -105,7 +136,7 @@ if perf_or is not None:
 elif perf_eur is not None:
     g3.metric("Performance en euros", ui.pct(perf_eur, signe=True))
 else:
-    g3.metric("Performance", "—", aide="Aucun snapshot enregistré.")
+    g3.metric("Performance", "—", help="Aucun snapshot enregistré.")
 
 if perf_or is not None and perf_or < 0:
     st.warning(
@@ -133,7 +164,7 @@ for e in ctx.ecarts:
     })
 
 if lignes:
-    df = ui.tableau(__import__("pandas").DataFrame(lignes))
+    df = ui.tableau(pd.DataFrame(lignes))
 
     hors = ctx.besoins_reequilibrage
     if hors:
