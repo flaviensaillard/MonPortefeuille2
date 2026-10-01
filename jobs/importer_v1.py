@@ -39,6 +39,70 @@ def lire_v1(table: str) -> pd.DataFrame:
     return pd.DataFrame(rep.data or [])
 
 
+def _dedupliquer(
+    lignes: list[dict],
+    cle: tuple[str, ...] = ("ticker", "sens", "date", "quantite", "cours"),
+) -> tuple[list[dict], list[str]]:
+    """Retire les lignes qui partagent la clé de conflit de `pf2_transactions`.
+
+    Pourquoi c'est nécessaire : `remplacer()` fait un upsert unique. Si le lot
+    contient deux lignes de même (ticker, sens, date, quantite, cours),
+    PostgreSQL devrait mettre à jour la même ligne cible deux fois dans la même
+    commande, et il refuse — `21000 ON CONFLICT DO UPDATE command cannot affect
+    row a second time`. Tout l'import échoue, pas seulement la ligne fautive.
+
+    Comment on traite chaque doublon :
+    - lignes rigoureusement identiques (seule la `reference` diffère, car elle
+      vient de l'identifiant v1) : c'est une double saisie, on en garde une.
+    - lignes qui divergent sur `frais` ou `devise` : on garde la première et on
+      le dit haut et fort, parce que ce n'est plus une simple double saisie et
+      que choisir à votre place serait inventer une donnée.
+
+    Retourne `(lignes_dédoublonnées, messages)`.
+
+    `cle` désigne les champs qui définissent l'identité d'une ligne. Pour
+    `pf2_transactions`, c'est la clé de l'index unique. Pour `pf2_apports`, qui
+    n'a aucun index unique, c'est nous qui la fixons — sans quoi un doublon
+    serait inséré sans bruit et gonflerait vos apports de capital.
+    """
+    CLE = cle
+    vues: dict[tuple, dict] = {}
+    messages: list[str] = []
+    resultat: list[dict] = []
+
+    for ligne in lignes:
+        cle_ligne = tuple(ligne.get(c) for c in CLE)
+        if cle_ligne not in vues:
+            vues[cle_ligne] = ligne
+            resultat.append(ligne)
+            continue
+
+        premiere = vues[cle_ligne]
+        divergentes = [
+            champ
+            for champ in ("frais", "devise", "montant_eur")
+            if champ in ligne and champ in premiere
+            and ligne.get(champ) != premiere.get(champ)
+        ]
+        etiquette = ligne.get("ticker") or ligne.get("compte") or "?"
+        if divergentes:
+            messages.append(
+                f"{etiquette} {ligne.get('date')} : DOUBLON À DONNÉES "
+                f"DIVERGENTES ({', '.join(divergentes)}) — "
+                f"{premiere.get('reference')} conservé, "
+                f"{ligne.get('reference')} écarté. "
+                f"À VÉRIFIER DANS VOTRE RELEVÉ."
+            )
+        else:
+            messages.append(
+                f"{etiquette} {ligne.get('date')} : ligne en double dans "
+                f"la v1 ({premiere.get('reference')} et "
+                f"{ligne.get('reference')}) — une seule conservée."
+            )
+
+    return resultat, messages
+
+
 def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
     """Importe les transactions v1, en normalisant les devises."""
     df = lire_v1(V1_TRANSACTIONS)
@@ -129,6 +193,21 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
             "reference": f"v1:id{r.get('id')}",
         })
 
+    # --- Dédoublonnage --------------------------------------------------------
+    # La clé de conflit de `pf2_transactions` est (ticker, sens, date, quantite,
+    # cours). Si le lot envoyé contient deux lignes qui partagent cette clé,
+    # PostgreSQL refuse tout le lot :
+    #
+    #     21000  ON CONFLICT DO UPDATE command cannot affect row a second time
+    #
+    # C'est ce qui arrive quand la v1 contient une transaction saisie deux fois.
+    # On ne peut pas « laisser faire » : l'import entier échoue. On ne peut pas
+    # non plus fusionner silencieusement deux lignes qui diffèrent — ce serait
+    # inventer une donnée. On conserve la première, on signale, et c'est à vous
+    # de trancher sur votre relevé.
+    lignes, doublons = _dedupliquer(lignes)
+    corrections.extend(doublons)
+
     if corrections:
         log.warning("%d ligne(s) à vérifier :", len(corrections))
         for c in corrections:
@@ -190,6 +269,15 @@ def importer_apports(dry_run: bool = False) -> int:
             "compte": "import_v1",
             "reference": f"v1:id{r.get('id')}",
         })
+
+    # Meme traitement que pour les transactions : `pf2_apports` n'a aucun index
+    # unique, donc un doublon de la v1 serait insere sans bruit — et viendrait
+    # gonfler vos apports de capital, donc fausser la performance.
+    lignes, doublons_apports = _dedupliquer(
+        lignes, cle=("date", "sens", "montant_eur", "compte")
+    )
+    for d in doublons_apports:
+        log.warning("  - %s", d)
 
     if dry_run:
         log.info("[dry-run] %d apports seraient importés.", len(lignes))
