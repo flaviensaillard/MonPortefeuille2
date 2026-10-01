@@ -31,6 +31,7 @@ import streamlit as st
 from core import fiscal_bars as fb
 from core import session as S
 from core import tax
+from core import dates
 from core import ui
 from core.models import Classe
 from core.portfolio import classe_de
@@ -210,7 +211,7 @@ vigilance = []
 
 if not ctx.snapshots.empty:
     snaps = ctx.snapshots.copy()
-    snaps["Date"] = pd.to_datetime(snaps["Date"], dayfirst=True, errors="coerce")
+    snaps["Date"] = dates.parser(snaps["Date"])
     snaps = snaps.dropna(subset=["Date"]).sort_values("Date")
     if len(snaps) >= 2:
         jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days

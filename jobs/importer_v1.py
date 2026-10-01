@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import db  # noqa: E402
 from core.portfolio import DEVISES_COTATION  # noqa: E402
+from core.dates import parser
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("import")
@@ -171,7 +172,7 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
             )
             continue
 
-        d = pd.to_datetime(row_date, dayfirst=True, errors="coerce", format="mixed")
+        d = parser(row_date)
         if pd.isna(d):
             corrections.append(f"{ticker} : date illisible ({r['Date']!r}), ignoré")
             continue
@@ -249,7 +250,7 @@ def importer_apports(dry_run: bool = False) -> int:
         if sens is None:
             continue
 
-        d = pd.to_datetime(r["Date"], dayfirst=True, errors="coerce")
+        d = parser(r["Date"])
         if pd.isna(d):
             continue
 

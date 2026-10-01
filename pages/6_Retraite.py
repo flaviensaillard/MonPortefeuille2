@@ -29,6 +29,7 @@ import pandas as pd
 import streamlit as st
 
 from core import metrics, session as S
+from core import dates
 from core import ui
 
 st.set_page_config(page_title="Retraite", page_icon="🌴", layout="wide")
@@ -63,7 +64,7 @@ taux_pv = c3.number_input(
 perf_hist = None
 if not ctx.snapshots.empty and len(ctx.snapshots) >= 2:
     snaps = ctx.snapshots.copy()
-    snaps["Date"] = pd.to_datetime(snaps["Date"], dayfirst=True, errors="coerce")
+    snaps["Date"] = dates.parser(snaps["Date"])
     snaps = snaps.dropna(subset=["Date"]).sort_values("Date")
     v0 = float(snaps["patrimoine_investi_eur"].iloc[0])
     v1 = float(snaps["patrimoine_investi_eur"].iloc[-1])

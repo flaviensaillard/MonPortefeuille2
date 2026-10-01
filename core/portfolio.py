@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 
 import pandas as pd
+from . import dates
 
 from . import fx, prices
 from .models import (
@@ -169,13 +170,11 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
     sortie: list[Transaction] = []
     for i, row in df.iterrows():
         try:
-            # `format="mixed"` : la v1 écrit des dates jj/mm/aaaa, la v2 écrit
-            # de l'ISO aaaa-mm-jj. Sans ce paramètre, pandas émet un
-            # UserWarning à chaque ligne ISO — du bruit inutile dans les logs
-            # des robots nocturnes.
-            d = pd.to_datetime(
-                row["Date"], dayfirst=True, errors="coerce", format="mixed"
-            )
+            # `format="mixed"` (dans `dates.parser`) : la v1 écrit des dates
+            # jj/mm/aaaa, la v2 écrit de l'ISO aaaa-mm-jj. Sans ce paramètre,
+            # pandas émet un UserWarning à chaque ligne ISO — du bruit inutile
+            # dans les logs des robots nocturnes.
+            d = dates.parser(row["Date"])
             if pd.isna(d):
                 raise ValueError(f"date illisible : {row['Date']!r}")
             ticker = str(row["Ticker"]).upper().strip()

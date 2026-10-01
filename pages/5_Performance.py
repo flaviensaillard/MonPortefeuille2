@@ -26,6 +26,7 @@ import pandas as pd
 import streamlit as st
 
 from core import metrics, session as S
+from core import dates
 from core import ui
 
 st.set_page_config(page_title="Performance", page_icon="📈", layout="wide")
@@ -43,7 +44,7 @@ if ctx.snapshots.empty or len(ctx.snapshots) < 2:
     st.stop()
 
 snaps = ctx.snapshots.copy()
-snaps["Date"] = pd.to_datetime(snaps["Date"], dayfirst=True, errors="coerce")
+snaps["Date"] = dates.parser(snaps["Date"])
 snaps = snaps.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,8 @@ import logging
 import pandas as pd
 import yfinance as yf
 
+from . import dates  # noqa: F401  (comparaisons de dates tolérantes au fuseau)
+
 log = logging.getLogger(__name__)
 
 
@@ -65,7 +67,7 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
     if devise == contre or devise in ("", "NAN"):
         return 1.0
 
-    d = pd.to_datetime(date, dayfirst=True, errors="coerce")
+    d = dates.parser(date)
     if pd.isna(d):
         raise FXIndisponible(devise, contre, str(date), "date illisible")
 
@@ -91,9 +93,16 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
             )
             if h.empty:
                 raise FXIndisponible(devise, contre, str(date), "série vide")
-            # Dernier cours connu au plus tard à la date demandée.
-            serie = h["Close"]
-            serie = serie[serie.index <= d + pd.Timedelta(days=1)]
+            # Dernier cours connu au plus tard à la date demandée — et pas un
+            # jour de plus. La version précédente ajoutait `+ 1 jour` au seuil,
+            # ce qui faisait utiliser le taux du LENDEMAIN pour une opération
+            # datée : un biais d'anticipation, qui flatte légèrement la
+            # performance et contredit ce commentaire.
+            #
+            # `dates.dernier_avant` et non `serie[serie.index <= ...]` : l'index
+            # de Yahoo porte un fuseau horaire, la comparaison directe lève un
+            # TypeError. Voyez core/dates.py.
+            serie = dates.dernier_avant(h["Close"], d)
             if serie.empty:
                 raise FXIndisponible(devise, contre, str(date), "aucun cours antérieur")
             brut = float(serie.iloc[-1])

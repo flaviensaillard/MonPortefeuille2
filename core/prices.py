@@ -21,6 +21,8 @@ import logging
 import pandas as pd
 import yfinance as yf
 
+from . import dates
+
 log = logging.getLogger(__name__)
 
 
@@ -93,7 +95,7 @@ def cours(ticker: str, date: str | None = None) -> float:
 
     cle_date = ""
     if date is not None:
-        d = pd.to_datetime(date, dayfirst=True, errors="coerce")
+        d = dates.parser(date)
         if pd.isna(d):
             raise CoursIndisponible(ticker, str(date), "date illisible")
         cle_date = d.strftime("%Y-%m-%d")
@@ -111,8 +113,9 @@ def cours(ticker: str, date: str | None = None) -> float:
             )
             if h.empty:
                 raise CoursIndisponible(ticker, cle_date, "série vide")
-            serie = h["Close"]
-            serie = serie[serie.index <= pd.Timestamp(cle_date) + pd.Timedelta(days=1)]
+            # Au plus tard à la date demandée, jamais au lendemain : prendre le
+            # cours du jour suivant serait un biais d'anticulation.
+            serie = dates.dernier_avant(h["Close"], pd.Timestamp(cle_date))
             if serie.empty:
                 raise CoursIndisponible(ticker, cle_date, "aucun cours antérieur")
             valeur = float(serie.iloc[-1])

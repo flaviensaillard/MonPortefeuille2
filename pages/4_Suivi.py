@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from core import session as S
+from core import dates
 from core import ui
 
 st.set_page_config(page_title="Suivi", page_icon="🏖️", layout="wide")
@@ -35,7 +36,7 @@ if ctx.snapshots.empty:
     st.stop()
 
 df = ctx.snapshots.copy()
-df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+df["Date"] = dates.parser(df["Date"])
 df = df.dropna(subset=["Date"]).sort_values("Date")
 
 # ---------------------------------------------------------------------------

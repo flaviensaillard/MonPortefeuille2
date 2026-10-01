@@ -23,6 +23,7 @@ import logging
 import os
 
 import pandas as pd
+from . import dates
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ def snapshots() -> pd.DataFrame:
     df = lire(T_SNAPSHOTS)
     if df.empty:
         return df
-    df["Date_DT"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+    df["Date_DT"] = dates.parser(df["Date"])
     return df.dropna(subset=["Date_DT"]).sort_values("Date_DT").reset_index(drop=True)
 
 
