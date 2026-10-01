@@ -92,7 +92,7 @@ if ordres:
         "Actif": o.ticker,
         "Sens": "🟢 Achat" if o.sens == "achat" else "🔴 Vente",
         "Montant": ui.eur(o.montant_eur),
-        "Quantité": f"{o.quantite:,.4f}".replace(",", " "),
+        "Quantité": ui.quantite(o.quantite),
         "Poche": o.poche,
         "Motif": o.motif,
     } for o in ordres]))

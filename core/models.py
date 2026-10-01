@@ -97,7 +97,7 @@ POCHES: list[Poche] = [
         nom="Énergie",
         cible=0.30,
         bande=0.05,
-        membres=["XDW0.L", "FLXC.L"],
+        membres=["XDW0.L"],
         description="ETF énergie. Surexposition volontaire à la croissance.",
     ),
     Poche(
@@ -105,8 +105,8 @@ POCHES: list[Poche] = [
         nom="Asie / Chine",
         cible=0.30,
         bande=0.05,
-        membres=["RI.PA"],
-        description="ETF Asie. Surexposition volontaire à la croissance.",
+        membres=["FLXC.L"],
+        description="ETF Chine (Franklin FTSE China). Surexposition volontaire à la croissance.",
     ),
     Poche(
         cle="jgb",

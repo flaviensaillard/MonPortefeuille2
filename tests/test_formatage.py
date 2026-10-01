@@ -147,3 +147,48 @@ class TestFormatSpecifiers:
         qu'à l'exécution, sur une valeur réelle, jamais à l'import."""
         with pytest.raises(ValueError, match="Invalid format specifier"):
             f"{1234.5:{spec}}"
+
+
+class TestQuantite:
+    """`ui.quantite()` — assez de décimales pour lire une quantité d'actifs.
+
+    L'affichage était `f"{q:,.4f}"` : « 0,0575 » pour 0,05747 BTC, et « 0,0000 »
+    pour une petite poche crypto. Deux positions devenaient indistinguables, et
+    la quantité réelle était illisible. Le nombre de décimales s'adapte donc à
+    la grandeur de la quantité.
+    """
+
+    @pytest.mark.parametrize("valeur, attendu", [
+        (0.05747, "0,05747"),      # le cas BTC : 4 décimales ne suffisaient pas
+        (0.005747, "0,005747"),
+        (0.06, "0,06"),
+        (0.0001, "0,0001"),
+        (0.00001234, "0,00001234"),
+        (800, "800"),               # un nombre entier ne prend pas de décimales
+        (2255, "2 255"),
+        (140, "140"),
+        (-22.0, "-22"),
+        (0, "0"),
+    ])
+    def test_quantite(self, valeur, attendu):
+        assert ui.quantite(valeur) == attendu
+
+    def test_garde_assez_de_chiffres_significatifs(self):
+        """0,05747 ne doit pas s'afficher 0,0575 : on perd de l'information.
+
+        Le bon critere est l'aller-retour : relu, le texte doit redonner la
+        quantite d'origine. Compter des caracteres ne prouve rien.
+        """
+        for valeur in [0.05747, 0.005747, 0.00001234, 2255, 800, 0.06]:
+            texte = ui.quantite(valeur)
+            relu = float(texte.replace(" ", "").replace(",", "."))
+            assert relu == pytest.approx(valeur), f"{valeur} -> {texte!r}"
+
+    def test_nan_et_none(self):
+        assert ui.quantite(None) == "—"
+        assert ui.quantite(float("nan")) == "—"
+
+    def test_jamais_leve_sur_une_valeur_reelle(self):
+        """Un helper de formatage plante en production, pas dans les tests."""
+        for v in [0.0, 1e-12, 1e12, 0.05747, 112988.0, 12345678.9, -0.0000001]:
+            assert isinstance(ui.quantite(v), str)

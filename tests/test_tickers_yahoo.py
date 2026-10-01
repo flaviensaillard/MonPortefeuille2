@@ -70,8 +70,11 @@ class TestRobotsQuotidiensNeCotentPasLesDevises:
 
     def test_tous_les_vrais_titres_sont_cotes(self):
         from jobs.update_market_data import tickers_a_coter
+        # RI.PA n'y figure plus : il n'appartient a aucune poche depuis que
+        # FLXC.L (Franklin FTSE China) a rejoint « Asie / Chine ». Le coter
+        # serait une requete Yahoo inutile chaque nuit.
         assert set(tickers_a_coter()) == {
-            "IGLN.L", "BTCUSDT", "XDW0.L", "FLXC.L", "RI.PA", "XJSE.SW",
+            "IGLN.L", "BTCUSDT", "XDW0.L", "FLXC.L", "XJSE.SW",
         }
 
     def test_les_titres_sont_tries(self):

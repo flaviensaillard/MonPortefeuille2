@@ -164,7 +164,7 @@ for classe, lst in cessions.items():
             "Classe": classe.value.replace("_", " "),
             "Régime": fb.REGIMES_FISCAUX.get(classe, "—") if hasattr(fb, "REGIMES_FISCAUX") else "—",
             "Date": l["date"].strftime("%d/%m/%Y"),
-            "Quantité": f"{l['quantite']:,.4f}".replace(",", " "),
+            "Quantité": ui.quantite(l['quantite']),
             "PRU (€)": ui.eur(l["pru_eur"]),
             "Prix de cession (€)": ui.eur(l["prix_cession_eur"]),
             "Plus-value (€)": ui.eur(pv),

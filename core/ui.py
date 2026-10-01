@@ -9,6 +9,8 @@ toujours visible, et le verrouillage n'existe pas : on affiche ce qui est calcul
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
@@ -83,6 +85,27 @@ def eur(montant: float | None, decimales: int = 2) -> str:
     if valeur is None:
         return "—"
     return f"{valeur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+
+
+def quantite(valeur: float | None, chiffres: int = 6) -> str:
+    """Formate une quantité d'actifs avec assez de décimales pour être lue.
+
+    `f"{q:,.4f}"` affichait « 0,0575 » pour 0,05747 BTC — et « 0,0000 » pour une
+    petite poche crypto, ce qui rendait deux positions indistinguables. Le nombre
+    de décimales s'adapte donc à la grandeur : on garde `chiffres` chiffres
+    significatifs. 800 reste « 800 », 0,05747 devient « 0,05747 ».
+    """
+    nombre = _nombre(valeur)
+    if nombre is None:
+        return "—"
+    if nombre == 0:
+        return "0"
+    exposant = math.floor(math.log10(abs(nombre)))
+    decimales = min(max(0, chiffres - 1 - exposant), 12)
+    texte = f"{nombre:,.{decimales}f}".replace(",", " ").replace(".", ",")
+    if "," in texte:                      # 800,00 -> 800
+        texte = texte.rstrip("0").rstrip(",")
+    return texte
 
 
 def pct(part: float | None, decimales: int = 1, signe: bool = False) -> str:

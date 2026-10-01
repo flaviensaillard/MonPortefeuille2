@@ -49,7 +49,7 @@ for a in sorted(ctx.actifs, key=lambda x: -(x.valeur_eur or 0.0)):
         "Poche": poche.nom if poche else "Non classé",
         "Classe": a.classe.value.replace("_", " "),
         "Régime fiscal": a.regime_fiscal,
-        "Qté": f"{a.quantite:,.4f}".replace(",", " "),
+        "Qté": ui.quantite(a.quantite),
         "Cours": f"{a.prix:,.4f}".replace(",", " "),
         "Devise": a.devise_cotation,
         "Valeur": ui.eur(a.valeur_eur),
@@ -92,7 +92,7 @@ for cle, etat in ctx.etats.items():
             )
         lignes_poche = [{
             "Actif": a.ticker,
-            "Qté": f"{a.quantite:,.4f}".replace(",", " "),
+            "Qté": ui.quantite(a.quantite),
             "Valeur": ui.eur(a.valeur_eur),
             "Part de la poche": ui.pct(a.valeur_eur / etat.valeur_eur)
             if etat.valeur_eur else "—",
