@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from _support import simuler_supabase
+
 
 # ---------------------------------------------------------------------------
 # Dédoublonnage : l'erreur 21000
@@ -120,6 +122,7 @@ def test_import_avec_doublon_n_envoie_qu_une_ligne(monkeypatch):
 
     monkeypatch.setattr(imp.db, "remplacer", faux_remplacer)
     monkeypatch.setattr(imp, "lire_v1", lambda t: df)
+    simuler_supabase(monkeypatch, imp)
 
     nombre, corrections = imp.importer_transactions(dry_run=False)
 
@@ -242,3 +245,106 @@ def test_import_apports_avec_doublon_n_insere_qu_une_ligne(monkeypatch):
     assert nombre == 1, "le doublon d'apport doit être neutralisé"
     assert len(ecritures) == 1
     assert len(ecritures[0][1]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Purge avant réécriture — les dates corrigées ne doivent pas créer de doublons
+# ---------------------------------------------------------------------------
+def test_reimport_purge_avant_decrire(monkeypatch):
+    """La clé de conflit de l'upsert contient la DATE.
+
+    L'importation précédente a stocké des dates mal lues — le parseur d'alors
+    intervertissait jour et mois sur les ISO (`2025-07-01` devenait
+    `2025-01-07`), ce qui a décalé 52 % des lignes. Relancer l'import avec le
+    parseur corrigé ne peut donc PAS écraser les anciennes : la clé diffère, et
+    chaque transaction se retrouverait en double, une fois à la mauvaise date.
+
+    D'où la purge préalable, qui doit passer AVANT l'écriture.
+    """
+    import jobs.importer_v1 as imp
+
+    journal: list[str] = []
+    filtres: list[tuple] = []
+
+    class Rep:
+        data = []
+
+    class FauxDelete:
+        def eq(self, colonne, valeur):
+            filtres.append((colonne, valeur))
+            journal.append("purger")
+
+            class E:
+                def execute(self):
+                    return Rep()
+
+            return E()
+
+    class FauxTable:
+        def delete(self):
+            journal.append("delete")
+            return FauxDelete()
+
+    class FauxClient:
+        def table(self, nom):
+            return FauxTable()
+
+    def faux_remplacer(table, lignes, on_conflict=None):
+        journal.append("ecrire")
+        return Rep()
+
+    monkeypatch.setattr(imp.db, "remplacer", faux_remplacer)
+    monkeypatch.setattr(imp.db, "client", lambda: FauxClient())
+
+    df = pd.DataFrame([
+        {"id": 1, "Ticker": "FLXC.L", "Type": "Vente", "Date": "01/07/2025",
+         "Quantité": 22, "Cours": 29.04, "Frais": 6.81, "Devise": "USD"},
+    ])
+    monkeypatch.setattr(imp, "lire_v1", lambda t: df)
+
+    imp.importer_transactions(dry_run=False)
+
+    assert journal[0] == "delete", "la purge doit être tentée avant l'écriture"
+    assert journal.index("purger") < journal.index("ecrire"), journal
+    # Seules les lignes écrites par l'import sont purgées : une transaction
+    # saisie à la main dans l'application doit survivre.
+    assert filtres == [("source", "import_v1")], filtres
+
+
+def test_la_purge_n_est_pas_faite_en_dry_run(monkeypatch):
+    """Un dry-run ne doit rien toucher à la base."""
+    import jobs.importer_v1 as imp
+
+    journal: list[str] = []
+
+    class Rep:
+        data = []
+
+    class FauxDelete:
+        def eq(self, colonne, valeur):
+            journal.append("purger")
+
+            class E:
+                def execute(self):
+                    return Rep()
+
+            return E()
+
+    class FauxTable:
+        def delete(self):
+            return FauxDelete()
+
+    class FauxClient:
+        def table(self, nom):
+            return FauxTable()
+
+    monkeypatch.setattr(imp.db, "client", lambda: FauxClient())
+    df = pd.DataFrame([
+        {"id": 1, "Ticker": "FLXC.L", "Type": "Vente", "Date": "01/07/2025",
+         "Quantité": 22, "Cours": 29.04, "Frais": 6.81, "Devise": "USD"},
+    ])
+    monkeypatch.setattr(imp, "lire_v1", lambda t: df)
+
+    imp.importer_transactions(dry_run=True)
+
+    assert "purger" not in journal, "un dry-run ne doit rien supprimer"

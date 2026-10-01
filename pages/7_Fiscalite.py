@@ -33,6 +33,7 @@ from core import session as S, tax
 from core import dates
 from core import ui
 from core.models import Classe
+from core.portfolio import classe_de
 
 st.set_page_config(page_title="Fiscalité", page_icon="🏛️", layout="wide")
 st.title("🏛️ Fiscalité")

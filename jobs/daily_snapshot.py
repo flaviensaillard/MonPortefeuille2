@@ -42,12 +42,25 @@ def main() -> int:
         return 1
 
     # --- Transactions -> positions ---
-    try:
-        transactions = charger_transactions(db.transactions())
-        positions = calculer_positions(transactions)
-    except ValueError as exc:
-        log.error("Transactions illisibles : %s", exc)
-        return 1
+    # Une ligne incohérente ne doit pas empêcher le snapshot : sans lui, vous
+    # n'avez aucun historique, donc aucune courbe de performance. On consigne
+    # l'anomalie dans une alerte et on continue avec ce qui est sain.
+    transactions = charger_transactions(db.transactions())
+    anomalies: list[str] = []
+    positions = calculer_positions(transactions, anomalies)
+
+    if anomalies:
+        for a in anomalies:
+            log.warning("Transaction incohérente ignorée : %s", a)
+        try:
+            db.ajouter_alerte(
+                "Transactions incohérentes",
+                "Ces lignes ont été ignorées dans le calcul des positions, vos "
+                "chiffres sont donc partiels : " + " ".join(anomalies),
+                niveau="attention",
+            )
+        except Exception as exc:      # une alerte ne doit jamais tuer le snapshot
+            log.warning("Alerte non enregistrée : %s", exc)
 
     if not positions:
         log.info("Aucune position. Rien à snapshotter.")

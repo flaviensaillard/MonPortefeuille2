@@ -27,6 +27,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from _support import simuler_supabase
+
 RACINE = Path(__file__).resolve().parent.parent
 SQL = (RACINE / "migrations" / "001_init.sql").read_text(encoding="utf-8")
 
@@ -313,6 +315,7 @@ def _importer_une_ligne(monkeypatch, ligne: dict):
     monkeypatch.setattr(imp.db, "remplacer", lambda t, l, on_conflict=None: (
         ecritures.append((t, l)), Rep())[1])
     monkeypatch.setattr(imp, "lire_v1", lambda t: pd.DataFrame([ligne]))
+    simuler_supabase(monkeypatch, imp)
 
     nombre, corrections = imp.importer_transactions(dry_run=False)
     return nombre, corrections, ecritures

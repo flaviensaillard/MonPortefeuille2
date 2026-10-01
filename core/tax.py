@@ -31,9 +31,13 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from . import fiscal_bars as fb
 from .models import Classe
+
+if TYPE_CHECKING:                     # annotations seulement : pas d'import à l'exécution
+    from .portfolio import Position, Transaction
 
 
 # ===========================================================================

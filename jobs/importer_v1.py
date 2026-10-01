@@ -224,6 +224,23 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
         return 0, corrections
 
     try:
+        # Purge préalable des lignes issues de l'import.
+        #
+        # Pourquoi c'est nécessaire : la clé de conflit de l'upsert contient la
+        # DATE. Or l'importation précédente a stocké des dates MAL LUES — le
+        # parseur d'alors intervertissait jour et mois sur les ISO
+        # (`2025-07-01` devenait `2025-01-07`), ce qui a décalé 52 % des lignes.
+        # Relancer l'import avec le parseur corrigé ne peut donc PAS écraser les
+        # anciennes : la clé diffère, et chaque transaction se retrouverait en
+        # double, une fois à la mauvaise date.
+        #
+        # On ne supprime que ce que l'import a lui-même écrit. Une transaction
+        # saisie à la main dans l'application n'est pas touchée.
+        db.client().table(db.T_TRANSACTIONS).delete().eq(
+            "source", "import_v1"
+        ).execute()
+        log.info("Anciennes lignes d'import supprimées.")
+
         # Upsert sur l'index unique : relancer l'import ne crée pas de doublons.
         db.remplacer(
             db.T_TRANSACTIONS, lignes,
