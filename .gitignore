@@ -1,0 +1,13 @@
+# Dépendances et artefacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.streamlit/secrets.toml
+.env
+*.log
+
+# Données locales
+data/
+*.db
