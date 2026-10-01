@@ -43,6 +43,7 @@ def lire_v1(table: str) -> pd.DataFrame:
 def _dedupliquer(
     lignes: list[dict],
     cle: tuple[str, ...] = ("ticker", "sens", "date", "quantite", "cours"),
+    fusionner: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """Retire les lignes qui partagent la clé de conflit de `pf2_transactions`.
 
@@ -58,6 +59,19 @@ def _dedupliquer(
     - lignes qui divergent sur `frais` ou `devise` : on garde la première et on
       le dit haut et fort, parce que ce n'est plus une simple double saisie et
       que choisir à votre place serait inventer une donnée.
+
+    `fusionner=True` (transactions seulement) change le traitement du cas
+    « même titre, même jour, même cours, même quantité, frais différents ». Ce
+    n'est pas une double saisie : ce sont deux achats distincts. Jeter la seconde
+    ligne perdait la moitié de la position — 178 unités de XJSE.SW sont parties
+    comme ça. Les fusionner est exact, pas inventé : deux achats de 89 unités à
+    1 115,60 avec 148 € puis 1 149 € de frais donnent le même PRU qu'un achat de
+    178 unités pour 1 297 € de frais. On additionne la quantité et les frais, on
+    garde les deux références, et on le dit.
+
+    `fusionner` reste False pour `pf2_apports`, où la clé inclut déjà le montant :
+    deux lignes qui la partagent sont de vrais doublons, les additionner
+    gonflerait vos apports de capital.
 
     Retourne `(lignes_dédoublonnées, messages)`.
 
@@ -79,14 +93,23 @@ def _dedupliquer(
             continue
 
         premiere = vues[cle_ligne]
+        # Champs dont la divergence rend la ligne irréciliable : on ne peut pas
+        # décider à la place de l'utilisateur.
         divergentes = [
             champ
-            for champ in ("frais", "devise", "montant_eur")
+            for champ in ("devise", "montant_eur")
             if champ in ligne and champ in premiere
             and ligne.get(champ) != premiere.get(champ)
         ]
+        # `frais` est à part : c'est le seul champ réconciliable par fusion.
+        frais_divergents = (
+            "frais" in ligne and "frais" in premiere
+            and ligne.get("frais") != premiere.get("frais")
+        )
         etiquette = ligne.get("ticker") or ligne.get("compte") or "?"
+
         if divergentes:
+            # Vraiment ambigu : on ne choisit pas à la place de l'utilisateur.
             messages.append(
                 f"{etiquette} {ligne.get('date')} : DOUBLON À DONNÉES "
                 f"DIVERGENTES ({', '.join(divergentes)}) — "
@@ -94,12 +117,58 @@ def _dedupliquer(
                 f"{ligne.get('reference')} écarté. "
                 f"À VÉRIFIER DANS VOTRE RELEVÉ."
             )
-        else:
-            messages.append(
-                f"{etiquette} {ligne.get('date')} : ligne en double dans "
-                f"la v1 ({premiere.get('reference')} et "
-                f"{ligne.get('reference')}) — une seule conservée."
+            continue
+
+        if fusionner and frais_divergents:
+            # Seul cas où la fusion est légitime : les frais diffèrent. Deux
+            # ordres passés le même jour, au même cours, pour la même quantité,
+            # avec des frais différents, sont nécessairement deux achats
+            # distincts — et leur somme est exacte.
+            #
+            # En revanche, des frais IDENTIQUES laissent l'ambiguïté ouverte :
+            # c'est peut-être une double saisie (le cas IGLN.L déjà examiné).
+            # Là on garde une ligne et on le dit, comme avant.
+            quantite_totale = float(premiere["quantite"]) + float(ligne["quantite"])
+            frais_totaux = round(
+                float(premiere.get("frais") or 0.0) + float(ligne.get("frais") or 0.0), 6
             )
+            frais_avant = premiere.get("frais")
+            refs = [premiere.get("reference"), ligne.get("reference")]
+            # Copie, surtout pas de mutation : `lignes` appartient à l'appelant.
+            fusion = {
+                **premiere,
+                "quantite": quantite_totale,
+                "frais": frais_totaux,
+                "reference": "+".join(r for r in refs if r),
+            }
+            vues[cle_ligne] = fusion
+            resultat[resultat.index(premiere)] = fusion
+            messages.append(
+                f"{etiquette} {ligne.get('date')} : deux achats le même jour au "
+                f"même cours ({refs[0]} et {refs[1]}), frais différents "
+                f"({frais_avant} puis {ligne.get('frais')}). "
+                f"Fusionnés en une ligne de {quantite_totale:g} unités pour "
+                f"{frais_totaux:g} de frais — le PRU est inchangé. "
+                f"À VÉRIFIER DANS VOTRE RELEVÉ."
+            )
+            continue
+
+        if frais_divergents:
+            # Fusion non demandée (apports) : on signale sans toucher aux données.
+            messages.append(
+                f"{etiquette} {ligne.get('date')} : DOUBLON À DONNÉES "
+                f"DIVERGENTES (frais) — "
+                f"{premiere.get('reference')} conservé, "
+                f"{ligne.get('reference')} écarté. "
+                f"À VÉRIFIER DANS VOTRE RELEVÉ."
+            )
+            continue
+
+        messages.append(
+            f"{etiquette} {ligne.get('date')} : ligne en double dans "
+            f"la v1 ({premiere.get('reference')} et "
+            f"{ligne.get('reference')}) — une seule conservée."
+        )
 
     return resultat, messages
 
@@ -206,7 +275,7 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
     # non plus fusionner silencieusement deux lignes qui diffèrent — ce serait
     # inventer une donnée. On conserve la première, on signale, et c'est à vous
     # de trancher sur votre relevé.
-    lignes, doublons = _dedupliquer(lignes)
+    lignes, doublons = _dedupliquer(lignes, fusionner=True)
     corrections.extend(doublons)
 
     if corrections:
