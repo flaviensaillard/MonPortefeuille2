@@ -39,7 +39,8 @@ log = logging.getLogger(__name__)
 # La classe détermine le régime fiscal — c'est le seul endroit où elle est fixée.
 CLASSES: dict[str, Classe] = {
     "IGLN.L": Classe.OR,                  # ETC or — régime valeurs mobilières
-    "BTCUSDT": Classe.CRYPTO,
+    "BTCUSDT": Classe.CRYPTO,             # notation de l'utilisateur, conservée telle quelle
+    "BTC-USD": Classe.CRYPTO,             # symbole Yahoo, si un jour il le saisit
     "XDW0.L": Classe.ACTION_ETF,          # Xtrackers MSCI World Energy
     "FLXC.L": Classe.ACTION_ETF,          # Franklin FTSE China
     "RI.PA": Classe.ACTION_ETF,           # Ripcurl / action unitaire
@@ -49,6 +50,7 @@ CLASSES: dict[str, Classe] = {
 DEVISES_COTATION: dict[str, str] = {
     "IGLN.L": "USD",
     "BTCUSDT": "USD",
+    "BTC-USD": "USD",
     "XDW0.L": "USD",
     "FLXC.L": "USD",
     "RI.PA": "EUR",

@@ -43,6 +43,24 @@ class CoursIndisponible(Exception):
 _cache: dict[tuple[str, str], float] = {}
 _cache_devise: dict[str, str | None] = {}
 
+# Symbole retenu pour l'or. Yahoo a supprimé le spot (`XAUUSD=X`, `XAU=X` et
+# `XAUUSD` renvoient tous « Quote not found »), donc on prend le contrat
+# front-month du COMEX. Ce n'est PAS le spot : il porte un écart basis et une
+# échéance. C'était précisément ce que la v1 refusait, faute de mieux — mais le
+# mieux n'existe plus sur Yahoo, et l'absence de cours de l'or est pire qu'un
+# cours approché à moins de 1 %.
+TICKER_OR = "GC=F"
+
+# Yahoo a retiré des symboles qu'on utilisait. On ne renomme PAS les tickers dans
+# le code : ils sont déjà dans la base de l'utilisateur, issus de sa saisie et de
+# l'import de la v1. Les renommer ici obligerait à réimporter toutes ses
+# transactions. On les traduit donc au moment de l'appel.
+ALIAS_YAHOO: dict[str, str] = {
+    # Notation Binance, qui n'a jamais existé sur Yahoo. `BTC-USD` est le bon
+    # symbole et renvoie bien un cours.
+    "BTCUSDT": "BTC-USD",
+}
+
 
 def vider_cache() -> None:
     _cache.clear()
@@ -65,7 +83,7 @@ def devise_de(ticker: str) -> str | None:
 
     devise: str | None = None
     try:
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(ALIAS_YAHOO.get(ticker, ticker))
         try:
             # `fast_info` interroge le point d'entrée des cotations : peu
             # coûteux, et il porte la devise.
@@ -92,6 +110,11 @@ def cours(ticker: str, date: str | None = None) -> float:
     ticker = str(ticker).upper().strip()
     if not ticker:
         raise CoursIndisponible(ticker, str(date), "ticker vide")
+    # Traduction d'un ticker que Yahoo ne connaît plus. Le cache reste indexé sur
+    # le ticker d'origine : c'est celui qui figure dans les données de l'utilisateur.
+    demande, symbole = ticker, ALIAS_YAHOO.get(ticker, ticker)
+    if symbole != demande:
+        log.info("Ticker %s → %s sur Yahoo", demande, symbole)
 
     cle_date = ""
     if date is not None:
@@ -105,7 +128,7 @@ def cours(ticker: str, date: str | None = None) -> float:
         return _cache[cle]
 
     try:
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(symbole)
         if cle_date:
             h = tk.history(
                 start=(pd.Timestamp(cle_date) - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
@@ -115,7 +138,7 @@ def cours(ticker: str, date: str | None = None) -> float:
                 raise CoursIndisponible(ticker, cle_date, "série vide")
             # Au plus tard à la date demandée, jamais au lendemain : prendre le
             # cours du jour suivant serait un biais d'anticulation.
-            serie = dates.dernier_avant(h["Close"], pd.Timestamp(cle_date))
+            serie = dates.dernier_avant(h["Close"].dropna(), pd.Timestamp(cle_date))
             if serie.empty:
                 raise CoursIndisponible(ticker, cle_date, "aucun cours antérieur")
             valeur = float(serie.iloc[-1])
@@ -123,14 +146,25 @@ def cours(ticker: str, date: str | None = None) -> float:
             h = tk.history(period="5d")
             if h.empty:
                 raise CoursIndisponible(ticker, "", "série vide")
-            valeur = float(h["Close"].iloc[-1])
+            # Yahoo renvoie une ligne de queue sans cours (séance non ouverte,
+            # ou boucle-trou) pour IGLN.L, XDW0.L, FLXC.L, RI.PA. Prendre le
+            # dernier élément brut donne NaN, et NaN traverse tous les tests
+            # usuels — voir le garde-fou plus bas.
+            fermetures = h["Close"].dropna()
+            if fermetures.empty:
+                raise CoursIndisponible(ticker, "", "aucune clôture exploitable")
+            valeur = float(fermetures.iloc[-1])
     except CoursIndisponible:
         raise
     except Exception as exc:
         raise CoursIndisponible(ticker, cle_date, str(exc)) from exc
 
-    if valeur <= 0:
-        raise CoursIndisponible(ticker, cle_date, f"cours non positif ({valeur})")
+    # `valeur <= 0` ne suffit PAS : toute comparaison avec NaN est fausse, donc un
+    # NaN passerait ce test et se propagerait dans toute la valorisation — chaque
+    # montant affiché deviendrait « nan », et le total investi aussi. Il faut
+    # tester NaN explicitement.
+    if valeur != valeur or valeur in (float("inf"), float("-inf")) or valeur <= 0:
+        raise CoursIndisponible(ticker, cle_date, f"cours inexploitable ({valeur})")
 
     _cache[cle] = valeur
     return valeur
@@ -155,8 +189,11 @@ def cours_actuels(tickers: list[str]) -> tuple[dict[str, float], list[str]]:
 def cours_or(date: str | None = None) -> float:
     """Cours de l'or en USD l'once.
 
-    Utilise `XAUUSD=X` (spot) et non `GC=F` (contrat à terme) : la v1 se servait
-    du future pour convertir les apports en onces, ce qui introduit un écart
-    basis et une échéance.
+    Yahoo a retiré le spot (`XAUUSD=X`), qui renvoyait « Quote not found ». On
+    passe donc par `TICKER_OR`, le contrat front-month du COMEX. C'est un future
+    et non le spot : il porte un écart basis (typiquement moins de 1 %) et une
+    échéance. Le dire vaut mieux que le masquer, parce que la v1 refusait
+    explicitement ce choix — mais le spot n'étant plus disponible, un cours
+    approché vaut mieux qu'aucun cours, qui ferait disparaître l'équivalent-or.
     """
-    return cours("XAUUSD=X", date)
+    return cours(TICKER_OR, date)

@@ -31,22 +31,74 @@ def bandeau_erreurs(echecs: list[str], contexte: str = "") -> None:
     )
 
 
+def _nombre(valeur: object) -> float | None:
+    """Convertit une valeur en nombre, ou `None` si c'est impossible.
+
+    Ce helper existe à cause d'un défaut qui a vécu jusqu'en production. Une
+    valeur qui arrive en texte ne lève PAS `TypeError` mais `ValueError`
+    (« Unknown format code 'f' for object of type 'str' »), si bien qu'un
+    garde-fou sur `None` seul donne une fausse confiance : une bonne moitié des
+    entrées non numériques passaient au travers. Une valeur illisible doit
+    afficher un tiret, pas faire sauter la page.
+
+    NaN et l'infini sont traités comme illisibles, pour la même raison : ils
+    traversent tous les tests usuels (`nan <= 0` est faux) et finiraient
+    affichés tels quels — « nan € » dans une valorisation, ce qui est pire
+    qu'un tiret, parce que ça ressemble à un vrai montant.
+    """
+    if valeur is None:
+        return None
+    if isinstance(valeur, str):
+        try:
+            valeur = float(valeur.replace(",", ".").replace(" ", "").replace("\u202f", ""))
+        except (ValueError, AttributeError):
+            return None
+    try:
+        nombre = float(valeur)
+    except (TypeError, ValueError):
+        return None
+    if nombre != nombre or nombre in (float("inf"), float("-inf")):
+        return None
+    return nombre
+
+
 def eur(montant: float | None, decimales: int = 2) -> str:
-    if montant is None:
+    """Formate un montant en euros, à la française.
+
+    CORRECTION : le spécificateur était `f"{montant:,.{decimales} f}"`, avec une
+    ESPACE entre la précision et le `f`. Python veut les drapeaux (signe,
+    espace) AVANT la largeur et la précision :
+
+        f"{1234.5:,.2 f}"   → ValueError: Invalid format specifier ',.2 f'
+
+    Le défaut était là depuis le début, mais il ne s'était jamais vu : toutes les
+    erreurs précédentes (taux de change, tri des transactions...) arrêtaient
+    l'application avant qu'elle n'affiche le premier montant. Une fois ces
+    erreurs corrigées, le plantage est remonté ici.
+
+    On retire simplement l'espace : `,` pour les milliers, `.` pour la
+    précision, puis on convertit au format français.
+    """
+    valeur = _nombre(montant)
+    if valeur is None:
         return "—"
-    return f"{montant:,.{decimales} f}".replace(",", " ").replace(".", ",") + " €"
+    return f"{valeur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
 
 
 def pct(part: float | None, decimales: int = 1, signe: bool = False) -> str:
-    if part is None:
+    valeur = _nombre(part)
+    if valeur is None:
         return "—"
-    val = part * 100
+    val = valeur * 100
     return f"{val:+.{decimales}f} %" if signe else f"{val:.{decimales}f} %"
 
 
 def points(ecart: float, decimales: int = 1) -> str:
     """Écart en points de pourcentage, toujours signé."""
-    return f"{ecart:+,.{decimales}f} pts"
+    valeur = _nombre(ecart)
+    if valeur is None:
+        return "—"
+    return f"{valeur:+,.{decimales}f} pts"
 
 
 def couleur_ecart(ecart_points: float, bande_points: float) -> str:

@@ -8,8 +8,12 @@ La v1 convertissait chaque apport en onces avec `yf.Ticker("GC=F").fast_info.get
 et le repli faisait que toute panne Yahoo enregistrait vos apports comme si l'or
 valait 2 000 $.
 
-Ici : le spot (`XAUUSD=X`), et une panne bloque l'enregistrement au lieu de le
-falsifier.
+Ici, le principe de la v2 tient : pas de valeur de repli inventée, et une panne
+bloque l'enregistrement au lieu de le falsifier. Reste que le spot lui-même
+(`XAUUSD=X`) a été retiré de Yahoo — la v2 est donc passée au contrat front-month
+`GC=F`. L'écart basis est de l'ordre de quelques dizaines de dollars sur
+4 200 $, soit moins de 1 % ; l'essentiel — ne jamais enregistrer un prix inventé —
+est préservé.
 """
 
 from __future__ import annotations

@@ -158,7 +158,7 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
             taux_usd = fx.taux("EUR", dt.date.today().isoformat(), "USD")
             ctx.equivalent_or_oz = (ctx.total_investi_eur * taux_usd) / ctx.cours_or
     except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
-        ctx.echecs_cours.append("XAUUSD=X")
+        ctx.echecs_cours.append(prices.TICKER_OR)
 
     # --- Historiques ---
     try:

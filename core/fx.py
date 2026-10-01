@@ -85,7 +85,13 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
             h = yf.Ticker(symbole).history(period="5d")
             if h.empty:
                 raise FXIndisponible(devise, contre, str(date), "série vide")
-            brut = float(h["Close"].iloc[-1])
+            # Yahoo renvoie parfois une ligne de queue sans cours. Prendre le
+            # dernier élément brut donne NaN — et NaN traverse `<= 0`. Voyez le
+            # garde-fou en bas de fonction.
+            fermetures = h["Close"].dropna()
+            if fermetures.empty:
+                raise FXIndisponible(devise, contre, str(date), "aucune clôture exploitable")
+            brut = float(fermetures.iloc[-1])
         else:
             h = yf.Ticker(symbole).history(
                 start=(d - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
@@ -102,7 +108,7 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
             # `dates.dernier_avant` et non `serie[serie.index <= ...]` : l'index
             # de Yahoo porte un fuseau horaire, la comparaison directe lève un
             # TypeError. Voyez core/dates.py.
-            serie = dates.dernier_avant(h["Close"], d)
+            serie = dates.dernier_avant(h["Close"].dropna(), d)
             if serie.empty:
                 raise FXIndisponible(devise, contre, str(date), "aucun cours antérieur")
             brut = float(serie.iloc[-1])
@@ -111,8 +117,12 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
     except Exception as exc:  # réseau, throttle, ticker inconnu
         raise FXIndisponible(devise, contre, str(date), str(exc)) from exc
 
-    if brut <= 0:
-        raise FXIndisponible(devise, contre, str(date), f"taux non positif ({brut})")
+    # `brut <= 0` ne suffit PAS : toute comparaison avec NaN est fausse. Un taux
+    # NaN se propagerait dans CHAQUE conversion euro du portefeuille — la
+    # valorisation entière deviendrait NaN, sans le moindre message d'erreur.
+    # Il faut tester NaN explicitement.
+    if brut != brut or brut in (float("inf"), float("-inf")) or brut <= 0:
+        raise FXIndisponible(devise, contre, str(date), f"taux inexploitable ({brut})")
 
     _cache[cle] = brut
     return brut

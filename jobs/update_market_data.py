@@ -29,10 +29,22 @@ log = logging.getLogger("market")
 
 DEVISES = ["EUR", "USD", "CHF", "JPY", "CNY", "GBP"]
 
+# Les devises sont membres de poches (`precaution`, `courant`) mais ne sont pas
+# des titres : elles n'ont pas de « cours » chez Yahoo, seulement un taux de
+# change — ce que traite la boucle plus bas. Les inclure ici faisait écrire,
+# chaque nuit, une alerte « Cours manquants : CHF, CNY, EUR, USD ». Fausse, et
+# surtout elle noie les vraies alertes.
+DEVISES_MEMBRES = set(DEVISES)
+
+
+def tickers_a_coter() -> list[str]:
+    """Les membres de poches qui sont de vrais titres cotés."""
+    return sorted({t for p in POCHES for t in p.membres if t not in DEVISES_MEMBRES})
+
 
 def main() -> int:
     aujourdhui = dt.date.today().isoformat()
-    tickers = sorted({t for p in POCHES for t in p.membres})
+    tickers = tickers_a_coter()
 
     # --- Cours ---
     lignes_cours, echecs = [], []

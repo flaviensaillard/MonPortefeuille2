@@ -38,7 +38,10 @@ if not ctx.actifs:
 # Positions
 # ---------------------------------------------------------------------------
 lignes = []
-for a in sorted(ctx.actifs, key=lambda x: -x.valeur_eur):
+# `-x.valeur_eur` lève `TypeError` si une valeur manque. `valoriser()` écarte les
+# actifs en échec, donc cela ne devrait pas arriver — mais si un jour un actif
+# sans valeur passait, mieux vaut le voir en bas de liste qu'une page blanche.
+for a in sorted(ctx.actifs, key=lambda x: -(x.valeur_eur or 0.0)):
     pos = ctx.positions.get(a.ticker)
     poche = POCHES_PAR_CLE.get(a.poche)
     lignes.append({

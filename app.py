@@ -20,6 +20,7 @@ import datetime as dt
 
 import streamlit as st
 
+from core import prices
 from core import session as S
 from core import ui
 from core.models import Perimetre
@@ -78,7 +79,8 @@ st.subheader("🪙 La mesure qui compte", help="Performance exprimée en onces d
 
 g1, g2, g3 = st.columns(3)
 if ctx.cours_or:
-    g1.metric("Cours de l'or", f"{ctx.cours_or:,.0f} $/oz", aide="Spot XAU/USD.")
+    g1.metric("Cours de l'or", f"{ctx.cours_or:,.0f} $/oz",
+              aide=f"Contrat à terme {prices.TICKER_OR} (COMEX) : Yahoo ne fournit plus le spot.")
 else:
     g1.metric("Cours de l'or", "—")
 
