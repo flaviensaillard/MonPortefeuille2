@@ -1,0 +1,24 @@
+# Diagnostic — à lancer quand un chiffre ne colle pas.
+#
+# Onglet Actions → « Diagnostic » → Run workflow.
+# Le rapport s'affiche dans le journal. Il ne modifie RIEN : lecture seule.
+
+name: Diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Diagnostic du portefeuille
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/diagnostic.py
