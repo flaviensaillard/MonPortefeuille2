@@ -113,3 +113,39 @@ class TestUiMetriqueTraduitAide:
         monkeypatch.setattr(ui.st, "metric", faux_metric)
         ui.metrique("Libellé", "Valeur")
         assert capture.get("help") is None
+
+
+class TestRafraichissementApresImport:
+    """Le cache doit expirer, et on doit pouvoir le vider à la main.
+
+    `charger()` est mémoïsé 5 minutes. Après un import, l'application continuait
+    donc à servir les anciennes transactions — un message d'erreur survivait à sa
+    propre correction, et l'utilisateur croyait le correctif inefficace. D'où un
+    bouton de rafraîchissement explicite.
+    """
+
+    def test_charger_expose_une_methode_clear(self):
+        from core import session as S
+        assert hasattr(S.charger, "clear"), (
+            "sans cache, impossible de forcer une relecture"
+        )
+
+    def test_vider_cache_ne_leve_pas(self):
+        from core import session as S
+        S.vider_cache()          # ne doit rien casser
+
+    def test_le_tableau_de_bord_a_un_bouton_de_rafraichissement(self):
+        src = (RACINE / "app.py").read_text(encoding="utf-8")
+        assert "Rafraîchir" in src, "aucun moyen de forcer la relecture après un import"
+        assert "S.vider_cache()" in src
+
+    def test_le_ttl_est_court(self):
+        """Un TTL de plusieurs minutes fait survivre une erreur corrigée."""
+        src = (RACINE / "core" / "session.py").read_text(encoding="utf-8")
+        ligne = next(
+            (l for l in src.splitlines() if "st.cache_data" in l and "ttl" in l),
+            "",
+        )
+        assert "ttl=" in ligne, f"TTL introuvable dans : {ligne!r}"
+        secondes = int(ligne.split("ttl=")[1].split(",")[0].strip())
+        assert secondes <= 300, f"TTL trop long : {secondes} s"

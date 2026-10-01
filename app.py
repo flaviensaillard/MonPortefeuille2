@@ -30,6 +30,17 @@ st.set_page_config(page_title="Mon Portefeuille", page_icon="📊", layout="wide
 
 st.title("📊 Tableau de bord")
 
+# `charger()` est mémoïsé 5 minutes (`st.cache_data(ttl=300)`). Après un import,
+# l'application continuait donc à servir les anciennes transactions — d'où un
+# message d'erreur qui survivait à sa propre correction. Le bouton vide le cache
+# et relance le calcul.
+col_titre, col_rafraichir = st.columns([5, 1])
+with col_rafraichir:
+    if st.button("🔄 Rafraîchir", width="stretch",
+                 help="Relecture depuis Supabase. À utiliser après un import."):
+        S.vider_cache()
+        st.rerun()
+
 ctx = S.charger()
 
 for err in ctx.erreurs:

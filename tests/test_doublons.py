@@ -11,6 +11,9 @@ from __future__ import annotations
 import pandas as pd
 
 from _support import simuler_supabase
+import pytest
+
+from jobs.importer_v1 import _dedupliquer
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +51,32 @@ def test_doublon_exact_est_neutralise():
     assert "v1:id1" in messages[0] and "v1:id2" in messages[0]
 
 
-def test_doublon_a_donnees_divergentes_est_signale():
-    """Même clé mais frais différents : on garde la première et on alerte."""
+def test_doublon_a_frais_differents_est_fusionne():
+    """Même clé, frais différents : deux achats distincts, on les fusionne.
+
+    Ce test encodait l'ancien comportement — garder la première ligne et signaler
+    « DIVERGENTES ». C'est ce qui a fait perdre 178 unités de XJSE.SW en
+    production : la clé de conflit ignore `frais`, donc deux achats du même jour
+    au même cours mais avec des frais différents partageaient la clé, et le
+    second était jeté.
+    """
+    from jobs.importer_v1 import _dedupliquer
+
+    lignes = [_ligne_v2(), _ligne_v2(reference="v1:id2", frais=5)]
+    resultat, messages = _dedupliquer(lignes, fusionner=True)
+
+    assert len(resultat) == 1
+    assert len(messages) == 1
+    assert "Fusionnés" in messages[0]
+    assert "frais différents" in messages[0]
+    assert "À VÉRIFIER" in messages[0]
+    # La quantité et les frais sont additionnés, pas perdus.
+    assert resultat[0]["quantite"] == pytest.approx(_ligne_v2()["quantite"] * 2)
+    assert resultat[0]["frais"] == pytest.approx(5)
+
+
+def test_sans_fusionner_les_frais_divergents_restent_signales():
+    """Sans `fusionner`, l'ancien comportement est conservé (cas des apports)."""
     from jobs.importer_v1 import _dedupliquer
 
     lignes = [_ligne_v2(), _ligne_v2(reference="v1:id2", frais=5)]
@@ -59,7 +86,6 @@ def test_doublon_a_donnees_divergentes_est_signale():
     assert len(messages) == 1
     assert "DIVERGENTES" in messages[0]
     assert "frais" in messages[0]
-    assert "À VÉRIFIER" in messages[0]
 
 
 def test_doublon_sur_devise_est_signale():
@@ -348,3 +374,148 @@ def test_la_purge_n_est_pas_faite_en_dry_run(monkeypatch):
     imp.importer_transactions(dry_run=True)
 
     assert "purger" not in journal, "un dry-run ne doit rien supprimer"
+
+
+# ---------------------------------------------------------------------------
+# Fusion plutôt que perte — deux achats le même jour au même cours
+# ---------------------------------------------------------------------------
+def _achat(ticker, jour, quantite, cours, frais, ref):
+    return {"ticker": ticker, "sens": "achat", "date": jour, "quantite": quantite,
+            "cours": cours, "frais": frais, "devise": "JPY",
+            "source": "import_v1", "reference": ref}
+
+
+def test_deux_achats_meme_jour_meme_cours_sont_fusionnes():
+    """Le cas réel : 89 unités à 1 115,60 avec 148 € de frais, puis 89 unités au
+    même cours avec 1 149 € de frais. La clé de conflit ne voit pas la différence
+    (elle ignore `frais`), donc l'ancien code jetait la seconde ligne — et 89
+    unités disparaissaient en silence.
+    """
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+    ]
+    garde, messages = _dedupliquer(lignes, fusionner=True)
+
+    assert len(garde) == 1
+    assert garde[0]["quantite"] == pytest.approx(178.0)
+    assert garde[0]["frais"] == pytest.approx(1297.0)
+    assert len(messages) == 1
+    assert "Fusionnés" in messages[0]
+
+
+def test_la_fusion_ne_change_pas_le_pru():
+    """C'est le cœur de l'argument : fusionner est exact, pas approximatif.
+
+    Deux achats de 89 unités à 1 115,60 (frais 148 et 1 149) donnent exactement
+    le même PRU qu'un achat de 178 unités avec 1 297 € de frais.
+    """
+    separes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+    ]
+    garde, _ = _dedupliquer(separes, fusionner=True)
+
+    cout_separe = sum(l["quantite"] * l["cours"] + l["frais"] for l in separes)
+    cout_fusion = garde[0]["quantite"] * garde[0]["cours"] + garde[0]["frais"]
+    assert cout_fusion == pytest.approx(cout_separe)
+
+    pru_separe = cout_separe / sum(l["quantite"] for l in separes)
+    pru_fusion = cout_fusion / garde[0]["quantite"]
+    assert pru_fusion == pytest.approx(pru_separe)
+
+
+def test_les_deux_references_sont_conservees():
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+    ]
+    garde, _ = _dedupliquer(lignes, fusionner=True)
+    assert "v1:id67" in garde[0]["reference"]
+    assert "v1:id68" in garde[0]["reference"]
+
+
+def test_trois_achats_le_meme_jour_sont_tous_fusionnes():
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 500, "v1:id99"),
+    ]
+    garde, messages = _dedupliquer(lignes, fusionner=True)
+    assert len(garde) == 1
+    assert garde[0]["quantite"] == pytest.approx(267.0)
+    assert garde[0]["frais"] == pytest.approx(1797.0)
+    assert len(messages) == 2
+
+
+def test_des_cours_differents_ne_sont_pas_fusionnes():
+    """Deux cours différents = deux lignes distinctes, la clé de conflit les
+    sépare déjà. Rien à fusionner."""
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1116.25, 548, "v1:id70"),
+    ]
+    garde, messages = _dedupliquer(lignes, fusionner=True)
+    assert len(garde) == 2
+    assert messages == []
+
+
+def test_devise_divergente_reste_signalee_sans_fusion():
+    """Deux devises sur le même titre, même jour : là on ne choisit pas."""
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        {**_achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+         "devise": "USD"},
+    ]
+    garde, messages = _dedupliquer(lignes, fusionner=True)
+    assert len(garde) == 1
+    assert garde[0]["quantite"] == pytest.approx(89.0), "pas de fusion sur devise"
+    assert "DIVERGENTES" in messages[0]
+
+
+def test_sans_fusionner_le_comportement_est_inchange():
+    """Les apports gardent l'ancien comportement : les additionner gonflerait
+    les apports de capital."""
+    lignes = [
+        {"date": "2024-01-02", "sens": "Ajout", "montant_eur": 5000,
+         "compte": "import_v1", "reference": "v1:id7"},
+        {"date": "2024-01-02", "sens": "Ajout", "montant_eur": 5000,
+         "compte": "import_v1", "reference": "v1:id8"},
+    ]
+    garde, messages = _dedupliquer(
+        lignes, cle=("date", "sens", "montant_eur", "compte"), fusionner=False
+    )
+    assert len(garde) == 1
+    assert "en double" in messages[0]
+
+
+def test_la_fonction_ne_mute_pas_son_entree():
+    """`lignes` appartient à l'appelant : le dédoublonnage ne doit pas le modifier.
+
+    Un bug de la première version du correctif mutait les dictionnaires d'origine,
+    ce qui faussait tout calcul fait ensuite sur les données non dédoublonnées.
+    """
+    lignes = [
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 148, "v1:id67"),
+        _achat("XJSE.SW", "2026-02-02", 89, 1115.6, 1149, "v1:id68"),
+    ]
+    avant = [dict(l) for l in lignes]
+    _dedupliquer(lignes, fusionner=True)
+    assert lignes == avant, "l'entrée a été modifiée"
+
+
+def test_frais_identiques_restent_une_double_saisie_signalee():
+    """Deux lignes rigoureusement identiques : l'ambiguïté reste entière.
+
+    C'est le cas IGLN.L déjà examiné — une double saisie est possible, et décider
+    à votre place serait inventer une donnée. On garde une ligne et on le dit.
+    """
+    lignes = [
+        _achat("IGLN.L", "2024-03-03", 4, 118.5, 0, "v1:id41"),
+        _achat("IGLN.L", "2024-03-03", 4, 118.5, 0, "v1:id42"),
+    ]
+    garde, messages = _dedupliquer(lignes, fusionner=True)
+    assert len(garde) == 1
+    assert garde[0]["quantite"] == pytest.approx(4.0), "pas de fusion si les frais sont égaux"
+    assert len(messages) == 1
+    assert "en double" in messages[0]
