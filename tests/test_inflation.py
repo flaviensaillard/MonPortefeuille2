@@ -239,3 +239,116 @@ class TestPerimetreDuCalcul:
         assert ui.SELECTEUR["IND_TYPE"] == "IX"
         assert ui.SELECTEUR["TPH_CPI"] == "_T"
         assert ui.SELECTEUR["FREQ"] == "M"
+
+
+class TestLEcritureEstUnUpsert:
+    """Le premier lancement réel du robot s'est arrêté sur ceci :
+
+        POST /rest/v1/pf2_inflation            -> 409 Conflict
+        duplicate key value violates unique constraint "pf2_inflation_pkey"
+        Key (annee)=(2021) already exists.
+
+    L'ancien jeu de chiffres était en base, la clé primaire de `pf2_inflation`
+    est `annee`, et le robot faisait un INSERT. Il échouait donc AVANT d'écrire
+    quoi que ce soit — 2026 compris, l'année qui manquait justement. Un robot
+    quotidien qui plante dès la deuxième nuit ne sert à rien : la même table est
+    réécrite chaque nuit avec les mêmes années.
+    """
+
+    def _serie(self):
+        # Deux années closes et une en cours, de quoi produire les trois cas.
+        serie = {}
+        for an, base in ((2023, 100.0), (2024, 104.88), (2025, 106.98)):
+            for m in range(1, 13):
+                serie[f"{an}-{m:02d}"] = base + m * 0.1
+        for m in range(1, 10):
+            serie[f"2026-{m:02d}"] = 106.98 + m * 0.9
+        return serie
+
+    def _faux_db(self, monkeypatch):
+        """Une base qui se comporte comme la vraie : `annee` est une clé."""
+        etat = {"annee": {2023}, "appels": []}
+
+        class Table:
+            def __init__(self, nom):
+                self.nom = nom
+
+            def insert(self, lignes):
+                etat["appels"].append(("insert", list(lignes)))
+                annees = [l.get("annee") for l in lignes]
+                if 2023 in annees:
+                    raise RuntimeError(
+                        'duplicate key value violates unique constraint '
+                        '"pf2_inflation_pkey"'
+                    )
+                etat["annee"].update(annees)
+                return self
+
+            def upsert(self, lignes, on_conflict=""):
+                etat["appels"].append(("upsert", list(lignes), on_conflict))
+                etat["annee"].update(l.get("annee") for l in lignes)
+                if on_conflict != "annee":
+                    raise RuntimeError("upsert sans on_conflict : conflit impossible à cibler")
+                return self
+
+            def execute(self):
+                return type("R", (), {"data": [{"annee": a} for a in etat["annee"]]})()
+
+        monkeypatch.setattr(db, "client", lambda: type(
+            "C", (), {"table": staticmethod(lambda n: Table(n))})())
+        # On patche `db.inflation` elle-meme : ce test porte sur le MODE
+        # D'ECRITURE, et la lecture a deja ses propres tests. Passer par le
+        # vrai lecteur obligerait a simuler aussi son renommage de colonnes.
+        monkeypatch.setattr(db, "inflation", lambda: pd.DataFrame([
+            {"annee": a, "inflation": 1.0, "source": "x"}
+            for a in sorted(etat["annee"])
+        ]))
+        return etat
+
+    def test_le_robot_ne_plante_pas_sur_une_annee_deja_en_base(self, monkeypatch, tmp_path):
+        etat = self._faux_db(monkeypatch)
+        monkeypatch.setattr(ui, "_telecharger", lambda: self._serie())
+        monkeypatch.setattr(ui, "serie_mensuelle", lambda brut: brut)
+
+        code = ui.main()
+
+        assert code == 0, "le robot doit finir normalement, pas sur un 409"
+        assert any(a[0] == "upsert" for a in etat["appels"]), \
+            "l'écriture doit passer par un upsert"
+
+    def test_l_upsert_vise_la_bonne_cle(self, monkeypatch):
+        """`on_conflict` doit nommer `annee` : sans lui, PostgREST ne connaît
+        pas l'index sur lequel arbitrer, et l'erreur revient."""
+        etat = self._faux_db(monkeypatch)
+        monkeypatch.setattr(ui, "_telecharger", lambda: self._serie())
+        monkeypatch.setattr(ui, "serie_mensuelle", lambda brut: brut)
+
+        ui.main()
+
+        upserts = [a for a in etat["appels"] if a[0] == "upsert"]
+        assert upserts and upserts[0][2] == "annee"
+
+    def test_l_annee_provisoire_est_reecrite_chaque_nuit(self, monkeypatch):
+        """2026 est provisoire : il doit être réécrit à chaque passage, sans
+        quoi le chiffre de janvier resterait figé toute l'année."""
+        etat = self._faux_db(monkeypatch)
+        monkeypatch.setattr(ui, "_telecharger", lambda: self._serie())
+        monkeypatch.setattr(ui, "serie_mensuelle", lambda brut: brut)
+
+        ui.main()
+
+        ecrites = [l for appel in etat["appels"] if appel[0] == "upsert" for l in appel[1]]
+        assert any(l["annee"] == 2026 for l in ecrites)
+
+    def test_une_annee_close_deja_en_base_ne_rouvre_pas(self, monkeypatch):
+        """2023 est close et en base : elle ne doit pas être réécrite. Une
+        année close ne bouge plus — sinon la performance passée changerait
+        sous les pieds de l'utilisateur."""
+        etat = self._faux_db(monkeypatch)
+        monkeypatch.setattr(ui, "_telecharger", lambda: self._serie())
+        monkeypatch.setattr(ui, "serie_mensuelle", lambda brut: brut)
+
+        ui.main()
+
+        ecrites = [l for appel in etat["appels"] if appel[0] == "upsert" for l in appel[1]]
+        assert not any(l["annee"] == 2023 for l in ecrites)

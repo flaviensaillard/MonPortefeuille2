@@ -55,7 +55,10 @@ snaps = snaps.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 flux_jour = S.flux_par_date(ctx.apports)
 
 
-flux = [flux_jour.get(d.date(), 0.0) for d in snaps["Date"]]
+# Par PÉRIODE, pas par date exacte. L'historique de la v1 est mensuel jusqu'en
+# avril 2026 : une correspondance exacte perdrait silencieusement tout versement
+# tombé entre deux snapshots, et gonflerait le TWR d'autant.
+flux = metrics.flux_par_periode([d.date() for d in snaps["Date"]], flux_jour)
 
 valeurs = snaps["patrimoine_investi_eur"].astype(float).tolist()
 
@@ -74,6 +77,84 @@ twr_ann = metrics.annualiser(twr_total, jours)
 # oublié, mais on peut repérer le cas où c'est le plus probable, et le dire.
 for alerte in metrics.controle_apports(valeurs, flux, jours):
     st.error("⚠️ " + alerte)
+
+# --- Les sauts non expliqués, jour par jour ---
+# DÉFAUT QUI A PRODUIT +26,2 % AU LIEU DE +4,10 %.
+#
+# Le 02/02/2026, la valeur investie passe de 55 639,93 € à 64 808,82 € alors que
+# 200 € de flux sont enregistrés ce jour-là. Le TWR compte les 9 169 € restants
+# comme du rendement : +16,5 % en une séance sur un portefeuille de quatre ETF.
+#
+# Le contrôle ci-dessus ne pouvait pas l'attraper : il ne se déclenche que
+# lorsqu'AUCUN flux n'existe sur la période. Ici il y en a 38 — sur d'autres
+# jours. Le trou est localisé, pas global.
+sauts = metrics.sauts_non_expliques(
+    [d.date() for d in snaps["Date"]], valeurs, flux
+)
+
+if sauts:
+    st.divider()
+    st.subheader("⚠️ Mouvements sans flux enregistré")
+    st.caption(
+        "Ces mouvements ne sont pas de la performance. Le chiffre plus haut les "
+        "compte comme telle, donc il est trop flatteur. Corrigez-les, et il "
+        "deviendra juste."
+    )
+
+    for saut in sauts:
+        st.error(metrics.anomalie_saut(saut))
+
+    flux_corrige = metrics.flux_corrige_des_sauts(flux, sauts)
+    rendements_corriges = metrics.rendements_periode(valeurs, flux_corrige)
+    twr_corrige = metrics.twr(rendements_corriges)
+
+    c1, c2 = st.columns(2)
+    c1.metric("TWR affiché ci-dessus", ui.pct(twr_total, signe=True),
+              help="Ce qu'on obtient en prenant vos données telles quelles.")
+    c2.metric("TWR une fois ces mouvements enregistrés",
+              ui.pct(twr_corrige, signe=True),
+              delta=ui.points((twr_corrige - twr_total) * 100, 2),
+              help="Ce que vous auriez gagné si ces mouvements avaient été "
+                   "saisis comme des apports.")
+
+    st.info(
+        "**Comment corriger.** Chaque saut est un mouvement réel qui n'a pas "
+        "été saisi : un virement depuis le livret CHF, une position ajoutée à "
+        "la main, ou un versement oublié. Déclarez-le comme un **apport** à sa "
+        "date dans 🪙 Mouvements de fonds, et le chiffre se corrige tout seul. "
+        "Pour ce portefeuille, c'est environ **"
+        f"{ui.eur(sum(s['residuel'] for s in sauts))}** à répartir sur "
+        f"{len(sauts)} date(s)."
+    )
+
+# --- Les flux que la valeur n'a pas suivis ---
+# Le miroir exact du bloc ci-dessus : là, la valeur montait sans flux ; ici, un
+# flux est enregistré et la valeur ne suit pas. Le cas réel trouvé dans
+# l'historique v1 : un apport de 10 800 € le 29/04/2024, et une valeur qui
+# augmente de 23 € ce mois-là. Sans ce contrôle, 2024 s'affiche à −24,9 %.
+fantomes = metrics.fluxs_sans_effet(
+    [d.date() for d in snaps["Date"]], valeurs, flux
+)
+
+if fantomes:
+    st.divider()
+    st.subheader("⚠️ Apports que la valeur n'a pas suivis")
+    st.caption(
+        "Un versement est enregistré, mais la valeur du portefeuille ne bouge "
+        "pas d'autant. C'est l'inverse du cas précédent, et le résultat est le "
+        "même : le chiffre plus haut est faux."
+    )
+
+    for f in fantomes:
+        st.error(metrics.anomalie_flux_sans_effet(f))
+
+    st.info(
+        "**Deux causes possibles, et une seule est dans vos données.** Soit le "
+        "versement n'a jamais eu lieu — une ligne saisie deux fois, ou une date "
+        "erronée —, soit il a eu lieu, mais la valorisation de ce mois-là a été "
+        "oubliée. Regardez votre relevé à cette date : la réponse y est en "
+        "trente secondes. C'est la seule chose que je ne peux pas deviner."
+    )
 
 with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=False):
     t1, t2, t3, t4 = st.columns(4)

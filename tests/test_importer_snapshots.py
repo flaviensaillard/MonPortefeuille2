@@ -1,15 +1,24 @@
-"""Import de l'historique mensuel de la v1 — `importer_snapshots()`.
+"""Import de l'historique de valorisation de la v1 — `importer_snapshots()`.
 
 Pourquoi ce fichier existe
 --------------------------
-La table `Historique` de la v1 porte les valuations mensuelles depuis 2023.
-`importer_v1.py` n'en extrayait que les mouvements de trésorerie : les trois ans
-et demi de valorisation n'avaient aucune destination, et un portefeuille suivi
-depuis 2023 repartait de zéro côté graphiques.
+La table s'appelle `Projections`. Elle a été cherchée pendant trois rounds :
+`Historique` n'en portait que la trésorerie, et les vingt-deux autres noms
+essayés n'existaient pas. Ces 180 lignes, du 01/04/2023 au 01/10/2026, sont
+l'historique complet du portefeuille.
 
-Ces tests vérifient surtout que **rien n'est inventé** : la répartition par poche
-n'existe pas dans la v1, donc elle reste NULL plutôt que devinée, et une ligne
-écartée est toujours signalée.
+Ces tests vérifient surtout que **rien n'est inventé** :
+
+- la répartition par poche n'existe pas dans la v1, donc elle reste NULL ;
+- un jour sans taux de change disponible voit sa ligne ÉCARTÉE, pas convertie
+  au hasard — le pire des résultats serait de rendre 1,0 et d'écrire un facteur
+  1,13 d'erreur sans bruit ;
+- les montants de la v1 sont en DOLLARS et doivent être convertis.
+
+Et une chose qui n'est pas de l'invention mais un choix : la série du robot de
+la v2 est retirée sur la période que la v1 couvre. Voyez `_purger_la_fenetre`
+pour le pourquoi — en un mot, la v2 était 9 900 € trop basse avant le
+02/02/2026, et mélanger les deux séries produirait un faux mouvement de plus.
 """
 
 from __future__ import annotations
@@ -38,29 +47,92 @@ LIGNES = [
 ]
 
 
+class _Ecrites(list):
+    """Les lignes écrites — et, accrochés dessus, ce qui a été retiré.
+
+    Une liste, parce que les tests la parcourent comme avant ; des attributs en
+    plus, parce que la purge doit pouvoir être vérifiée sans casser les
+    assertions existantes.
+    """
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.retires: list[str] = []
+        self.existants: list[dict] = []
+
+
+class _FauxClient:
+    """Le minimum du client Supabase : `select`, `upsert`, `insert`, `delete`."""
+
+    def __init__(self, ecrites, existants):
+        self.ecrites = ecrites
+        self.existants = existants
+        self.retires = ecrites.retires
+
+    def table(self, nom):
+        return _FauxTable(self)
+
+    # `db.lire` fait `client().table(t).select("*").execute()`.
+    def select(self, *a, **k):
+        pass
+
+
+class _Reponse:
+    def __init__(self, data):
+        self.data = data
+
+    def execute(self):
+        return self
+
+
+class _FauxTable:
+    def __init__(self, client):
+        self.c = client
+
+    def select(self, *a, **k):
+        return _Reponse(list(self.c.existants))
+
+    def upsert(self, ligne, on_conflict=None):
+        self.c.ecrites.append(ligne)
+        return _Reponse([])
+
+    def insert(self, lignes):
+        if isinstance(lignes, dict):
+            lignes = [lignes]
+        self.c.ecrites.extend(lignes)
+        return _Reponse(list(lignes))
+
+    def update(self, champs):
+        return _Suppression(self.c)
+
+    def delete(self):
+        return _Suppression(self.c)
+
+
+class _Suppression:
+    def __init__(self, client):
+        self.c = client
+
+    def eq(self, *a, **k):
+        return _Reponse([])
+
+    def in_(self, champ, lot):
+        self.c.retires.extend(lot)
+        return _Reponse([])
+
+
 @pytest.fixture
 def _v1(monkeypatch):
-    """Remplace `lire_v1` et neutralise l'écriture."""
-    ecritures = []
-
-    def table(nom):
-        def delete():
-            def eq(*a):
-                def execute():
-                    return type("R", (), {"data": []})()
-                return type("D", (), {"execute": staticmethod(execute)})()
-            return type("E", (), {"eq": staticmethod(eq)})()
-        def upsert(ligne, on_conflict=None):
-            ecritures.append(ligne)
-            return type("U", (), {"execute": staticmethod(lambda: None)})()
-        return type("T", (), {
-            "delete": staticmethod(delete),
-            "upsert": staticmethod(upsert),
-        })()
-
-    client = type("C", (), {"table": staticmethod(table)})()
+    """Remplace `lire_v1` et neutralise l'écriture. Aucun accès réseau."""
+    ecritures = _Ecrites()
+    client = _FauxClient(ecritures, ecritures.existants)
     monkeypatch.setattr(imp.db, "client", lambda: client)
+    monkeypatch.setattr(imp.db, "lire", lambda t: pd.DataFrame(ecritures.existants))
     monkeypatch.setattr(imp, "lire_v1", lambda t: pd.DataFrame(LIGNES))
+    # Le taux de change est réel dans l'application et figé ici : un test qui
+    # dépend de Yahoo tomberait au premier incident chez eux, et personne ne
+    # saurait si c'est le code ou le réseau.
+    monkeypatch.setattr(imp, "_taux_usd_eur", lambda jour: 1.0)
     return ecritures
 
 
@@ -129,3 +201,144 @@ def test_les_colonnes_de_performance_ne_sont_pas_importees(monkeypatch, _v1):
     for ligne in _v1:
         assert "Score TWR %" not in ligne
         assert "Evolution cumulée %" not in ligne
+
+
+# --------------------------------------------------------------------------
+# La conversion : les montants de la v1 sont en dollars
+# --------------------------------------------------------------------------
+class TestLaConversionDesDollars:
+    """`Actifs Stratégiques` et `Total Global` sont en USD.
+
+    Deux preuves, faites sur les données réelles plutôt que supposées :
+
+    1. les cours de `Donnees` sont les cotes brutes de Yahoo (IGLN.L à 79,96
+       quand Yahoo cote 80,865 — la cote USD de Londres, pas une conversion) ;
+    2. `Total_Apports_nets` passe de 58 378,92 à 58 625,92 le 05/06/2026, soit
+       +247,00 : le `Montant $` de la ligne, quand `Montant €` dit 212,42.
+
+    Sans conversion, l'historique entre 12 % trop haut en niveau et, plus grave,
+    la performance mélange le rendement des actifs et la variation de l'euro.
+    """
+
+    def test_les_montants_sont_converti(self, _v1, monkeypatch):
+        monkeypatch.setattr(imp, "_taux_usd_eur", lambda jour: 0.90)
+        imp.importer_snapshots(dry_run=False)
+        premiere = next(e for e in _v1 if e["date"] == "2023-04-01")
+        assert premiere["patrimoine_investi_eur"] == pytest.approx(10905 * 0.90)
+        assert premiere["patrimoine_total_eur"] == pytest.approx(33668 * 0.90)
+
+    def test_la_precaution_reste_l_ecart_apres_conversion(self, _v1, monkeypatch):
+        """L'écart entre les deux colonnes ne dépend pas du taux : il subit la
+        même multiplication, donc la répartition reste juste."""
+        monkeypatch.setattr(imp, "_taux_usd_eur", lambda jour: 1.13)
+        imp.importer_snapshots(dry_run=False)
+        premiere = next(e for e in _v1 if e["date"] == "2023-04-01")
+        ecart = (33668 - 10905) * 1.13
+        assert premiere["precaution_eur"] == pytest.approx(ecart)
+
+    def test_un_jour_sans_taux_voit_sa_ligne_ecartee(self, _v1, monkeypatch, caplog):
+        """Rendre 1,0 serait la pire des réponses : la ligne entrerait en base
+        avec un facteur 1,13 d'erreur et aucun signe visible."""
+        monkeypatch.setattr(
+            imp, "_taux_usd_eur",
+            lambda jour: None if jour == "2023-04-30" else 1.0,
+        )
+        with caplog.at_level("WARNING"):
+            n = imp.importer_snapshots(dry_run=False)
+
+        assert n == 3, "les quatre dates moins celle sans taux"
+        assert "2023-04-30" not in {e["date"] for e in _v1}
+        assert "2023-04-30" in caplog.text
+        assert "écartée" in caplog.text
+
+    def test_un_taux_null_ou_negatif_ne_passe_pas(self):
+        """`_taux_usd_eur` ne rend jamais 0 ni un nombre négatif."""
+        import types as _t
+        class Rep:
+            data = []
+        def faux(jour):
+            return 0.0
+        # On teste directement `_taux_usd_eur` sur un cas dégénéré : la fonction
+        # doit transformer un taux nul en refus, pas le laisser passer.
+        vrai_fx = imp.fx.taux
+        imp.fx.taux = faux
+        try:
+            assert imp._taux_usd_eur("2023-04-01") is None
+        finally:
+            imp.fx.taux = vrai_fx
+
+    def test_une_exception_de_change_devient_un_refus(self):
+        """Le réseau tombe : on écarte la ligne, on ne fait pas échouer tout
+        l'import — et surtout on n'écrit pas 1,0."""
+        def boum(*a, **k):
+            raise RuntimeError("Yahoo indisponible")
+        vrai_fx = imp.fx.taux
+        imp.fx.taux = boum
+        try:
+            assert imp._taux_usd_eur("2023-04-01") is None
+        finally:
+            imp.fx.taux = vrai_fx
+
+
+# --------------------------------------------------------------------------
+# La purge de la fenêtre
+# --------------------------------------------------------------------------
+class TestLaPurgeDeLaFenetre:
+    """La v2 était 9 900 € trop basse avant le 02/02/2026.
+    Mesure : au 31/01/2026, `Actifs Stratégiques` = 78 416 USD, soit 65 534 €
+    au taux réel du jour, quand la v2 affichait 55 640 €.
+
+    Depuis fin février les deux séries concordent (0,13 % au 28/02, 0,97 % au
+    01/10). Le désaccord est localisé avant. Mélanger les deux créerait une
+    scie, et le TWR lirait chaque passage d'une série à l'autre comme un
+    mouvement de plus.
+    """
+
+    def _existants(self, dates):
+        return [{"date": d, "patrimoine_investi_eur": 1000.0} for d in dates]
+
+    def test_les_lignes_de_la_v2_hors_dates_v1_sont_retirees(self, _v1):
+        _v1.existants.extend(self._existants([
+            "2023-04-01", "2023-04-15", "2023-04-30", "2023-05-02",
+        ]))
+        imp.importer_snapshots(dry_run=False)
+        assert "2023-04-15" in _v1.retires
+        assert "2023-05-02" in _v1.retires
+
+    def test_les_dates_de_la_v1_sont_conservees(self, _v1):
+        _v1.existants.extend(self._existants(["2023-04-01", "2023-04-15"]))
+        imp.importer_snapshots(dry_run=False)
+        assert "2023-04-01" not in _v1.retires
+
+    def test_rien_hors_de_la_fenetre_n_est_touche(self, _v1):
+        """Un snapshot de 2024 a sa place : la v1 ne couvre pas ce trou, le
+        robot de la v2 le remplit et on n'y touche pas."""
+        _v1.existants.extend(self._existants(["2022-01-01", "2027-01-01"]))
+        imp.importer_snapshots(dry_run=False)
+        assert "2022-01-01" not in _v1.retires
+        assert "2027-01-01" not in _v1.retires
+
+    def test_le_dry_run_ne_retire_rien(self, _v1, caplog):
+        _v1.existants.extend(self._existants(["2023-04-15"]))
+        with caplog.at_level("INFO"):
+            imp.importer_snapshots(dry_run=True)
+        assert _v1.retires == []
+        assert "seraient retir" in caplog.text
+
+    def test_le_dry_run_dit_combien_de_lignes_seraient_retirees(self, _v1, caplog):
+        _v1.existants.extend(self._existants(["2023-04-15", "2023-04-20"]))
+        with caplog.at_level("INFO"):
+            imp.importer_snapshots(dry_run=True)
+        assert "2 ligne(s) seraient retir" in caplog.text
+
+    def test_une_lecture_impossible_ne_fait_pas_echouer_l_import(self, _v1, monkeypatch, caplog):
+        """Si la lecture des snapshots tombe, on garde l'écriture et on signale.
+        Refuser tout l'import pour une purge ratée serait pire : les 180 lignes
+        de la v1 seraient perdues pour une question de ménage."""
+        def boum(t):
+            raise RuntimeError("PostgREST indisponible")
+        monkeypatch.setattr(imp.db, "lire", boum)
+        with caplog.at_level("ERROR"):
+            n = imp.importer_snapshots(dry_run=False)
+        assert n == 4
+        assert "rien n'est purgé" in caplog.text

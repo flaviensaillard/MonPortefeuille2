@@ -252,7 +252,14 @@ def main() -> int:
         log.info("Inflation déjà à jour (%d années en base).", len(deja))
     else:
         try:
-            db.ecrire(db.T_INFLATION, a_ecrire)
+            # UPSERT, pas INSERT. La clé primaire de `pf2_inflation` est `annee` :
+            # un insert échoue en 409 dès que l'année existe déjà, et elle existe
+            # toujours — le robot tourne chaque nuit sur les mêmes années. Le
+            # premier lancement réel s'est arrêté là, sur « Key (annee)=(2021)
+            # already exists », sans rien écrire du tout : pas même le 2026 qui
+            # manquait. L'upsert rend le robot idempotent, ce qu'un robot
+            # quotidien doit être par définition.
+            db.remplacer(db.T_INFLATION, a_ecrire, on_conflict="annee")
         except Exception as exc:
             log.error("Écriture de l'inflation échouée : %s", exc)
             return 1

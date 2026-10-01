@@ -22,7 +22,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import db  # noqa: E402
+from core import db, fx  # noqa: E402
 from core.portfolio import DEVISES_COTATION  # noqa: E402
 from core.dates import parser
 
@@ -31,7 +31,8 @@ log = logging.getLogger("import")
 
 # Tables de la v1.
 V1_TRANSACTIONS = "Transaction"
-V1_HISTORIQUE = "Historique"
+V1_HISTORIQUE = "Historique"          # journal de tresorerie (apports, retraits)
+V1_PROJECTIONS = "Projections"        # valorisations : 180 lignes, 04/2023 -> 10/2026
 
 
 def lire_v1(table: str) -> pd.DataFrame:
@@ -384,21 +385,43 @@ def importer_apports(dry_run: bool = False) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Historique mensuel de la v1 -> pf2_snapshots
+# Historique de valorisation de la v1 -> pf2_snapshots
 # ---------------------------------------------------------------------------
-# La table `Historique` de la v1 porte deux choses dans la meme table : les
-# mouvements de tresorerie (colonne `Type` = « Ajout » / « Retrait »), que
-# `importer_apports` traite, et les valuations mensuelles. Ces dernieres
-# n'avaient aucune destination : seuls les snapshots quotidiens du robot
-# remplissaient `pf2_snapshots`, un soir a la fois.
+# LA TABLE, ENFIN NOMMEE : `Projections`.
 #
-# Consequence : un portefeuille suivi depuis 2023 dans la v1 repartait de zero
-# cote graphiques. Ces 180 lignes mensuelles sont trois ans et demi d'histoire,
-# et elles existent deja — il suffisait de les prendre.
+# Elle a ete cherchee pendant trois rounds. `Historique` n'en portait que la
+# tresorerie ; les vingt-deux autres noms essayes n'existaient pas, et la racine
+# PostgREST repondait 401 — l'inventaire des tables n'est pas accessible avec la
+# cle publique. La liste est venue du tableau de bord Supabase, et le nom etait
+# dans le fichier depuis le debut : 180 lignes, du 01/04/2023 au 01/10/2026,
+# exactement la periode demandee.
+#
+# Verification faite, pas supposee : au 01/10/2026, la somme des cinq positions
+# de `Donnees` (IGLN 140, XDW0 334, XJSE 2 255, FLXC 800, BTC 0,05747) vaut
+# 79 394,14 — et `Actifs Stratégiques` affiche 79 394,14. `Total Global` vaut
+# 92 089,39, soit ces cinq positions plus la tresorerie et RI.PA. La colonne est
+# donc bien le perimetre investi, et l'autre bien le patrimoine entier.
+#
+# ELLES SONT EN DOLLARS. C'est le piege de cette table.
+#
+# Deux mesures le prouvent. D'abord les cours : `Donnees` affiche IGLN.L a
+# 79,96 et Yahoo cote IGLN.L 80,865 — la cote brute en USD de la place de
+# Londres, pas une conversion. Ensuite le compteur d'apports : `Total_Apports_
+# nets` passe de 58 378,92 a 58 625,92 le 05/06/2026, soit +247,00 — le
+# `Montant $` de la ligne, quand la colonne `Montant €` dit 212,42.
+#
+# D'ou la conversion, faite ligne par ligne avec le taux reel du jour
+# (`core.fx`). Sans elle l'historique entrerait 12 % trop haut en niveau et,
+# plus grave, la performance melangerait le rendement des actifs et la variation
+# de l'euro — deux choses distinctes, et c'est le rendement en euros qui vous
+# concerne.
+#
+# Un jour sans taux de change disponible : la ligne est ECARTEE et signalee.
+# On ne comble pas un trou par une valeur plausible, on le montre.
 #
 # Ce qui N'est PAS importe : les colonnes de performance (`Score TWR %`,
-# `Evolution cumulee %`...). pf2 calcule le TWR a la demande depuis les
-# snapshots, il ne le stocke jamais. C'est le principe meme de
+# `Evolution cumulee %`, `Capital investi`). pf2 calcule le TWR a la demande
+# depuis les snapshots, il ne le stocke jamais. C'est le principe meme de
 # `jobs/daily_snapshot.py` : une seule source de verite, impossible a
 # desynchroniser.
 ALIAS_SNAPSHOT = {
@@ -418,25 +441,123 @@ def _nombre(valeur) -> float | None:
         return None
 
 
-def importer_snapshots(dry_run: bool = False) -> int:
-    """Importe les valuations mensuelles de la v1 dans `pf2_snapshots`."""
-    df = lire_v1(V1_HISTORIQUE)
-    if df.empty:
-        log.info("Aucun historique à importer.")
+def _taux_usd_eur(jour: str) -> float | None:
+    """Le taux USD -> EUR au jour dit, ou `None` s'il est introuvable.
+
+    Le `None` est un resultat, pas une erreur : il signifie « cette ligne ne
+    peut pas etre convertie ». L'appelant ecarte la ligne et le dit. Rendre 1.0
+    serait la pire des reponses — elle entrerait dans la base sans bruit, avec
+    un facteur 1,13 d'erreur et aucun signe visible.
+    """
+    try:
+        t = float(fx.taux("USD", jour, "EUR"))
+    except Exception:
+        return None
+    return t if t > 0 else None
+
+
+def _purger_la_fenetre(debut: str, fin: str, conservees: set[str],
+                       dry_run: bool = False, taille: int = 50) -> int:
+    """Retire de `pf2_snapshots` les lignes que l'historique de la v1 remplace.
+
+    POURQUOI CE N'EST PAS UN SIMPLE IMPORT
+    --------------------------------------
+    Le robot de la v2 ecrit un snapshot par nuit depuis le 18/03/2025. Sa serie
+    porte un trou : avant le 02/02/2026 elle vaut environ 9 900 EUR de moins que
+    la v1 — mesure faite, au 31/01/2026, en convertissant `Actifs Stratégiques`
+    au taux EUR/USD reel du jour (78 416 USD = 65 534 EUR, quand la v2 disait
+    55 640 EUR). Ce trou est la vraie cause du saut du 02/02 et du +26,2 %
+    affiche pour 2026.
+
+    Depuis fin fevrier 2026 les deux series concordent : 67 685 EUR contre
+    67 772 EUR au 28/02 soit 0,13 %, et 70 470 contre 69 795 au 01/10 soit
+    0,97 %. Le desaccord est localise avant, pas apres.
+
+    Melanger les deux donnerait une scie : des lignes au bon niveau et des
+    lignes 9 900 EUR trop basses, sur la meme courbe. Le TWR, qui multiplie des
+    rendements journaliers, lirait chaque passage d'une serie a l'autre comme un
+    faux mouvement — exactement le defaut qu'on passe ce temps a faire
+    disparaitre. On garde donc la serie de l'utilisateur, qui commence en avril
+    2023 et va jusqu'au 01/10/2026.
+
+    POURQUOI APRES L'ECRITURE
+    -------------------------
+    Un echec laisse des lignes en trop, visibles, que la prochaine execution
+    retirera. L'ordre inverse laisserait un trou dans l'historique. Entre une
+    ligne de trop et une ligne manquante, le choix ne se discute pas.
+
+    Rien n'est silencieux : le decompte et les plus gros ecarts sont journalises.
+    """
+    try:
+        existants = db.lire(db.T_SNAPSHOTS)
+    except Exception as exc:
+        log.error("Lecture des snapshots impossible, rien n'est purgé : %s", exc)
         return 0
 
-    # On ne garde que les lignes de valorisation. Une ligne de tresorerie porte
-    # un `Type` (« Ajout » / « Retrait ») ; une valuation n'en porte aucun.
-    #
-    # PIEGE : `df["Type"].astype(str)` transforme un absent en la CHAINE "nan".
-    # Exclure "nan" jetait donc aussi toutes les valuations — c'est-a-dire
-    # l'integralite de l'historique. On teste donc l'absence avec `notna()`,
-    # jamais par la valeur que donne `astype(str)`.
-    if "Type" in df.columns:
-        types = df["Type"].astype(str).str.strip().str.lower()
-        tresorerie = df["Type"].notna() & types.isin(("ajout", "retrait", "apport"))
-        df = df[~tresorerie]
+    if existants.empty or "date" not in existants.columns:
+        return 0
 
+    dedans = existants[
+        (existants["date"] >= debut) & (existants["date"] <= fin)
+    ]
+    a_retirer = sorted(set(dedans["date"].astype(str)) - conservees)
+    if not a_retirer:
+        log.info("Aucune ligne à retirer : la fenêtre est déjà propre.")
+        return 0
+
+    # Les plus gros ecarts avec la v1 : c'est ce qui merite d'etre montre, pas
+    # un decompte anonyme.
+    if "patrimoine_investi_eur" in existants.columns and not dry_run:
+        gardees = existants[existants["date"].astype(str).isin(conservees)]
+        if not gardees.empty:
+            log.info(
+                "Fenêtre %s -> %s : %d ligne(s) de la v2 remplacée(s) par "
+                "l'historique v1 (la v2 en avait %d au total).",
+                debut, fin, len(a_retirer), len(dedans),
+            )
+
+    if dry_run:
+        log.info(
+            "[dry-run] %d ligne(s) seraient retirées de la fenêtre "
+            "(%s -> %s). Exemples : %s",
+            len(a_retirer), debut, fin, ", ".join(a_retirer[:5]),
+        )
+        return len(a_retirer)
+
+    table = db.client().table(db.T_SNAPSHOTS)
+    retires = 0
+    for i in range(0, len(a_retirer), taille):
+        lot = a_retirer[i:i + taille]
+        try:
+            table.delete().in_("date", lot).execute()
+            retires += len(lot)
+        except Exception as exc:
+            log.error(
+                "Purge interrompue (%d lignes retirees) : %s. Relancez l'import : "
+                "il est idempotent.", retires, exc,
+            )
+            raise
+    log.info("%d ligne(s) de la v2 retirées de la fenêtre.", retires)
+    return retires
+
+
+def importer_snapshots(dry_run: bool = False) -> int:
+    """Importe l'historique de valorisation de la v1 (`Projections`).
+
+    Les montants de la v1 sont en dollars : ils sont convertis en euros avec le
+    taux reel de chaque date. La table remplace la serie du robot sur toute la
+    periode qu'elle couvre — voyez `_purger_la_fenetre` pour le pourquoi.
+    """
+    df = lire_v1(V1_PROJECTIONS)
+    if df.empty:
+        log.info("Aucune ligne dans %s. Rien a importer.", V1_PROJECTIONS)
+        return 0
+
+    # `Projections` ne porte que des valorisations : pas de colonne `Type`, donc
+    # pas de ligne de tresorerie a filtrer. Le filtre qui vivait ici servait a
+    # `Historique`, ou les deux cohabitaient. Il est retire parce qu'il ne
+    # protegeait plus de rien, pas parce qu'il genait.
+    sans_taux: list[str] = []
     lignes = []
     for _, r in df.iterrows():
         d = parser(r.get("Date"))
@@ -444,14 +565,24 @@ def importer_snapshots(dry_run: bool = False) -> int:
             continue
         date_iso = d.date().isoformat()
 
-        investi = _nombre(r.get("Actifs Stratégiques"))
-        total = _nombre(r.get("Total Global"))
-        if investi is None and total is None:
-            continue          # ni valorisation ni tresorerie exploitable
-        if investi is None:
-            investi = total
-        if total is None:
-            total = investi
+        investi_usd = _nombre(r.get("Actifs Stratégiques"))
+        total_usd = _nombre(r.get("Total Global"))
+        if investi_usd is None and total_usd is None:
+            continue
+        if investi_usd is None:
+            investi_usd = total_usd
+        if total_usd is None:
+            total_usd = investi_usd
+        if investi_usd is None or investi_usd <= 0:
+            continue
+
+        taux = _taux_usd_eur(date_iso)
+        if taux is None:
+            sans_taux.append(date_iso)
+            continue
+
+        investi = investi_usd * taux
+        total = total_usd * taux
 
         ligne = {
             "date": date_iso,
@@ -466,8 +597,13 @@ def importer_snapshots(dry_run: bool = False) -> int:
         }
         lignes.append(ligne)
 
+    if sans_taux:
+        log.warning(
+            "%d ligne(s) écartée(s), taux USD/EUR introuvable : %s",
+            len(sans_taux), ", ".join(sans_taux[:10]),
+        )
     if not lignes:
-        log.info("Aucune valuation mensuelle trouvée dans %s.", V1_HISTORIQUE)
+        log.info("Aucune valorisation exploitable dans %s.", V1_PROJECTIONS)
         return 0
 
     # `pf2_snapshots` a une contrainte d'unicite sur `date`, mais deux lignes de
@@ -483,6 +619,8 @@ def importer_snapshots(dry_run: bool = False) -> int:
             "[dry-run] %d snapshots seraient importés (%s -> %s).",
             len(lignes), lignes[0]["date"], lignes[-1]["date"],
         )
+        _purger_la_fenetre(lignes[0]["date"], lignes[-1]["date"],
+                           {l["date"] for l in lignes}, dry_run=True)
         return len(lignes)
 
     # Idempotence : `pf2_snapshots` a une contrainte d'unicite sur `date`, donc
@@ -524,6 +662,10 @@ def importer_snapshots(dry_run: bool = False) -> int:
         "%d snapshots importés (%s -> %s).",
         ecrits, lignes[0]["date"], lignes[-1]["date"],
     )
+
+    _purger_la_fenetre(lignes[0]["date"], lignes[-1]["date"],
+                       {l["date"] for l in lignes}, dry_run=dry_run)
+
     if or_manquant:
         log.warning(
             "%d date(s) sans equivalent-or : %s. La performance en or ne sera "
@@ -545,9 +687,12 @@ def main() -> int:
         log.error("Tables v2 absentes : %s. Exécutez migrations/001_init.sql.", manquantes)
         return 1
 
-    for table in (V1_TRANSACTIONS, V1_HISTORIQUE):
+    for table in (V1_TRANSACTIONS, V1_HISTORIQUE, V1_PROJECTIONS):
         if not db.existe(table):
-            log.error("Table v1 '%s' introuvable.", table)
+            log.error(
+                "Table v1 '%s' introuvable. Vérifiez le nom exact dans "
+                "Supabase → Table Editor.", table,
+            )
             return 1
 
     # Contrôle d'écriture AVANT de traiter quoi que ce soit. Une table
@@ -563,7 +708,7 @@ def main() -> int:
     importer_transactions(dry_run=args.dry_run)
     log.info("=== Import des apports ===")
     importer_apports(dry_run=args.dry_run)
-    log.info("=== Import de l'historique mensuel ===")
+    log.info("=== Import de l'historique de valorisation (Projections) ===")
     importer_snapshots(dry_run=args.dry_run)
     return 0
 

@@ -20,6 +20,7 @@ CORRECTIONS PAR RAPPORT À LA V1
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -57,6 +58,73 @@ def rendements_periode(
             continue
         r = (valeurs[i] - v_prec - flux[i]) / v_prec
         sortie.append(r)
+    return sortie
+
+
+def flux_par_periode(
+    dates: list,
+    flux_jour: dict,
+    defaut: float = 0.0,
+) -> list[float]:
+    """Range chaque flux dans la période qui se termine à la date du snapshot.
+
+    `dates`     : les dates des snapshots, TRIÉES, en `datetime.date`.
+    `flux_jour` : `{date: montant signé}`, apport positif — exactement ce que
+                  rend `session.flux_par_date`.
+    `defaut`    : la valeur du premier élément, qui n'appartient à aucune période.
+
+    POURQUOI PAS UNE CORRESPONDANCE EXACTE PAR DATE
+    -----------------------------------------------
+    `rendements_periode` calcule `r_i = (V_i - V_{i-1} - F_i) / V_{i-1}` : `F_i`
+    est le flux de la période qui se TERMINE en i. Écrire
+    `flux_jour.get(dates[i])` ne trouve donc que les flux tombés exactement un
+    jour de snapshot.
+
+    Tant que le robot écrivait un snapshot par nuit, les deux coïncidaient —
+    sauf la nuit où le robot échouait. L'apport de ce jour-là disparaissait alors
+    sans un mot, et gonflait le TWR du montant du versement. Le défaut existait
+    déjà ; il était rare.
+
+    Depuis que l'historique de la v1 alimente la série — mensuel jusqu'en avril
+    2026, quotidien ensuite — le décalage devient la règle. Un apport du 13/03
+    tombe entre deux snapshots et n'est vu par personne. On somme donc tous les
+    flux de l'intervalle `(dates[i-1], dates[i]]`.
+
+    Sur des données quotidiennes complètes, le résultat est identique à l'ancien
+    calcul. Sur des données trouées, il est juste là où l'ancien se taisait.
+    """
+    n = len(dates)
+    if n == 0:
+        return []
+
+    sortie = [float(defaut)] * n
+    entrees = sorted(
+        (d, float(m)) for d, m in (flux_jour or {}).items()
+        if m is not None and float(m) != 0.0
+    )
+    if not entrees:
+        return sortie
+
+    # Le flux du premier jour est déjà dans la valeur de départ : il n'appartient
+    # à aucune période et n'est donc rangé nulle part. On le garde en tête de
+    # liste pour que la longueur reste celle des snapshots, sans l'utiliser.
+    premier = float(flux_jour.get(dates[0], defaut))
+    sortie[0] = premier
+
+    k = 0
+    for i in range(1, n):
+        deb, fin = dates[i - 1], dates[i]
+        # Tout ce qui est antérieur ou égal au début de la période a été consommé
+        # par la période précédente. Le pointeur ne recule pas.
+        while k < len(entrees) and not (entrees[k][0] > deb):
+            k += 1
+        j = k
+        total = 0.0
+        while j < len(entrees) and not (entrees[j][0] > fin):
+            total += entrees[j][1]
+            j += 1
+        sortie[i] = total
+        k = j
     return sortie
 
 
@@ -439,3 +507,247 @@ def controle_apports(
             "Actions).".replace(",", " ")
         )
     return alertes
+
+# ===========================================================================
+# Sauts non expliqués : le défaut qui a produit +26,2 % au lieu de +4,10 %
+# ===========================================================================
+
+# Un portefeuille diversifié de quatre ETF ne bouge pas de 8 % en un jour. Le
+# krach tarifaire d'avril 2025 a fait -7,4 % sur celui-ci : c'est le plus gros
+# mouvement de marché réel de son histoire. Au-delà de 8 %, la cause n'est plus
+# le marché.
+SEUIL_SAUT_INEXPLIQUE = 0.08
+
+# Un flux enregistré que la valeur n'a pas suivi : c'est l'autre moitié du
+# problème, et elle ne se voit pas de la même façon.
+MONTANT_MIN_FLUX_SANS_EFFET = 1000.0
+PART_DU_FLUX_INVISIBLE = 0.8
+SEUIL_FLUX_SANS_EFFET = 0.15
+
+# Un saut de 8 % sur 1 000 EUR ne vaut pas la peine d'alarmer. Sur 9 000 EUR,
+# si.
+MONTANT_MIN_SAUT = 500.0
+
+
+def sauts_non_expliques(
+    dates: list,
+    valeurs: list[float],
+    flux: list[float],
+    seuil: float = SEUIL_SAUT_INEXPLIQUE,
+    montant_min: float = MONTANT_MIN_SAUT,
+) -> list[dict]:
+    """Jours où la valeur saute sans qu'aucun flux ne l'explique.
+
+    POURQUOI CETTE FONCTION EXISTE
+    ------------------------------
+    Le 02/02/2026, sur le portefeuille réel :
+
+        01/02 : 55 639,93 EUR
+        02/02 : 64 808,82 EUR     apport enregistré ce jour : 200,00 EUR
+
+    Saut brut : +9 168,89 EUR. L'apport de 200 EUR en explique une part : ce
+    qui reste sans flux est **8 968,89 EUR** (+16,12 % en une séance). Le TWR,
+    qui ne connaît que les flux
+    enregistrés, l'a compté comme du rendement : +16,5 % en une journée sur un
+    portefeuille de quatre ETF.
+
+    Résultat affiché pour 2026 : **+26,2 %**. Chez Swissquote : **+4,10 %**.
+
+    Le contrôle existant (`controle_apports`) ne pouvait pas l'attraper : il ne
+    se déclenche que lorsqu'AUCUN flux n'est enregistré sur la période. Ici il y
+    en a 38 — sur d'autres jours. Le trou est localisé, pas global.
+
+    CE QUE CES SAUTS PEUVENT ÊTRE
+    -----------------------------
+    Aucun n'est de la performance. Ce sont, par ordre de fréquence :
+
+    - un virement interne (du livret CHF vers le portefeuille investi) : la
+      valeur investie monte sans qu'un apport extérieur n'existe ;
+    - une position ajoutée à la main dans l'application, sans transaction ;
+    - un versement réel non saisi dans le journal des apports ;
+    - une erreur de cours sur un actif (un titre coté en yens lu en dollars).
+
+    La fonction ne tranche pas : elle nomme le jour et le montant, pour que la
+    question se règle en trente secondes en regardant la date.
+    """
+    sauts: list[dict] = []
+    if not dates or len(valeurs) < 2 or len(valeurs) != len(flux) or len(dates) != len(valeurs):
+        return sauts
+
+    for i in range(1, len(valeurs)):
+        avant = float(valeurs[i - 1])
+        apres = float(valeurs[i])
+        if avant <= 0 or not (avant == avant) or not (apres == apres):
+            continue
+
+        flux_du_jour = float(flux[i])
+        # Ce que la valeur aurait dû devenir si seul le flux avait joué.
+        explique = avant + flux_du_jour
+        if explique <= 0:
+            continue
+        residuel = apres - explique
+        if abs(residuel) < montant_min:
+            continue
+
+        # LE SEUIL DÉPEND DU TEMPS ÉCOULÉ.
+        #
+        # 8 % en une séance sur quatre ETF n'existe pas : c'est un défaut de
+        # données. 8 % en un mois, c'est une bonne année, et ce n'est pas un
+        # défaut. Une fois l'historique de la v1 importé, la série est mensuelle
+        # jusqu'en avril 2026 — un seuil fixe signalerait alors chaque bon mois
+        # comme une anomalie, et une alerte qui crie au loup ne vaut pas mieux
+        # que pas d'alerte du tout.
+        #
+        # L'échelle est celle du mouvement brownien : l'écart-type d'un
+        # rendement croît comme la racine du temps. 8 % par jour deviennent
+        # 8 % × √30 ≈ 44 % sur un mois, ce qui reste largement au-delà de ce
+        # qu'un portefeuille diversifié peut produire sans flux.
+        jours = 1
+        try:
+            jours = max(int((dates[i] - dates[i - 1]).days), 1)
+        except (TypeError, AttributeError):
+            jours = 1
+        seuil_effectif = seuil * math.sqrt(jours)
+
+        variation = residuel / avant
+        if abs(variation) < seuil_effectif:
+            continue
+
+        sauts.append({
+            "i": i,                      # rang du jour fautif, pour recalculer
+            "date": dates[i],
+            "avant": avant,
+            "apres": apres,
+            "flux": flux_du_jour,
+            "residuel": residuel,
+            "residuel_pct": variation,
+            "jours": jours,              # écart avec le point précédent
+            "seuil": seuil_effectif,     # seuil appliqué, après mise à l'échelle
+        })
+    return sauts
+
+
+def fluxs_sans_effet(
+    dates: list,
+    valeurs: list[float],
+    flux: list[float],
+    montant_min: float = MONTANT_MIN_FLUX_SANS_EFFET,
+    part_invisible: float = PART_DU_FLUX_INVISIBLE,
+    seuil: float = SEUIL_FLUX_SANS_EFFET,
+) -> list[dict]:
+    """Flux enregistrés que la valeur n'a PAS suivis.
+
+    LE MIROIR DE `sauts_non_expliques`
+    ----------------------------------
+    Cette fonction et l'autre décrivent les deux moitiés du même défaut :
+
+        sauts_non_expliques : la valeur monte sans flux   -> versement manquant
+        fluxs_sans_effet    : le flux existe mais la
+                              valeur ne suit pas          -> versement fantôme
+
+    Le cas réel, trouvé en préparant l'import de l'historique v1 : le
+    29/04/2024, `Historique` enregistre un apport de 10 800 € — et entre le
+    30/03 et le 30/04/2024, la valeur investie passe de 31 988 à 31 779 USD,
+    soit +23 €. Elle n'a pas bougé de 11 027 €. Le même apport, de 10 800 €,
+    enregistré le 23/07/2024, fait bien monter la valeur de 10 658 €.
+
+    Un mois en −37 % au milieu de mois tous compris entre −7 % et +6 %, sur un
+    portefeuille de quatre ETF : ce n'est pas un mauvais mois, c'est une ligne
+    en trop dans le journal des apports. Sans ce contrôle, l'année 2024
+    s'afficherait à −24,9 %.
+
+    POURQUOI DEUX CONDITIONS ET NON UNE
+    ------------------------------------
+    Exiger seulement que la valeur n'ait pas suivi le flux produirait une fausse
+    alerte à chaque krach. Avril 2025 en est l'exemple : 2 620 € d'apports et une
+    valeur qui recule de 1 129 € — le trou de 3 749 € est le krach tarifaire, pas
+    un défaut. Il faut donc aussi que l'écart soit d'une ampleur qu'aucun marché
+    ne produit : 15 % du portefeuille, en plus du flux.
+
+        29/04/2024 : 11 027 € d'écart sur 31 000 € = 35 %  -> défaut
+        avril 2025 :  3 749 € d'écart sur 57 000 € =  6,6 % -> krach, silence
+    """
+    trouves: list[dict] = []
+    if not dates or len(valeurs) < 2 or len(valeurs) != len(flux) or len(dates) != len(valeurs):
+        return trouves
+
+    for i in range(1, len(valeurs)):
+        f = float(flux[i])
+        avant = float(valeurs[i - 1])
+        apres = float(valeurs[i])
+        if avant <= 0 or abs(f) < montant_min:
+            continue
+        if not (avant == avant) or not (apres == apres):
+            continue
+
+        residuel = (apres - avant) - f
+        if abs(residuel) < part_invisible * abs(f):
+            continue
+        if abs(residuel) / avant < seuil:
+            continue
+
+        trouves.append({
+            "i": i,
+            "date": dates[i],
+            "avant": avant,
+            "apres": apres,
+            "flux": f,
+            "residuel": residuel,
+            "residuel_pct": residuel / avant,
+        })
+    return trouves
+
+
+def anomalie_flux_sans_effet(flux_sans_effet: dict) -> str:
+    """Le message à afficher pour un flux que la valeur n'a pas suivi."""
+    jour = flux_sans_effet["date"]
+    jour = jour.date() if hasattr(jour, "date") else jour
+    f = flux_sans_effet["flux"]
+    bouge = flux_sans_effet["apres"] - flux_sans_effet["avant"]
+    sens = "un apport" if f > 0 else "un retrait"
+
+    return (
+        f"**{sens} de {abs(f):,.0f} € enregistré, et la valeur ne suit pas — "
+        f"{jour}.** Le portefeuille ne varie que de {bouge:+,.0f} € alors qu'il "
+        f"devrait varier d'au moins {abs(f):,.0f} € de ce seul fait. L'écart est "
+        f"de {abs(flux_sans_effet['residuel']):,.0f} €, soit "
+        f"{abs(flux_sans_effet['residuel_pct']):.1%} du portefeuille : aucun "
+        "marché ne produit ça. Le versement a été saisi deux fois, porte une "
+        "mauvaise date, ou n'a jamais eu lieu — et dans ce dernier cas c'est la "
+        "valorisation de ce mois qui manque. Votre relevé tranchera."
+    ).replace(",", " ")
+
+
+def flux_corrige_des_sauts(flux: list[float], sauts: list[dict]) -> list[float]:
+    """Les flux, augmentés de chaque saut non expliqué.
+
+    Sert à répondre à la seule question qui compte : « et si ce mouvement avait
+    été enregistré comme un apport, quel serait mon chiffre ? » On ne modifie
+    pas les données — on montre ce qu'elles donneraient, ce qui permet de juger
+    l'ampleur du défaut au lieu de la deviner.
+    """
+    corriges = list(flux)
+    for saut in sauts:
+        i = saut.get("i")
+        if isinstance(i, int) and 0 <= i < len(corriges):
+            corriges[i] += saut["residuel"]
+    return corriges
+
+
+def anomalie_saut(saut: dict) -> str:
+    """Le message à afficher pour un saut non expliqué."""
+    jour = saut["date"]
+    jour = jour.date() if hasattr(jour, "date") else jour
+    residuel = saut["residuel"]
+    sens = "apparaissent" if residuel > 0 else "disparaissent"
+
+    return (
+        f"**{residuel:+,.0f} € {sens} le {jour} sans flux enregistré.** "
+        f"La valeur investie passe de {saut['avant']:,.0f} € à "
+        f"{saut['apres']:,.0f} €, alors que {saut['flux']:,.0f} € de flux sont "
+        f"enregistrés ce jour-là — soit {saut['residuel_pct']:+.1%} que le TWR "
+        "compte comme du rendement. Un portefeuille diversifié ne bouge pas "
+        "ainsi en une séance : c'est un virement interne, une position ajoutée à "
+        "la main, ou un versement non saisi. Dans les trois cas, ce n'est pas de "
+        "la performance, et les chiffres ci-dessus sont trop flatteurs."
+    ).replace(",", " ")

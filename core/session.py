@@ -201,7 +201,10 @@ def twr_portefeuille(ctx: "Contexte") -> float | None:
     dates = dates[garder].tolist()
     valeurs = valeurs[garder].tolist()
     flux_jour = flux_par_date(ctx.apports)
-    flux = [flux_jour.get(d.date(), 0.0) for d in dates]
+    # Les flux sont rangés par PÉRIODE et non par date exacte : la série de la v1
+    # est mensuelle, et un versement du 13/03 tombe entre deux snapshots. Voyez
+    # `metrics.flux_par_periode`.
+    flux = metrics.flux_par_periode([d.date() for d in dates], flux_jour)
 
     return metrics.twr_depuis(valeurs, flux)
 
@@ -257,7 +260,10 @@ def twr_en_or_portefeuille(ctx: "Contexte") -> float | None:
     valeurs = valeurs[garder].tolist()
     onces = onces[garder].tolist()
     flux_jour = flux_par_date(ctx.apports)
-    flux = [flux_jour.get(d.date(), 0.0) for d in dates]
+    # Les flux sont rangés par PÉRIODE et non par date exacte : la série de la v1
+    # est mensuelle, et un versement du 13/03 tombe entre deux snapshots. Voyez
+    # `metrics.flux_par_periode`.
+    flux = metrics.flux_par_periode([d.date() for d in dates], flux_jour)
 
     try:
         return metrics.twr_en_or(valeurs, flux, onces)

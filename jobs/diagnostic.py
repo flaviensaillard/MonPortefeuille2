@@ -45,6 +45,10 @@ log = logging.getLogger("diagnostic")
 connexion_ok = True
 verdicts: list[str] = []
 
+# Les sauts sans flux, calculés une fois par `examiner_sauts` et relus par le
+# bloc à copier. Deux calculs du même chiffre finissent toujours par diverger.
+derniers_sauts: list[dict] = []
+
 # Noms plausibles pour un journal de valorisations de la v1. Utilises seulement
 # si l'enumeration complete echoue.
 NOMS_PLAUSIBLES = [
@@ -353,8 +357,10 @@ def examiner_snapshots() -> pd.DataFrame:
 
     # --- Les plus gros sauts journaliers ---
     log.info("")
-    log.info("  ▸ Les 12 plus gros sauts d'un jour à l'autre.")
-    log.info("     Si une ligne saute de 20 % sans apport ce jour-là, c'est là.")
+    log.info("  ▸ Les 12 plus gros MOUVEMENTS d'un jour à l'autre, toutes")
+    log.info("     amplitudes — un krach y figure, et ce n'est pas un défaut.")
+    log.info("     Les sauts au sens strict (8 % sans flux) sont comptés plus")
+    log.info("     haut, dans « LES SAUTS SANS FLUX ».")
 
     apports = pd.DataFrame()
     try:
@@ -401,6 +407,101 @@ def examiner_snapshots() -> pd.DataFrame:
 # Le TWR, recalculé sur vos données
 # ===========================================================================
 
+def examiner_sauts(snaps: pd.DataFrame, apports: pd.DataFrame) -> None:
+    """Les journées où la valeur saute sans flux — c'est là qu'est le +26,2 %."""
+    _titre("LES SAUTS SANS FLUX — l'origine du chiffre trop flatteur")
+
+    if snaps.empty or "patrimoine_investi_eur" not in snaps.columns:
+        log.info("  Pas de quoi calculer.")
+        return
+
+    s2 = snaps.copy()
+    s2["_d"] = pd.to_datetime(s2["date"], errors="coerce")
+    s2 = s2.dropna(subset=["_d"]).sort_values("_d").reset_index(drop=True)
+
+    flux = {}
+    if not apports.empty and {"date", "sens", "montant_eur"} <= set(apports.columns):
+        dd = pd.to_datetime(apports["date"], errors="coerce")
+        ss = apports["sens"].astype(str).str.strip().str.lower().map(
+            {"apport": 1.0, "ajout": 1.0, "retrait": -1.0})
+        mm = pd.to_numeric(apports["montant_eur"], errors="coerce")
+        for x, y, z in zip(dd, ss, mm):
+            if pd.isna(x) or y is None or pd.isna(z):
+                continue
+            flux[x.date()] = flux.get(x.date(), 0.0) + y * float(z)
+
+    dates = [d.date() for d in s2["_d"]]
+    valeurs = pd.to_numeric(s2["patrimoine_investi_eur"], errors="coerce").fillna(0).tolist()
+    fluxs = metrics.flux_par_periode(dates, flux)
+
+    sauts = metrics.sauts_non_expliques(dates, valeurs, fluxs)
+    derniers_sauts[:] = sauts
+
+    if not sauts:
+        log.info("  Aucun saut au-dessus du seuil. ✓")
+        return
+
+    log.info("  %d journée(s) où la valeur bouge sans flux pour l'expliquer.",
+             len(sauts))
+    log.info("")
+    log.info("  Le TWR ne connaît que les flux enregistrés : il compte ces")
+    log.info("  montants comme du rendement. Ce n'est pas du rendement.")
+    log.info("")
+    _montre(pd.DataFrame([{
+        "date": str(x["date"]),
+        "avant": x["avant"],
+        "apres": x["apres"],
+        "flux_du_jour": x["flux"],
+        "sans_flux": x["residuel"],
+        "variation_%": x["residuel_pct"] * 100,
+    } for x in sauts]), max_lignes=40)
+
+    total = sum(x["residuel"] for x in sauts)
+    log.info("")
+    log.info("  Total à déclarer comme apports : %s €", _fmt(total))
+
+    if len(sauts) == 1:
+        # Jamais de date écrite en dur : on lit celle du saut. Une phrase figée
+        # survivrait au correctif et désignerait un jour qui n'est plus fautif.
+        x = sauts[0]
+        try:
+            jour = pd.Timestamp(x["date"]).strftime("%d/%m/%Y")
+        except Exception:
+            jour = str(x["date"])
+        log.info("")
+        log.info("  ▸ Le %s, la valeur fait %+.2f %% en une séance.", jour,
+                 x["residuel_pct"] * 100)
+        log.info("    Un portefeuille diversifié ne fait pas ça. C'est un virement")
+        log.info("    interne, une position ajoutée à la main, ou un versement")
+        log.info("    réel jamais saisi dans le journal des apports.")
+
+    for x in sauts:
+        verdicts.append(
+            f"Saut le {x['date']} : {x['residuel']:+,.2f} € sans flux "
+            f"({x['residuel_pct']:+.2%}). À déclarer comme apport à cette date."
+        )
+
+    # --- Le miroir : les flux que la valeur n'a pas suivis ---
+    fantomes = metrics.fluxs_sans_effet(dates, valeurs, fluxs)
+    if fantomes:
+        log.info("")
+        log.info("  ── Et à l'envers ──")
+        log.info("")
+        log.info("  %d flux enregistré(s) que la valeur n'a PAS suivi(s) :",
+                 len(fantomes))
+        for x in fantomes:
+            log.info("    %s : flux de %s €, la valeur ne bouge que de %s € "
+                     "(écart %s €, %+.2f %%)",
+                     x["date"], _fmt(x["flux"]), _fmt(x["apres"] - x["avant"]),
+                     _fmt(abs(x["residuel"])), x["residuel_pct"] * 100)
+            verdicts.append(
+                f"Le {x['date']}, un flux de {x['flux']:,.2f} € est enregistré et "
+                f"la valeur ne suit pas (écart de {abs(x['residuel']):,.2f} €, "
+                f"{abs(x['residuel_pct']):.2%}). Ligne en trop, mauvaise date, ou "
+                "valorisation manquante : votre relevé tranchera.".replace(",", " ")
+            )
+
+
 def recalculer_twr(snaps: pd.DataFrame) -> None:
     _titre("LE TWR, RECALCULÉ SUR VOS DONNÉES")
 
@@ -427,7 +528,9 @@ def recalculer_twr(snaps: pd.DataFrame) -> None:
 
     dates = snaps["Date_DT"].tolist()
     valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce").fillna(0).tolist()
-    fluxs = [flux.get(d.date(), 0.0) for d in dates]
+    # Par période, pas par date exacte : la série de la v1 est mensuelle jusqu'en
+    # avril 2026, et un versement tombé entre deux snapshots serait perdu.
+    fluxs = metrics.flux_par_periode([d.date() for d in dates], flux)
 
     rendements = metrics.rendements_periode(valeurs, fluxs)
     colonne_r = [0.0] + list(rendements)
@@ -471,6 +574,113 @@ def recalculer_twr(snaps: pd.DataFrame) -> None:
 # ===========================================================================
 # Verdict
 # ===========================================================================
+
+def reconcilier_apports(hist: pd.DataFrame, apports: pd.DataFrame) -> None:
+    """Compare le cumul de la v1 et le total de la v2.
+
+    La v1 porte une colonne `Total_Apports_nets` — un cumul qu'elle tient
+    elle-même. Si ce cumul ne rejoint pas la somme des apports de la v2, c'est
+    qu'il manque des lignes, et on sait combien.
+    """
+    _titre("RÉCONCILIATION DES APPORTS v1 → v2")
+
+    if hist is None or hist.empty or "Montant €" not in hist.columns:
+        log.info("  Historique v1 illisible.")
+        return
+
+    types = hist["Type"].fillna("").astype(str).str.lower()
+    est_apport = types.str.contains("ajout|apport", regex=True)
+    est_retrait = types.str.contains("retrait", regex=True)
+
+    montants = pd.to_numeric(hist["Montant €"], errors="coerce").fillna(0.0)
+    brut_v1 = float(montants[est_apport].sum())
+    retraits_v1 = float(montants[est_retrait].sum())
+    net_v1 = brut_v1 - retraits_v1
+
+    log.info("  V1 — Historique :")
+    log.info("    apports                : %s €  (%d lignes)",
+             _fmt(brut_v1), int(est_apport.sum()))
+    log.info("    retraits               : %s €  (%d lignes)",
+             _fmt(retraits_v1), int(est_retrait.sum()))
+    log.info("    NET enregistré         : %s €", _fmt(net_v1))
+    if "Total_Apports_nets" in hist.columns:
+        cumul = pd.to_numeric(hist["Total_Apports_nets"], errors="coerce").dropna()
+        if not cumul.empty:
+            log.info("    cumul v1 en fin de table: %s €", _fmt(float(cumul.iloc[-1])))
+
+    if apports is None or apports.empty or "montant_eur" not in apports.columns:
+        log.info("")
+        log.info("  V2 — aucun apport.")
+        return
+
+    m2 = pd.to_numeric(apports["montant_eur"], errors="coerce").fillna(0.0)
+    sens2 = apports["sens"].astype(str).str.strip().str.lower()
+    brut_v2 = float(m2[sens2 == "apport"].sum())
+    retraits_v2 = float(m2[sens2 == "retrait"].sum())
+    net_v2 = brut_v2 - retraits_v2
+
+    log.info("")
+    log.info("  V2 — pf2_apports :")
+    log.info("    apports                : %s €  (%d lignes)",
+             _fmt(brut_v2), int((sens2 == "apport").sum()))
+    log.info("    retraits               : %s €  (%d lignes)",
+             _fmt(retraits_v2), int((sens2 == "retrait").sum()))
+    log.info("    NET enregistré         : %s €", _fmt(net_v2))
+
+    ecart = net_v1 - net_v2
+    log.info("")
+    log.info("  ▸ ÉCART v1 - v2          : %s €", _fmt(ecart))
+
+    if abs(ecart) < 1.0:
+        log.info("    Les deux se rejoignent. Rien à corriger.")
+        return
+
+    if ecart > 0:
+        verdicts.append(
+            f"Il manque {ecart:,.2f} € d'apports dans la v2 : la v1 en compte "
+            f"{net_v1:,.2f} € nets, la v2 {net_v2:,.2f} €. Un versement — ou "
+            "plusieurs — n'a pas été importé.".replace(",", " ")
+        )
+    else:
+        verdicts.append(
+            f"La v2 compte {-ecart:,.2f} € d'apports DE PLUS que la v1. "
+            "Vérifiez les doublons.".replace(",", " ")
+        )
+
+
+def requete_sql() -> None:
+    """La question à laquelle seul le tableau de bord peut répondre."""
+    _titre("LA LISTE DES TABLES — une requête, quinze secondes")
+
+    log.info("  Je n'ai pas pu énumérer les tables du projet : la clé publique")
+    log.info("  n'a pas accès à cet inventaire (HTTP 401). Les noms que j'ai")
+    log.info("  essayés n'existent pas :")
+    log.info("")
+    log.info("      Valuation, Valorisation, Valeur, Portefeuille, Snapshot,")
+    log.info("      Patrimoine, Evolution, Suivi, Performance, Mensuel,")
+    log.info("      Historique_Mensuel, Mois, Vue, Tableau")
+    log.info("")
+    log.info("  Aucun n'existe. Donc vos 180 valorisations sont SOIT dans une")
+    log.info("  table dont je n'ai pas trouvé le nom, SOIT nulle part — et dans")
+    log.info("  ce cas la v1 calculait sa performance à la volée, sans les")
+    log.info("  stocker.")
+    log.info("")
+    log.info("  ▸ Ouvrez Supabase → SQL Editor → New query, collez ceci,")
+    log.info("    exécutez, et envoyez-moi le résultat :")
+    log.info("")
+    log.info("      select table_name, (select count(*) from pg_class")
+    log.info("             where relname = table_name) as existe")
+    log.info("      from information_schema.tables")
+    log.info("      where table_schema = 'public'")
+    log.info("      order by table_name;")
+    log.info("")
+    log.info("  Ou, sans SQL : Supabase → Table Editor → la colonne de gauche")
+    log.info("  liste toutes les tables. Une capture d'écran suffit.")
+    log.info("")
+    log.info("  C'est la seule chose qui me manque. Je ne peux pas la deviner,")
+    log.info("  et je n'essaierai pas : mes deux dernières hypothèses étaient")
+    log.info("  fausses toutes les deux.")
+
 
 def bloc_a_envoyer(tables: list[str], hist: pd.DataFrame, tr: pd.DataFrame,
                    snaps: pd.DataFrame, apports: pd.DataFrame) -> None:
@@ -534,8 +744,18 @@ def bloc_a_envoyer(tables: list[str], hist: pd.DataFrame, tr: pd.DataFrame,
                               flux.get(s2.loc[i, "_d"].date(), 0.0)))
             sauts.sort(reverse=True)
             for _, jour, v0, v1, f in sauts[:5]:
-                L.append(f"  SAUT {jour}: {v0:.2f} -> {v1:.2f} ({(v1/v0-1)*100:+.2f}%), "
-                         f"apport_du_jour={f:.2f}")
+                L.append(f"  MOUVEMENT {jour}: {v0:.2f} -> {v1:.2f} "
+                         f"({(v1/v0-1)*100:+.2f}%), apport_du_jour={f:.2f}")
+
+    if derniers_sauts:
+        L.append(f"SautsSANS_FLUX={len(derniers_sauts)}, "
+                 f"total={sum(x['residuel'] for x in derniers_sauts):.2f}")
+        for x in derniers_sauts:
+            L.append(f"  {x['date']} {x['avant']:.2f} -> {x['apres']:.2f} "
+                     f"flux={x['flux']:.2f} sans_flux={x['residuel']:+.2f} "
+                     f"({x['residuel_pct']:+.2%})")
+    else:
+        L.append("SautsSANS_FLUX=aucun")
 
     if apports is not None and not apports.empty:
         m = pd.to_numeric(apports["montant_eur"], errors="coerce").fillna(0)
@@ -594,12 +814,16 @@ def main() -> int:
                 tr = df
 
         snaps = examiner_snapshots()
-        recalculer_twr(snaps)
 
         try:
             apports = db.lire(db.T_APPORTS)
         except Exception:
             apports = pd.DataFrame()
+
+        examiner_sauts(snaps, apports)
+        reconcilier_apports(hist, apports)
+        recalculer_twr(snaps)
+        requete_sql()
         bloc_a_envoyer(tables, hist, tr, snaps, apports)
 
         _titre("ÉTAT DE LA v2")

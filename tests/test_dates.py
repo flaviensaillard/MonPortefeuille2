@@ -120,7 +120,7 @@ class FauxTicker:
     def history(self, period=None, start=None, end=None):
         if period:                       # branche « aujourd'hui »
             return self._frame
-        d = pd.to_datetime(self._rame_index_milieu(start, end))
+        pd.to_datetime(self._rame_index_milieu(start, end))
         return self._frame
 
     @staticmethod
