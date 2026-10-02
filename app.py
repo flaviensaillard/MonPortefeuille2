@@ -112,14 +112,18 @@ if ctx.erreurs:
 st.caption(f"Au {dt.date.today().strftime('%d/%m/%Y')}")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Patrimoine total", ui.eur(ctx.patrimoine_total_eur),
-          help="Investi + épargne de précaution + compte courant.")
-c2.metric("Portefeuille investi", ui.eur(ctx.total_investi_eur),
-          help="Seul montant soumis à l'allocation cible.")
-c3.metric("Épargne de précaution", ui.eur(ctx.total_precaution_eur),
-          help="Livret CHF, disponible en 5 minutes. Jamais rééquilibrée.")
-c4.metric("Compte courant", ui.eur(ctx.total_courant_eur),
-          help="Revolut. Hors portefeuille d'investissement.")
+c1.metric("Patrimoine total",
+          ui.usd_eur(ctx.patrimoine_total_usd, ctx.patrimoine_total_eur),
+          help="Investi + épargne de précaution + compte courant ($ avec indication €).")
+c2.metric("Portefeuille investi",
+          ui.usd_eur(ctx.total_investi_usd, ctx.total_investi_eur),
+          help="Actifs stratégiques soumis à l'allocation cible ($ avec indication €).")
+c3.metric("Épargne de précaution",
+          ui.usd_eur(ctx.total_precaution_usd, ctx.total_precaution_eur),
+          help="Réserve CHF / CNY disponible en 5 minutes. Jamais rééquilibrée.")
+c4.metric("Compte courant",
+          ui.usd_eur(ctx.total_courant_usd, ctx.total_courant_eur),
+          help="Liquidités courantes hors portefeuille d'investissement.")
 
 # ---------------------------------------------------------------------------
 # L'étalon de Gave
@@ -147,20 +151,20 @@ if not ctx.snapshots.empty and "equivalent_or_oz" in ctx.snapshots.columns:
 # `perf_eur` : le TWR, PAS `derniere / premiere - 1`. Ce dernier comptait vos
 # versements comme du rendement — +628 % cumule sur le portefeuille reel, la
 # ou la strategie en avait produit une fraction. Voyez `twr_portefeuille`.
-perf_eur = S.twr_portefeuille(ctx)
+perf_usd = S.twr_portefeuille(ctx)
 if perf_or is not None:
     g3.metric("Performance en or", ui.pct(perf_or, signe=True),
-              delta=ui.pct(perf_eur, signe=True) if perf_eur is not None else None,
-              help="Depuis le premier snapshot. Le delta compare à la performance en euros.")
-elif perf_eur is not None:
-    g3.metric("Performance en euros", ui.pct(perf_eur, signe=True))
+              delta=ui.pct(perf_usd, signe=True) if perf_usd is not None else None,
+              help="Depuis le premier snapshot. Le delta compare à la performance en dollars ($).")
+elif perf_usd is not None:
+    g3.metric("Performance ($)", ui.pct(perf_usd, decimales=2, signe=True))
 else:
     g3.metric("Performance", "—", help="Aucun snapshot enregistré.")
 
 if perf_or is not None and perf_or < 0:
     st.warning(
         f"**Votre portefeuille perd de l'or.** En {ui.pct(perf_or, signe=True)}, "
-        "vous achetez moins d'onces qu'au début. Même si la performance en euros "
+        "vous achetez moins d'onces qu'au début. Même si la performance en dollars "
         "est positive, vous vous appauvrissez dans l'étalon qui compte."
     )
 
@@ -178,7 +182,7 @@ for e in ctx.ecarts:
         "Réel": ui.pct(e.poids_reel),
         "Écart": ui.points(e.ecart_points),
         "Bande": f"±{e.bande * 100:.0f} pts",
-        "Valeur": ui.eur(e.valeur_eur),
+        "Valeur ($ / €)": ui.usd_eur(e.valeur_usd, e.valeur_eur),
         "État": "🔴 hors bande" if e.hors_bande else "🟢 dans la bande",
     })
 
@@ -199,12 +203,12 @@ else:
 # ---------------------------------------------------------------------------
 # Épargne de précaution — rappel du rôle
 # ---------------------------------------------------------------------------
-if ctx.total_precaution_eur > 0:
+if ctx.total_precaution_usd > 0 or ctx.total_precaution_eur > 0:
     st.divider()
     st.subheader("🏦 Épargne de précaution")
     mois = 6
     st.caption(
-        f"{ui.eur(ctx.total_precaution_eur)} disponibles en 5 minutes. "
-        f"Soit environ {ctx.total_precaution_eur / mois:,.0f} €/mois sur {mois} mois "
+        f"{ui.usd_eur(ctx.total_precaution_usd, ctx.total_precaution_eur)} disponibles en 5 minutes. "
+        f"Soit environ {ui.usd_eur(ctx.total_precaution_usd / mois, ctx.total_precaution_eur / mois, decimales=0)}/mois sur {mois} mois "
         "de dépenses — à ajuster selon votre besoin réel."
     )

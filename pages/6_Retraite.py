@@ -52,7 +52,7 @@ annee_depart = c1.number_input(
     value=min(2055, 2100), step=1,
 )
 apport_mensuel = c2.number_input(
-    "Apport mensuel (€)", min_value=0.0, step=50.0, value=250.0,
+    "Apport mensuel ($)", min_value=0.0, step=50.0, value=250.0,
 )
 taux_pv = c3.number_input(
     "Imposition des plus-values (%)", min_value=0.0, max_value=60.0,
@@ -98,7 +98,7 @@ st.caption(
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-capital_initial = ctx.total_investi_eur
+capital_initial = ctx.total_investi_usd or ctx.total_investi_eur
 annees = list(range(annee_courante, annee_depart + 1))
 
 
@@ -146,19 +146,19 @@ for col, (traj, fin, nom, rend, infl) in zip(
         st.markdown(f"### Scénario {nom} — {rend:.1f} %/an, inflation {infl:.1f} %")
         r_reel = (1 + rend / 100) / (1 + infl / 100) - 1
         st.caption(f"Rendement réel : {ui.pct(r_reel, signe=True)}")
-        st.metric("Capital nominal", ui.eur(fin["Capital nominal"]))
-        st.metric("Capital en pouvoir d'achat actuel", ui.eur(fin["Capital réel"]))
-        st.metric("Dont apports", ui.eur(fin["Apports cumulés"]))
+        st.metric("Capital nominal", ui.usd_eur(fin["Capital nominal"]))
+        st.metric("Capital en pouvoir d'achat actuel", ui.usd_eur(fin["Capital réel"]))
+        st.metric("Dont apports", ui.usd_eur(fin["Apports cumulés"]))
         pv = max(0.0, fin["Capital nominal"] - fin["Apports cumulés"])
         part_pv = pv / fin["Capital nominal"] if fin["Capital nominal"] > 0 else 0
-        st.metric("Dont plus-value", ui.eur(pv), delta=ui.pct(part_pv))
+        st.metric("Dont plus-value", ui.usd_eur(pv), delta=ui.pct(part_pv))
 
         # Rente : on retire le rendement réel, on préserve le capital en pouvoir d'achat.
         rente_brute = fin["Capital réel"] * max(0.0, r_reel) / 12
         impot = rente_brute * part_pv * taux_pv
-        st.metric("Rente brute mensuelle", ui.eur(rente_brute))
-        st.metric(f"Impôt ({taux_pv*100:.1f} % sur la part de PV)", ui.eur(-impot))
-        st.metric("Rente nette mensuelle", ui.eur(rente_brute - impot))
+        st.metric("Rente brute mensuelle", ui.usd_eur(rente_brute))
+        st.metric(f"Impôt ({taux_pv*100:.1f} % sur la part de PV)", ui.usd_eur(-impot))
+        st.metric("Rente nette mensuelle", ui.usd_eur(rente_brute - impot))
 
 st.caption(
     "Le modèle de rente retire le **rendement réel** et préserve le capital en "
@@ -206,8 +206,8 @@ for variation in (-0.30, -0.15, 0.0, 0.15, 0.30):
     reel = metrics.pouvoir_achat(cap, inflation_a / 100, len(annees))
     lignes.append({
         "Variation EUR/USD": ui.pct(variation, signe=True),
-        "Capital nominal": ui.eur(cap),
-        "Pouvoir d'achat": ui.eur(reel),
+        "Capital nominal ($ / €)": ui.usd_eur(cap),
+        "Pouvoir d'achat ($ / €)": ui.usd_eur(reel),
         "vs hypothèse stable": ui.pct(variation, signe=True),
     })
 ui.tableau(pd.DataFrame(lignes))

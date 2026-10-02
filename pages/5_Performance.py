@@ -43,24 +43,14 @@ if ctx.snapshots.empty or len(ctx.snapshots) < 2:
     st.info("Il faut au moins deux snapshots pour calculer une performance.")
     st.stop()
 
-snaps = ctx.snapshots.copy()
-snaps["Date"] = dates.parser(snaps["Date"])
-snaps = snaps.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
-
-# ---------------------------------------------------------------------------
-# Flux externes : apports et retraits du jour
-# ---------------------------------------------------------------------------
-# Une seule implementation du decoupage des flux, partagee avec la page
-# d'accueil et la projection retraite. Voyez `session.flux_par_date`.
+# Série en DOLLARS ($) issue de `session.serie_performance(ctx)` :
+# utilise `Actifs Stratégiques` et les variations de `Capital investi` de
+# `Projections` (puis `flux_par_date` pour toute période postérieure).
 flux_jour = S.flux_par_date(ctx.apports)
-
-
-# Par PÉRIODE, pas par date exacte. L'historique de la v1 est mensuel jusqu'en
-# avril 2026 : une correspondance exacte perdrait silencieusement tout versement
-# tombé entre deux snapshots, et gonflerait le TWR d'autant.
-flux = metrics.flux_par_periode([d.date() for d in snaps["Date"]], flux_jour)
-
-valeurs = snaps["patrimoine_investi_eur"].astype(float).tolist()
+snaps, valeurs, flux = S.serie_performance(ctx)
+if len(valeurs) < 2:
+    st.info("Il faut au moins deux snapshots exploitables pour calculer une performance.")
+    st.stop()
 
 rendements = metrics.rendements_periode(valeurs, flux)
 twr_total = metrics.twr(rendements)
@@ -123,7 +113,7 @@ if sauts:
         "la main, ou un versement oublié. Déclarez-le comme un **apport** à sa "
         "date dans 🪙 Mouvements de fonds, et le chiffre se corrige tout seul. "
         "Pour ce portefeuille, c'est environ **"
-        f"{ui.eur(sum(s['residuel'] for s in sauts))}** à répartir sur "
+        f"{ui.usd_eur(sum(s['residuel'] for s in sauts))}** à répartir sur "
         f"{len(sauts)} date(s)."
     )
 
@@ -148,6 +138,25 @@ if fantomes:
     for f in fantomes:
         st.error(metrics.anomalie_flux_sans_effet(f))
 
+        # Nommer les versements de la période. Sans ça, le message donne un
+        # montant et deux bornes, et il faut aller chercher soi-même : sur le cas
+        # réel, la ligne fautive est datée du 29/04/2024 quand la période se
+        # termine le 30/04. Autant la montrer.
+        debut_p = f.get("date_avant")
+        fin_p = f.get("date")
+        if debut_p is not None and fin_p is not None and not ctx.apports.empty:
+            ap = ctx.apports.copy()
+            ap["_d"] = dates.parser(ap["date"])
+            dedans = ap[(ap["_d"].dt.date > debut_p) & (ap["_d"].dt.date <= fin_p)]
+            if not dedans.empty:
+                detail = " · ".join(
+                    f"**{ui.jour(r['_d'])}** — "
+                    f"{'apport' if str(r['sens']).lower().startswith('app') else 'retrait'} "
+                    f"de {ui.eur(float(r['montant_eur']))}"
+                    for _, r in dedans.sort_values("_d").iterrows()
+                )
+                st.caption(f"Versements enregistrés sur cette période : {detail}")
+
     st.info(
         "**Deux causes possibles, et une seule est dans vos données.** Soit le "
         "versement n'a jamais eu lieu — une ligne saisie deux fois, ou une date "
@@ -160,7 +169,12 @@ with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=
     t1, t2, t3, t4 = st.columns(4)
     t1.metric("Snapshots", len(snaps))
     t2.metric("Période", f"{(jours / 365.25):.1f} ans")
-    t3.metric("Apports enregistrés", ui.eur(sum(abs(f) for f in flux)))
+    cap_total = (
+        float(snaps["capital_investi_usd"].dropna().iloc[-1])
+        if "capital_investi_usd" in snaps.columns and snaps["capital_investi_usd"].notna().any()
+        else sum(abs(f) for f in flux)
+    )
+    t3.metric("Capital investi ($ / €)", ui.usd_eur(cap_total))
     annees_couvertes = sorted({int(a) for a in snaps["Date"].dt.year})
     inflation_dict = S.inflation_dict(ctx)
     manquantes = [a for a in annees_couvertes if a not in inflation_dict]
@@ -189,11 +203,11 @@ with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=
 st.subheader("Ce que la stratégie a produit")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("TWR cumulé", ui.pct(twr_total, signe=True),
-          help="Time-Weighted Return : neutralise l'effet de vos apports.")
-c2.metric("TWR annualisé", ui.pct(twr_ann, signe=True),
+c1.metric("TWR cumulé ($)", ui.pct(twr_total, decimales=2, signe=True),
+          help="Time-Weighted Return en dollars ($) : neutralise l'effet de vos apports.")
+c2.metric("TWR annualisé ($)", ui.pct(twr_ann, decimales=2, signe=True),
           help=f"Sur {jours} jours ({jours / 365.25:.1f} ans).")
-c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements), signe=True),
+c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements), decimales=2, signe=True),
           help="Écart-type des rendements de sous-période annualisé.")
 
 # ---------------------------------------------------------------------------
@@ -207,34 +221,30 @@ st.caption(
     "de valeur. »"
 )
 
-# 1. En euros.
-perf_eur = twr_total
+# 1. En dollars ($).
+perf_usd = twr_total
 
-# 2. En euros réels (pouvoir d'achat).
+# 2. En pouvoir d'achat réel (hors inflation).
 inflation = S.inflation_dict(ctx)
 d0, d1 = snaps["Date"].iloc[0].date(), snaps["Date"].iloc[-1].date()
-# Pondere par les jours, pas par le nombre de lignes : voir
-# `metrics.inflation_cumulee`, ou le defaut est documente.
 infl_periode = metrics.inflation_cumulee(inflation, d0, d1)
-perf_reel = (1.0 + perf_eur) / infl_periode - 1.0 if infl_periode > 0 else None
+perf_reel = (1.0 + perf_usd) / infl_periode - 1.0 if infl_periode > 0 else None
 
-# 3. En onces d'or — corrigee des apports, comme les deux autres lectures.
-# `oz_final / oz_initial` avait le meme defaut que `fin / debut` : il montait
-# avec vos versements.
+# 3. En onces d'or — corrigée des apports, comme les deux autres lectures.
 perf_or = S.twr_en_or_portefeuille(ctx)
 
 d1, d2, d3 = st.columns(3)
-d1.metric("En euros", ui.pct(perf_eur, signe=True))
-d2.metric("En euros réels", ui.pct(perf_reel, signe=True) if perf_reel is not None else "—",
+d1.metric("En dollars ($)", ui.pct(perf_usd, decimales=2, signe=True))
+d2.metric("Hors inflation (réelle)", ui.pct(perf_reel, decimales=2, signe=True) if perf_reel is not None else "—",
           help="Déflaté par l'inflation officielle.")
-d3.metric("En onces d'or", ui.pct(perf_or, signe=True) if perf_or is not None else "—",
+d3.metric("En onces d'or", ui.pct(perf_or, decimales=2, signe=True) if perf_or is not None else "—",
           help="L'étalon de Gave.")
 
-if perf_or is not None and perf_or < perf_eur:
+if perf_or is not None and perf_or < perf_usd:
     st.warning(
-        f"Votre portefeuille a gagné {ui.pct(perf_eur, signe=True)} en euros mais "
-        f"**{ui.pct(perf_or, signe=True)} en or**. La monnaie a fait le travail à "
-        "votre place : en étalon de valeur réel, vous avez perdu."
+        f"Votre portefeuille a gagné {ui.pct(perf_usd, decimales=2, signe=True)} en dollars mais "
+        f"**{ui.pct(perf_or, decimales=2, signe=True)} en or**. La monnaie a fait le travail à "
+        "votre place : en étalon de valeur réel, vous avez moins gagné qu'en nominal."
     )
 
 # ---------------------------------------------------------------------------
@@ -282,19 +292,30 @@ rendements_annuels = metrics.twr_par_annee(
     [d.date() for d in snaps["Date"]], snaps["Rendement"].tolist()
 )
 
+snaps["_val_usd"] = valeurs
+bilan_par_annee = snaps.groupby("Annee").last()
+
 lignes = []
 for annee, perf in rendements_annuels.items():
     infl = inflation.get(annee)
     reel = (1 + perf) / (1 + infl) - 1.0 if infl is not None else None
+    val_fin_u = float(bilan_par_annee.loc[annee, "_val_usd"]) if annee in bilan_par_annee.index else None
     lignes.append({
         "Année": int(annee),
-        "Performance": ui.pct(perf, signe=True),
-        "Inflation": ui.pct(infl, signe=True) if infl is not None else "⚠️ non renseignée",
-        "Réelle": ui.pct(reel, signe=True) if reel is not None else "—",
+        "Performance ($)": ui.pct(perf, decimales=2, signe=True),
+        "Inflation": ui.pct(infl, decimales=2, signe=True) if infl is not None else "⚠️ non renseignée",
+        "Réelle": ui.pct(reel, decimales=2, signe=True) if reel is not None else "—",
+        "Valeur bilan ($ / €)": ui.usd_eur(val_fin_u) if val_fin_u is not None else "—",
     })
 
 if lignes:
     ui.tableau(pd.DataFrame(lignes))
+    st.caption(
+        "Performances calculées en **dollars ($)** (hors effet de change EUR/USD), "
+        "avec indication de la valeur bilan en euros. Note : en 2023 (9 mois, "
+        "d'avril à décembre), la performance sur la période est de **+9,33 %** "
+        "(soit **+12,68 %** en rythme annualisé sur 12 mois dans la v1)."
+    )
 
     annees_sans_inflation = [
         a for a in sorted({int(x) for x in snaps["Annee"]}) if a not in inflation

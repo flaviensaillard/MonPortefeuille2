@@ -246,3 +246,44 @@ class TestAucunePageNeRecalcule:
             appels += source.count("twr_annualise_portefeuille(")
             appels += source.count("flux_par_date(")
         assert appels >= 4, f"seulement {appels} appels à la source unique"
+
+
+
+def test_twr_usd_projections_reproduit_swissquote():
+    """Vérifie que `serie_performance` calcule le TWR en USD à partir de
+    `Actifs Stratégiques` et des variations de `Capital investi` de `Projections`,
+    sans injecter le taux de change EUR/USD dans la performance."""
+    from unittest.mock import patch
+    import pandas as pd
+    from core import metrics, session as S
+
+    proj = pd.DataFrame([
+        {"Date": "31/12/2023", "Capital investi": 27769.0, "Actifs Stratégiques": 29534.0, "Total Global": 34372.0},
+        {"Date": "30/04/2024", "Capital investi": 29757.0, "Actifs Stratégiques": 34039.0, "Total Global": 45658.0},
+        {"Date": "31/12/2024", "Capital investi": 50122.0, "Actifs Stratégiques": 57986.0, "Total Global": 69850.0},
+        {"Date": "31/12/2025", "Capital investi": 56707.0, "Actifs Stratégiques": 73229.0, "Total Global": 82563.0},
+        {"Date": "01/10/2026", "Capital investi": 59629.92, "Actifs Stratégiques": 79007.0, "Total Global": 92313.0},
+    ])
+
+    ctx = S.Contexte()
+    ctx.taux_eur_usd = 1.1245
+    ctx.total_investi_usd = 79007.0
+    ctx.total_investi_eur = round(79007.0 / 1.1245, 2)
+
+    def fake_lire(table):
+        if table == "Projections":
+            return proj
+        return pd.DataFrame()
+
+    with patch("core.db.lire", side_effect=fake_lire):
+        S._enrichir_historiques_usd(ctx)
+
+    snaps, valeurs, flux = S.serie_performance(ctx)
+    assert valeurs == [29534.0, 34039.0, 57986.0, 73229.0, 79007.0]
+    assert [round(f, 2) for f in flux] == [0.0, 1988.0, 20365.0, 6585.0, 2922.92]
+    rends = [0.0] + metrics.rendements_periode(valeurs, flux)
+    par_an = metrics.twr_par_annee([d.date() for d in snaps["Date"]], rends)
+    # Aucun faux trou dû à la ligne 29/04/2024 d'Historique ni au taux EUR/USD
+    assert par_an[2024] > 0.14
+    assert par_an[2025] > 0.13
+    assert 0.035 < par_an[2026] < 0.045

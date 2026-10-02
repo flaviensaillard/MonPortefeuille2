@@ -50,6 +50,12 @@ class Contexte:
     total_courant_eur: float = 0.0
     patrimoine_total_eur: float = 0.0
 
+    total_investi_usd: float = 0.0
+    total_precaution_usd: float = 0.0
+    total_courant_usd: float = 0.0
+    patrimoine_total_usd: float = 0.0
+    taux_eur_usd: float = 1.125
+
     cours_or: float | None = None
     equivalent_or_oz: float | None = None
 
@@ -66,7 +72,7 @@ class Contexte:
 
     @property
     def ecarts(self):
-        return diagnostiquer(self.etats, self.total_investi_eur)
+        return diagnostiquer(self.etats, self.total_investi_eur, self.total_investi_usd)
 
     @property
     def besoins_reequilibrage(self):
@@ -155,21 +161,23 @@ def _date_dernier_import(df) -> str | None:
 # defaut sans faire echouer `tests/test_twr_portefeuille.py`.
 
 
-def flux_par_date(apports: pd.DataFrame) -> dict:
+def flux_par_date(apports: pd.DataFrame, colonne: str = "montant_eur") -> dict:
     """Apports et retraits, dates par jour.
 
-    `apports` doit avoir les colonnes `date`, `sens`, `montant_eur`.
-    Retourne `{date: montant signe}`, un apport etant positif.
+    `apports` doit avoir les colonnes `date`, `sens`, et `colonne`
+    (`montant_usd` ou `montant_eur`). Retourne `{date: montant signe}`, un
+    apport etant positif.
     """
     if apports is None or apports.empty:
         return {}
-    if not {"date", "sens", "montant_eur"} <= set(apports.columns):
+    col = colonne if colonne in apports.columns else "montant_eur"
+    if not {"date", "sens", col} <= set(apports.columns):
         return {}
     dates = pd.to_datetime(apports["date"], errors="coerce")
     signes = apports["sens"].astype(str).str.strip().str.lower().map(
         {"apport": 1.0, "ajout": 1.0, "retrait": -1.0}
     )
-    montants = pd.to_numeric(apports["montant_eur"], errors="coerce")
+    montants = pd.to_numeric(apports[col], errors="coerce")
     sortie: dict = {}
     for d, s, m in zip(dates, signes, montants):
         if pd.isna(d) or s is None or pd.isna(m):
@@ -179,33 +187,69 @@ def flux_par_date(apports: pd.DataFrame) -> dict:
     return sortie
 
 
-def twr_portefeuille(ctx: "Contexte") -> float | None:
-    """TWR depuis le premier snapshot, corrigé des apports et retraits.
+def serie_performance(
+    ctx: "Contexte",
+) -> tuple[pd.DataFrame, list[float], list[float]]:
+    """Série propre `(snapshots, valeurs, flux)` pour le TWR et les diagnostics.
 
-    Retourne `None` s'il n'y a pas assez de snapshots — jamais une valeur
-    inventée. C'est la SEULE façon correcte de répondre à « qu'a produit la
-    stratégie » quand on alimente le portefeuille.
+    CONVENTION DE L'UTILISATEUR : tout est compté en DOLLARS ($).
+    - Si `patrimoine_investi_usd` est présent dans `ctx.snapshots`, c'est lui
+      qui est utilisé (série USD de `Projections` + valorisation USD du jour).
+    - Si `capital_investi_usd` est présent (la colonne `Capital investi` de
+      `Projections`), le flux de chaque sous-période `[i-1, i]` est
+      `capital_investi_usd[i] - capital_investi_usd[i-1]` — exactement la
+      définition de `recalculer_toute_la_base_projections` dans la v1, qui
+      reproduit au centième de point les performances Swissquote / v1
+      (2023 : +9,33 %, 2024 : +15,21 %, 2025 : +13,92 %, 2026 : +4,1 % / +4,47 %).
+    - Pour toute période postérieure à `Projections` (ou dans les jeux de tests
+      unitaires qui ne fournissent que `patrimoine_investi_eur`), on retombe sur
+      `metrics.flux_par_periode` appliqué à `ctx.apports`.
     """
     snaps = ctx.snapshots
-    if snaps is None or snaps.empty or len(snaps) < 2:
-        return None
-    if "patrimoine_investi_eur" not in snaps.columns:
-        return None
+    if snaps is None or snaps.empty or "Date" not in snaps.columns:
+        return pd.DataFrame(), [], []
 
-    dates = _parser_dates(snaps["Date"])
-    valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce")
-    garder = dates.notna() & valeurs.notna() & (valeurs > 0)
-    if int(garder.sum()) < 2:
+    use_usd = (
+        "patrimoine_investi_usd" in snaps.columns
+        and pd.to_numeric(snaps["patrimoine_investi_usd"], errors="coerce").gt(0).sum() >= 2
+    )
+    col_val = "patrimoine_investi_usd" if use_usd else "patrimoine_investi_eur"
+    if col_val not in snaps.columns:
+        return pd.DataFrame(), [], []
+
+    df = snaps.copy()
+    df["Date"] = _parser_dates(df["Date"])
+    df[col_val] = pd.to_numeric(df[col_val], errors="coerce")
+    df = df.dropna(subset=["Date", col_val])
+    df = df[df[col_val] > 0].sort_values("Date").reset_index(drop=True)
+    if len(df) < 2:
+        return df, [], []
+
+    dates_l = [d.date() for d in df["Date"]]
+    valeurs = df[col_val].astype(float).tolist()
+
+    col_ap = "montant_usd" if (use_usd and ctx.apports is not None and "montant_usd" in getattr(ctx.apports, "columns", [])) else "montant_eur"
+    flux_ap = metrics.flux_par_periode(dates_l, flux_par_date(ctx.apports, col_ap))
+
+    if use_usd and "capital_investi_usd" in df.columns:
+        cap = pd.to_numeric(df["capital_investi_usd"], errors="coerce")
+        flux: list[float] = [0.0]
+        for i in range(1, len(df)):
+            if pd.notna(cap.iloc[i]) and pd.notna(cap.iloc[i - 1]):
+                flux.append(float(cap.iloc[i] - cap.iloc[i - 1]))
+            else:
+                flux.append(float(flux_ap[i]))
+    else:
+        flux = flux_ap
+
+    return df, valeurs, flux
+
+
+def twr_portefeuille(ctx: "Contexte") -> float | None:
+    """TWR depuis le premier snapshot, corrigé des apports et retraits (en $)."""
+    df, valeurs, flux = serie_performance(ctx)
+    if len(valeurs) < 2:
         return None
-
-    dates = dates[garder].tolist()
-    valeurs = valeurs[garder].tolist()
-    flux_jour = flux_par_date(ctx.apports)
-    # Les flux sont rangés par PÉRIODE et non par date exacte : la série de la v1
-    # est mensuelle, et un versement du 13/03 tombe entre deux snapshots. Voyez
-    # `metrics.flux_par_periode`.
-    flux = metrics.flux_par_periode([d.date() for d in dates], flux_jour)
-
     return metrics.twr_depuis(valeurs, flux)
 
 
@@ -225,48 +269,15 @@ def twr_annualise_portefeuille(ctx: "Contexte") -> float | None:
 
 
 def twr_en_or_portefeuille(ctx: "Contexte") -> float | None:
-    """Performance en onces d'or depuis le premier snapshot, corrigée des apports.
-
-    Même défaut, même remède que `twr_portefeuille` : « onces finales / onces
-    initiales » monte dès que vous versez de l'argent. Sur le portefeuille
-    réel, l'ancien calcul affichait +120 % là où la stratégie en avait produit
-    16,9 %.
-
-    Retourne `None` si l'équivalent-or manque sur une seule ligne — les
-    snapshots importés de la v1 n'en ont pas, et il faut le dire plutôt que
-    de fabriquer un prix de l'or.
-    """
-    snaps = ctx.snapshots
-    if snaps is None or snaps.empty or len(snaps) < 2:
+    """Performance en onces d'or depuis le premier snapshot, corrigée des apports."""
+    df, valeurs, flux = serie_performance(ctx)
+    if len(valeurs) < 2 or "equivalent_or_oz" not in df.columns:
         return None
-    if not {"patrimoine_investi_eur", "equivalent_or_oz"} <= set(snaps.columns):
+    onces = pd.to_numeric(df["equivalent_or_oz"], errors="coerce")
+    if onces.isna().any() or (onces <= 0).any():
         return None
-
-    dates = _parser_dates(snaps["Date"])
-    valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce")
-    onces = pd.to_numeric(snaps["equivalent_or_oz"], errors="coerce")
-    garder = dates.notna() & valeurs.notna() & (valeurs > 0)
-    if int(garder.sum()) < 2:
-        return None
-
-    # Un equivalent-or manque-t-il sur la periode retenue ? On refuse de
-    # « sauter » la ligne : la sous-periode qui l'enjambe serait calculee sur
-    # deux periodes comme si c'en etait une, et le flux intermediaire serait
-    # perdu. Autant le dire que mesurer de travers.
-    if onces[garder].isna().any() or (onces[garder] <= 0).any():
-        return None
-
-    dates = dates[garder].tolist()
-    valeurs = valeurs[garder].tolist()
-    onces = onces[garder].tolist()
-    flux_jour = flux_par_date(ctx.apports)
-    # Les flux sont rangés par PÉRIODE et non par date exacte : la série de la v1
-    # est mensuelle, et un versement du 13/03 tombe entre deux snapshots. Voyez
-    # `metrics.flux_par_periode`.
-    flux = metrics.flux_par_periode([d.date() for d in dates], flux_jour)
-
     try:
-        return metrics.twr_en_or(valeurs, flux, onces)
+        return metrics.twr_en_or(valeurs, flux, onces.astype(float).tolist())
     except ValueError:
         return None
 
@@ -326,39 +337,50 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     except fx.FXIndisponible as exc:
         ctx.echecs_fx.append(str(exc))
 
+    # --- Taux EUR -> USD courant (pour l'indication en euros partout) ---
+    aujourdhui_iso = dt.date.today().isoformat()
+    try:
+        ctx.taux_eur_usd = float(fx.taux("EUR", aujourdhui_iso, "USD"))
+    except Exception:
+        ctx.taux_eur_usd = 1.125
+    from . import ui as _ui
+    _ui.definir_taux_eur_usd(ctx.taux_eur_usd)
+
+    # --- Liquidités hors transactions (CHF, CNY, USD de la table Donnees v1) ---
+    _completer_liquidites_v1(ctx, aujourdhui_iso)
+
     # --- Agrégation par poche, sur le patrimoine INVESTI seulement ---
-    perimetres: dict[str, float] = {p.value: 0.0 for p in Perimetre}
+    perimetres_eur: dict[str, float] = {p.value: 0.0 for p in Perimetre}
+    perimetres_usd: dict[str, float] = {p.value: 0.0 for p in Perimetre}
     for a in ctx.actifs:
         p = POCHES_PAR_CLE.get(a.poche)
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
-        perimetres[cle] += a.valeur_eur
+        perimetres_eur[cle] += a.valeur_eur
+        perimetres_usd[cle] += getattr(a, "valeur_usd", a.valeur_eur)
 
-    ctx.total_investi_eur = perimetres[Perimetre.INVESTI.value]
-    ctx.total_precaution_eur = perimetres[Perimetre.PRECAUTION.value]
-    ctx.total_courant_eur = perimetres[Perimetre.COURANT.value]
-    ctx.patrimoine_total_eur = sum(perimetres.values())
+    ctx.total_investi_eur = perimetres_eur[Perimetre.INVESTI.value]
+    ctx.total_precaution_eur = perimetres_eur[Perimetre.PRECAUTION.value]
+    ctx.total_courant_eur = perimetres_eur[Perimetre.COURANT.value]
+    ctx.patrimoine_total_eur = sum(perimetres_eur.values())
+
+    ctx.total_investi_usd = perimetres_usd[Perimetre.INVESTI.value]
+    ctx.total_precaution_usd = perimetres_usd[Perimetre.PRECAUTION.value]
+    ctx.total_courant_usd = perimetres_usd[Perimetre.COURANT.value]
+    ctx.patrimoine_total_usd = sum(perimetres_usd.values())
 
     ctx.etats = agreger_par_poche(ctx.actifs, ctx.total_investi_eur)
 
     # --- Or : l'étalon de Gave ---
     try:
         ctx.cours_or = prices.cours_or()
-        if ctx.cours_or and ctx.total_investi_eur > 0:
-            # Equivalent en onces du patrimoine investi, converti en USD.
-            taux_usd = fx.taux("EUR", dt.date.today().isoformat(), "USD")
-            ctx.equivalent_or_oz = (ctx.total_investi_eur * taux_usd) / ctx.cours_or
+        if ctx.cours_or and ctx.total_investi_usd > 0:
+            ctx.equivalent_or_oz = ctx.total_investi_usd / ctx.cours_or
     except prices.CoursIndisponible:
-        # Le cours de l'or manque : c'est LUI qui manque, la conversion est
-        # peut-etre valide. On le dit dans la bonne liste.
         ctx.echecs_cours.append(prices.TICKER_OR)
     except fx.FXIndisponible:
-        # Le defaut separe : avant, l'echec du taux de change etait rapporte
-        # comme un cours manquant. `exc` etait capture puis jete — l'exception
-        # nommait pourtant la paire et la date fautives. L'utilisateur voyait
-        # « GC=F » alors que le probleme etait l'EUR/USD.
         ctx.echecs_fx.append("EUR/USD (pour l'équivalent-or)")
 
-    # --- Historiques ---
+    # --- Historiques (en dollars, avec l'indication en euros) ---
     try:
         ctx.snapshots = db.snapshots()
         ctx.apports = db.apports()
@@ -366,7 +388,245 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     except Exception as exc:
         ctx.erreurs.append(f"Chargement des historiques : {exc}")
 
+    _enrichir_historiques_usd(ctx)
+
     return ctx
+
+
+def _completer_liquidites_v1(ctx: Contexte, jour_iso: str) -> None:
+    """Charge les réserves de cash (CHF, CNY, USD, EUR) depuis `Donnees` (v1).
+
+    Dans la v1, les liquidités (`🏦 Cash réserve` et `💵 Cash`) étaient tenues
+    directement dans la table `Donnees` et non dans `Transaction`. Si aucune
+    ligne de précaution ou de compte courant n'est issue des transactions, on
+    les lit dans `Donnees` pour que l'épargne de précaution (CHF, CNY) et le
+    compte courant apparaissent sur le tableau de bord.
+    """
+    from .models import Classe
+    from .portfolio import poche_de
+
+    deja = {a.ticker for a in ctx.actifs if a.quantite > 0}
+    if any(t in deja for t in ("CHF", "CNY")):
+        return
+    try:
+        df_d = db.lire("Donnees")
+    except Exception:
+        return
+    if df_d is None or df_d.empty or "Ticker" not in df_d.columns:
+        return
+
+    for _, r in df_d.iterrows():
+        t = str(r.get("Ticker", "")).upper().strip()
+        if t not in ("CHF", "CNY", "USD", "EUR") or t in deja:
+            continue
+        try:
+            qte = float(str(r.get("Quantité", 0) or 0).replace(" ", "").replace(",", "."))
+        except (TypeError, ValueError):
+            continue
+        if qte <= 0:
+            continue
+        try:
+            t_eur = 1.0 if t == "EUR" else float(fx.taux(t, jour_iso, "EUR"))
+            t_usd = 1.0 if t == "USD" else float(fx.taux(t, jour_iso, "USD"))
+        except Exception:
+            continue
+        poche = poche_de(t)
+        ctx.actifs.append(Actif(
+            ticker=t,
+            classe=Classe.ESPECE,
+            devise_cotation=t,
+            poche=poche.cle if poche else "precaution",
+            quantite=qte,
+            prix=1.0,
+            valeur_eur=qte * t_eur,
+            valeur_usd=qte * t_usd,
+            dernier_taux=t_eur,
+            dernier_taux_usd=t_usd,
+        ))
+
+
+def _enrichir_historiques_usd(ctx: Contexte) -> None:
+    """Attache les colonnes USD (`*_usd`) aux apports et aux snapshots.
+
+    1. Pour `ctx.apports` : chaque ligne reçoit `montant_usd` depuis la table
+       `Historique` de la v1 (`Montant $`), ou à défaut depuis
+       `montant_or * cours_or` (qui vaut exactement `Montant $`), ou
+       `montant_eur * taux_eur_usd`.
+    2. Pour `ctx.snapshots` : les colonnes `Actifs Stratégiques`, `Total Global`
+       et `Capital investi` de `Projections` (qui sont nativement en dollars
+       dans la v1) alimentent `patrimoine_investi_usd`, `patrimoine_total_usd`,
+       `precaution_usd` et `capital_investi_usd`. Et si le portefeuille est
+       valorisé en direct aujourd'hui (`ctx.total_investi_usd > 0`), le dernier
+       point reflète la valeur en direct (comme `df_p_live` dans `app.py` l. 461
+       de la v1), ce qui donne la performance 2026 en temps réel.
+    """
+    from . import dates as _dates
+
+    taux = ctx.taux_eur_usd if ctx.taux_eur_usd > 0 else 1.125
+
+    # --- 1. Apports en USD ---
+    if ctx.apports is not None and not ctx.apports.empty:
+        ap = ctx.apports.copy()
+        usd_par_ref: dict[str, float] = {}
+        try:
+            df_h = db.lire("Historique")
+            if df_h is not None and not df_h.empty and "Montant $" in df_h.columns:
+                for _, r in df_h.iterrows():
+                    if pd.notna(r.get("id")) and pd.notna(r.get("Montant $")):
+                        usd_par_ref[f"v1:id{r.get('id')}"] = abs(float(r["Montant $"]))
+        except Exception:
+            pass
+
+        montants_usd: list[float] = []
+        for _, r in ap.iterrows():
+            ref = str(r.get("reference") or "")
+            if ref in usd_par_ref:
+                montants_usd.append(round(usd_par_ref[ref], 2))
+            elif pd.notna(r.get("montant_or")) and pd.notna(r.get("cours_or")) and float(r.get("montant_or") or 0) > 0 and float(r.get("cours_or") or 0) > 0:
+                montants_usd.append(round(float(r["montant_or"]) * float(r["cours_or"]), 2))
+            else:
+                montants_usd.append(round(float(r.get("montant_eur") or 0.0) * taux, 2))
+        ap["montant_usd"] = montants_usd
+        ctx.apports = ap
+
+    # --- 2. Snapshots en USD (depuis Projections + pf2_snapshots) ---
+    df_proj = pd.DataFrame()
+    try:
+        df_proj = db.lire("Projections")
+    except Exception:
+        df_proj = pd.DataFrame()
+
+    snaps = ctx.snapshots.copy() if (ctx.snapshots is not None and not ctx.snapshots.empty) else pd.DataFrame()
+
+    if df_proj is not None and not df_proj.empty and "Date" in df_proj.columns:
+        p = df_proj.copy()
+        p["_dt"] = _dates.parser(p["Date"]).dt.tz_localize(None).dt.normalize()
+        p = p.dropna(subset=["_dt"]).sort_values("_dt").drop_duplicates(subset=["_dt"], keep="last")
+        for c in ("Actifs Stratégiques", "Total Global", "Capital investi"):
+            if c in p.columns:
+                p[c] = pd.to_numeric(p[c], errors="coerce")
+        p = p.dropna(subset=["Actifs Stratégiques"])
+        p = p[p["Actifs Stratégiques"] > 0].reset_index(drop=True)
+
+        # Dictionnaire d'or depuis pf2_snapshots
+        or_par_date: dict = {}
+        cours_or_par_date: dict = {}
+        eur_inv_par_date: dict = {}
+        eur_tot_par_date: dict = {}
+        if not snaps.empty and "Date" in snaps.columns:
+            snaps["_dt"] = _dates.parser(snaps["Date"]).dt.tz_localize(None).dt.normalize()
+            for _, sr in snaps.dropna(subset=["_dt"]).iterrows():
+                d_cle = sr["_dt"].date()
+                if pd.notna(sr.get("equivalent_or_oz")):
+                    or_par_date[d_cle] = float(sr["equivalent_or_oz"])
+                if pd.notna(sr.get("cours_or_usd")):
+                    cours_or_par_date[d_cle] = float(sr["cours_or_usd"])
+                if pd.notna(sr.get("patrimoine_investi_eur")):
+                    eur_inv_par_date[d_cle] = float(sr["patrimoine_investi_eur"])
+                if pd.notna(sr.get("patrimoine_total_eur")):
+                    eur_tot_par_date[d_cle] = float(sr["patrimoine_total_eur"])
+
+        lignes_u = []
+        for _, r in p.iterrows():
+            d_cle = r["_dt"].date()
+            inv_u = float(r["Actifs Stratégiques"])
+            tot_u = float(r["Total Global"]) if pd.notna(r.get("Total Global")) else inv_u
+            cap_u = float(r["Capital investi"]) if pd.notna(r.get("Capital investi")) else None
+            inv_e = eur_inv_par_date.get(d_cle, round(inv_u / taux, 2))
+            tot_e = eur_tot_par_date.get(d_cle, round(tot_u / taux, 2))
+            lignes_u.append({
+                "Date": pd.Timestamp(d_cle),
+                "date": d_cle.isoformat(),
+                "patrimoine_investi_usd": round(inv_u, 2),
+                "patrimoine_total_usd": round(tot_u, 2),
+                "precaution_usd": round(max(tot_u - inv_u, 0.0), 2),
+                "courant_usd": 0.0,
+                "capital_investi_usd": round(cap_u, 2) if cap_u is not None else None,
+                "patrimoine_investi_eur": round(inv_e, 2),
+                "patrimoine_total_eur": round(tot_e, 2),
+                "precaution_eur": round(max(tot_e - inv_e, 0.0), 2),
+                "courant_eur": 0.0,
+                "cours_or_usd": cours_or_par_date.get(d_cle),
+                "equivalent_or_oz": or_par_date.get(d_cle),
+            })
+
+        # Ajouter les éventuels snapshots de pf2_snapshots postérieurs à Projections
+        max_proj = p["_dt"].max().date() if not p.empty else dt.date.min
+        if not snaps.empty and "_dt" in snaps.columns:
+            apres = snaps[snaps["_dt"].dt.date > max_proj].sort_values("_dt")
+            for _, sr in apres.iterrows():
+                d_cle = sr["_dt"].date()
+                inv_e = float(sr.get("patrimoine_investi_eur") or 0.0)
+                tot_e = float(sr.get("patrimoine_total_eur") or inv_e)
+                oz = sr.get("equivalent_or_oz")
+                co = sr.get("cours_or_usd")
+                if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0:
+                    inv_u = float(oz) * float(co)
+                    ratio = inv_u / inv_e if inv_e > 0 else taux
+                    tot_u = tot_e * ratio
+                else:
+                    inv_u = inv_e * taux
+                    tot_u = tot_e * taux
+                lignes_u.append({
+                    "Date": pd.Timestamp(d_cle),
+                    "date": d_cle.isoformat(),
+                    "patrimoine_investi_usd": round(inv_u, 2),
+                    "patrimoine_total_usd": round(tot_u, 2),
+                    "precaution_usd": round(max(tot_u - inv_u, 0.0), 2),
+                    "courant_usd": 0.0,
+                    "capital_investi_usd": None,
+                    "patrimoine_investi_eur": round(inv_e, 2),
+                    "patrimoine_total_eur": round(tot_e, 2),
+                    "precaution_eur": round(max(tot_e - inv_e, 0.0), 2),
+                    "courant_eur": 0.0,
+                    "cours_or_usd": float(co) if pd.notna(co) else None,
+                    "equivalent_or_oz": float(oz) if pd.notna(oz) else None,
+                })
+
+        df_out = pd.DataFrame(lignes_u)
+        # Mise à jour du point du jour avec la valorisation en direct (comme
+        # `df_p_live` dans `app.py` l. 461 de la v1) pour que 2026 affiche la
+        # performance en direct (ex. +4,1 % à 79 007 $).
+        if not df_out.empty and ctx.total_investi_usd > 0:
+            idx_last = df_out.index[-1]
+            df_out.at[idx_last, "patrimoine_investi_usd"] = round(ctx.total_investi_usd, 2)
+            df_out.at[idx_last, "patrimoine_investi_eur"] = round(ctx.total_investi_eur, 2)
+            if ctx.patrimoine_total_usd >= ctx.total_investi_usd:
+                df_out.at[idx_last, "patrimoine_total_usd"] = round(ctx.patrimoine_total_usd, 2)
+                df_out.at[idx_last, "patrimoine_total_eur"] = round(ctx.patrimoine_total_eur, 2)
+                df_out.at[idx_last, "precaution_usd"] = round(ctx.total_precaution_usd, 2)
+                df_out.at[idx_last, "precaution_eur"] = round(ctx.total_precaution_eur, 2)
+            if ctx.equivalent_or_oz:
+                df_out.at[idx_last, "equivalent_or_oz"] = round(ctx.equivalent_or_oz, 4)
+            if ctx.cours_or:
+                df_out.at[idx_last, "cours_or_usd"] = round(ctx.cours_or, 2)
+
+        ctx.snapshots = df_out
+    elif not snaps.empty:
+        # Repli si `Projections` n'est pas accessible : on déduit l'USD depuis
+        # `equivalent_or_oz * cours_or_usd` ou `patrimoine_investi_eur * taux`.
+        inv_u_list = []
+        tot_u_list = []
+        prec_u_list = []
+        for _, sr in snaps.iterrows():
+            inv_e = float(sr.get("patrimoine_investi_eur") or 0.0)
+            tot_e = float(sr.get("patrimoine_total_eur") or inv_e)
+            oz = sr.get("equivalent_or_oz")
+            co = sr.get("cours_or_usd")
+            if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0:
+                inv_u = float(oz) * float(co)
+                ratio = inv_u / inv_e if inv_e > 0 else taux
+                tot_u = tot_e * ratio
+            else:
+                inv_u = inv_e * taux
+                tot_u = tot_e * taux
+            inv_u_list.append(round(inv_u, 2))
+            tot_u_list.append(round(tot_u, 2))
+            prec_u_list.append(round(max(tot_u - inv_u, 0.0), 2))
+        snaps["patrimoine_investi_usd"] = inv_u_list
+        snaps["patrimoine_total_usd"] = tot_u_list
+        snaps["precaution_usd"] = prec_u_list
+        ctx.snapshots = snaps
 
 
 def inflation_dict(ctx: Contexte) -> dict[int, float]:

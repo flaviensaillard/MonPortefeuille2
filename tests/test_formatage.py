@@ -12,6 +12,9 @@ teste avec de vrais nombres. Un `None` ne prouve qu'une seule des branches.
 
 from __future__ import annotations
 
+import datetime as dt
+
+import pandas as pd
 import pytest
 
 from core import ui
@@ -192,3 +195,55 @@ class TestQuantite:
         """Un helper de formatage plante en production, pas dans les tests."""
         for v in [0.0, 1e-12, 1e12, 0.05747, 112988.0, 12345678.9, -0.0000001]:
             assert isinstance(ui.quantite(v), str)
+
+
+class TestFormatageDesDates:
+    """`ui.jour` : une date en français, jamais en ISO.
+
+    Le défaut qu'il corrige : les alertes de la page Performance affichaient
+    « 2024-04-30 » quand le versement litigieux est daté du 29/04/2024. Une date
+    ISO se survole — on ne voit pas qu'elle désigne un autre jour que celui
+    qu'on cherche. Le reste de l'application parle en jj/mm/aaaa depuis le
+    début ; les alertes parlent la même langue maintenant.
+    """
+
+    def test_un_date(self):
+        assert ui.jour(dt.date(2024, 4, 30)) == "30/04/2024"
+
+    def test_un_datetime(self):
+        assert ui.jour(dt.datetime(2026, 2, 2, 23, 59)) == "02/02/2026"
+
+    def test_une_chaine_iso(self):
+        assert ui.jour("2024-04-30") == "30/04/2024"
+
+    def test_un_timestamp_pandas(self):
+        assert ui.jour(pd.Timestamp("2024-03-30")) == "30/03/2024"
+
+    def test_none_rend_le_defaut(self):
+        assert ui.jour(None) == "—"
+        assert ui.jour(None, defaut="·") == "·"
+
+    def test_une_chaine_illisible_ne_leve_pas(self):
+        """Une date illisible doit afficher un tiret, pas faire sauter la page."""
+        assert ui.jour("pas une date") == "—"
+        assert ui.jour("") == "—"
+
+    def test_nat_pandas(self):
+        assert ui.jour(pd.NaT) == "—"
+
+    def test_le_defaut_est_personnalisable(self):
+        assert ui.jour(float("nan"), defaut="non daté") == "non daté"
+
+
+
+def test_usd_affiche_dollar_espace_insécable():
+    from core import ui
+    assert ui.usd(79007.0) == "79 007,00 $"
+    assert ui.usd(79007.0, decimales=0) == "79 007 $"
+
+
+def test_usd_eur_affiche_dollar_puis_euro():
+    from core import ui
+    ui.definir_taux_eur_usd(1.1245)
+    assert ui.usd_eur(79007.0, 70259.67) == "79 007,00 $ / 70 259,67 €"
+    assert ui.usd_eur(1124.50) == "1 124,50 $ / 1 000,00 €"

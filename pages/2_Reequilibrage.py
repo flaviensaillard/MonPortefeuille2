@@ -59,9 +59,9 @@ for e in ctx.ecarts:
         "Réel": ui.pct(e.poids_reel),
         "Écart": ui.points(e.ecart_points),
         "Bande": f"±{e.bande * 100:.0f} pts",
-        "Valeur": ui.eur(e.valeur_eur),
-        "Valeur cible": ui.eur(e.valeur_cible_eur),
-        "Ajustement": ui.eur(e.ecart_eur, ),
+        "Valeur ($ / €)": ui.usd_eur(e.valeur_usd, e.valeur_eur),
+        "Valeur cible ($ / €)": ui.usd_eur(e.valeur_cible_usd, e.valeur_cible_eur),
+        "Ajustement ($ / €)": ui.usd_eur(e.ecart_usd, e.ecart_eur),
         "État": "🔴 Hors bande" if e.hors_bande else "🟢 Dans la bande",
     })
 ui.tableau(pd.DataFrame(lignes))
@@ -91,7 +91,7 @@ if ordres:
     ui.tableau(pd.DataFrame([{
         "Actif": o.ticker,
         "Sens": "🟢 Achat" if o.sens == "achat" else "🔴 Vente",
-        "Montant": ui.eur(o.montant_eur),
+        "Montant ($ / €)": ui.usd_eur(o.montant_usd, o.montant_eur),
         "Quantité": ui.quantite(o.quantite),
         "Poche": o.poche,
         "Motif": o.motif,

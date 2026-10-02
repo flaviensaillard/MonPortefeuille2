@@ -161,8 +161,14 @@ class Actif:
     poche: str
     quantite: float = 0.0
     prix: float = 0.0                 # dans la devise de cotation
-    valeur_eur: float = 0.0           # valorisation convertie
+    valeur_eur: float = 0.0           # valorisation en euros (indication & fiscalité)
+    valeur_usd: float = 0.0           # valorisation en dollars (unité de compte)
     dernier_taux: float | None = None # taux utilisé, pour traçabilité
+    dernier_taux_usd: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.valeur_usd == 0.0 and self.valeur_eur != 0.0:
+            self.valeur_usd = self.valeur_eur
 
     @property
     def regime_fiscal(self) -> str:

@@ -345,15 +345,81 @@ class TestFluxSansEffet:
         dates = [dt.date(2026, 1, 1), dt.date(2026, 2, 1)]
         assert metrics.fluxs_sans_effet(dates, [100.0], [0.0, 0.0]) == []
 
-    def test_le_message_nomme_le_montant_et_la_date(self):
+    def test_le_message_nomme_le_montant_et_les_deux_bornes(self):
+        """Les DEUX bornes de la période, et non la seule date du snapshot.
+
+        Vérifié sur le cas réel : le versement litigieux est daté du 29/04/2024
+        dans le journal, alors que le snapshot qui le révèle porte le 30/04/2024.
+        Un message qui n'aurait dit que « 2024-04-30 » envoyait chercher une
+        ligne qui n'existe pas.
+        """
         dates = [dt.date(2024, 3, 30), dt.date(2024, 4, 30)]
         trouve = metrics.fluxs_sans_effet(dates, [31988.0, 31779.0], [0.0, 11050.0])[0]
         message = metrics.anomalie_flux_sans_effet(trouve)
-        assert "2024-04-30" in message
+        assert "30/03/2024" in message
+        assert "30/04/2024" in message
         assert "11 050" in message
         assert "apport" in message
+
+    def test_les_dates_sont_en_format_francais(self):
+        """Jamais d'ISO dans un message : une date ISO se survole, une date
+        jj/mm/aaaa se lit."""
+        dates = [dt.date(2024, 3, 30), dt.date(2024, 4, 30)]
+        trouve = metrics.fluxs_sans_effet(dates, [31988.0, 31779.0], [0.0, 11050.0])[0]
+        message = metrics.anomalie_flux_sans_effet(trouve)
+        assert "2024-04-30" not in message
+        assert "2024-03-30" not in message
+
+    def test_la_ponctuation_du_message_survit_au_formatage(self):
+        """REGRESSION. Le message finissait par `.replace(",", " ")`, appliqué à
+        la PHRASE ENTIÈRE : toutes les virgules de ponctuation disparaissaient.
+        Le défaut était visible à l'écran (« L'écart est de 11 027 € soit
+        37.2 % ») et il rendait l'alerte pénible à lire — or une alerte qu'on ne
+        lit pas ne sert à rien.
+
+        On formate les NOMBRES, jamais la phrase.
+        """
+        dates = [dt.date(2024, 3, 30), dt.date(2024, 4, 30)]
+        trouve = metrics.fluxs_sans_effet(dates, [31988.0, 31779.0], [0.0, 11050.0])[0]
+        message = metrics.anomalie_flux_sans_effet(trouve)
+        assert "11 259 €, soit" in message, "la virgule après le montant"
+        assert "deux fois, porte" in message, "la virgule de l'énumération"
+        assert "une mauvaise date, ou" in message
+
+    def test_le_message_jumeau_formate_aussi_ses_nombres(self):
+        """`anomalie_saut` avait exactement le même défaut."""
+        saut = {
+            "date": dt.date(2026, 2, 2), "avant": 55639.93, "apres": 64808.82,
+            "flux": 200.0, "residuel": 8968.89, "residuel_pct": 0.1612,
+        }
+        message = metrics.anomalie_saut(saut)
+        assert "02/02/2026" in message
+        assert "2026-02-02" not in message
+        assert "8 969" in message, "le millier est une espace"
+        assert "55 640" in message
 
     def test_le_message_distingue_un_retrait(self):
         dates = [dt.date(2025, 1, 31), dt.date(2025, 2, 28)]
         trouve = metrics.fluxs_sans_effet(dates, [50000.0, 50020.0], [0.0, -12000.0])[0]
         assert "retrait" in metrics.anomalie_flux_sans_effet(trouve)
+
+
+class TestLeFormatageDesNombresDansLesMessages:
+    """Le millier est une espace, la décimale une virgule — comme `ui.eur`."""
+
+    def test_millier_avec_espace(self):
+        dates = [dt.date(2024, 3, 30), dt.date(2024, 4, 30)]
+        trouve = metrics.fluxs_sans_effet(
+            dates, [3198800.0, 3177900.0], [0.0, 1105000.0])[0]
+        message = metrics.anomalie_flux_sans_effet(trouve)
+        assert "1 105 000" in message
+        assert "1,105000".replace(",", "") not in message
+
+    def test_le_signe_du_mouvement_est_conserve(self):
+        """La valeur recule alors qu'un apport entre : le message doit dire
+        « -209 € », avec le signe. Un montant absolu laisserait croire que la
+        valeur a monté."""
+        dates = [dt.date(2024, 3, 30), dt.date(2024, 4, 30)]
+        trouve = metrics.fluxs_sans_effet(dates, [31988.0, 31779.0], [0.0, 11050.0])[0]
+        message = metrics.anomalie_flux_sans_effet(trouve)
+        assert "-209" in message

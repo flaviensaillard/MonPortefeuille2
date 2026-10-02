@@ -64,6 +64,52 @@ def _nombre(valeur: object) -> float | None:
     return nombre
 
 
+# Taux EUR -> USD courant (ex. 1,125 : 1 € = 1,125 $), rafraîchi par
+# `session.charger()`. Permet à `usd_eur(montant_usd)` d'afficher l'indication
+# en euros même quand seul le montant en dollars lui est passé.
+_TAUX_EUR_USD: float = 1.125
+
+
+def definir_taux_eur_usd(taux: float | None) -> None:
+    """Enregistre le taux EUR -> USD courant pour l'indication en euros."""
+    global _TAUX_EUR_USD
+    val = _nombre(taux)
+    if val is not None and val > 0:
+        _TAUX_EUR_USD = val
+
+
+def usd(montant: float | None, decimales: int = 2) -> str:
+    """Formate un montant en dollars, à la française (ex. « 79 007,00 $ »)."""
+    valeur = _nombre(montant)
+    if valeur is None:
+        return "—"
+    return f"{valeur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+
+
+def usd_eur(
+    montant_usd: float | None,
+    montant_eur: float | None = None,
+    taux_eur_usd: float | None = None,
+    decimales: int = 2,
+) -> str:
+    """Formate un montant en dollars avec son indication en euros (« X $ / Y € »).
+
+    Convention de l'utilisateur (identique à `afficher_montant_double` dans la
+    v1) : tout est compté en dollars ($), avec l'équivalent en euros (€) affiché
+    à côté à titre indicatif.
+    """
+    v_usd = _nombre(montant_usd)
+    if v_usd is None:
+        return "—"
+    v_eur = _nombre(montant_eur)
+    if v_eur is None:
+        t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
+        v_eur = (v_usd / t) if (t and t > 0) else v_usd
+    s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+    s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+    return f"{s_usd} / {s_eur}"
+
+
 def eur(montant: float | None, decimales: int = 2) -> str:
     """Formate un montant en euros, à la française.
 
@@ -106,6 +152,30 @@ def quantite(valeur: float | None, chiffres: int = 6) -> str:
     if "," in texte:                      # 800,00 -> 800
         texte = texte.rstrip("0").rstrip(",")
     return texte
+
+
+def jour(valeur, defaut: str = "—") -> str:
+    """Une date au format français : 30/04/2024.
+
+    Pourquoi ça existe : les messages de diagnostic affichaient l'ISO
+    (`2024-04-30`), et une date en ISO se lit mal quand elle n'est pas triée —
+    on la survole au lieu de la lire. Le reste de l'application parle déjà en
+    jj/mm/aaaa ; les alertes doivent parler la même langue que les tableaux.
+
+    Accepte un `date`, un `datetime`, un `Timestamp` ou une chaîne ISO.
+    Ne lève jamais : une date illisible rend `defaut`.
+    """
+    if valeur is None:
+        return defaut
+    try:
+        if hasattr(valeur, "strftime") and not isinstance(valeur, str):
+            return valeur.strftime("%d/%m/%Y")
+        t = pd.Timestamp(str(valeur))
+        if pd.isna(t):
+            return defaut
+        return t.strftime("%d/%m/%Y")
+    except Exception:
+        return defaut
 
 
 def pct(part: float | None, decimales: int = 1, signe: bool = False) -> str:

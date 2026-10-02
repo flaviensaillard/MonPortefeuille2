@@ -82,18 +82,21 @@ def main() -> int:
 
     # --- Agrégation ---
     totaux = {p.value: 0.0 for p in Perimetre}
+    totaux_usd = {p.value: 0.0 for p in Perimetre}
     poches = {cle: 0.0 for cle in POCHES_PAR_CLE}
     for a in actifs:
         p = POCHES_PAR_CLE.get(a.poche)
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
         totaux[cle] += a.valeur_eur
+        totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
 
     # --- Or ---
     try:
         cours_or = prices.cours_or()
         taux_usd = fx.taux("EUR", aujourdhui.isoformat(), "USD")
-        equivalent_or = (totaux[Perimetre.INVESTI.value] * taux_usd) / cours_or
+        inv_usd = totaux_usd[Perimetre.INVESTI.value] or (totaux[Perimetre.INVESTI.value] * taux_usd)
+        equivalent_or = inv_usd / cours_or
     except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
         log.error("Cours de l'or indisponible : %s. Snapshot abandonné.", exc)
         return 1
@@ -105,7 +108,7 @@ def main() -> int:
         "precaution_eur": round(totaux[Perimetre.PRECAUTION.value], 2),
         "courant_eur": round(totaux[Perimetre.COURANT.value], 2),
         "cours_or_usd": round(cours_or, 2),
-        "equivalent_or_oz": round(equivalent_or, 4),
+        "equivalent_or_oz": round(equivalent_or, 6),
         "poche_rv_eur": round(poches.get("rv", 0.0), 2),
         "poche_energie_eur": round(poches.get("energie", 0.0), 2),
         "poche_asie_eur": round(poches.get("asie", 0.0), 2),

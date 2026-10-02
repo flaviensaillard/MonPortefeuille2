@@ -244,17 +244,27 @@ class Position:
     poche: str
     devise_cotation: str
     quantite: float = 0.0
-    cout_total_eur: float = 0.0     # coût total en euros
+    cout_total_eur: float = 0.0     # coût total en euros (fiscalité française)
     pru_eur: float = 0.0
+    cout_total_usd: float = 0.0     # coût total en dollars (unité de compte)
+    pru_usd: float = 0.0
     prix: float = 0.0               # dans la devise de cotation
     valeur_eur: float = 0.0
     pv_latente_eur: float = 0.0
+    valeur_usd: float = 0.0
+    pv_latente_usd: float = 0.0
 
     @property
     def perf_globale(self) -> float | None:
         if self.pru_eur <= 0:
             return None
         return (self.valeur_eur / (self.pru_eur * self.quantite)) - 1.0 if self.quantite else None
+
+    @property
+    def perf_globale_usd(self) -> float | None:
+        if self.pru_usd <= 0:
+            return self.perf_globale
+        return (self.valeur_usd / (self.pru_usd * self.quantite)) - 1.0 if self.quantite else None
 
     @property
     def poche_obj(self) -> Poche | None:
@@ -291,10 +301,18 @@ def calculer_positions(
             positions[t.ticker] = pos
 
         montant_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
+        if t.devise == "USD":
+            montant_usd = t.montant_net
+        else:
+            try:
+                montant_usd = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "USD")
+            except Exception:
+                montant_usd = montant_eur
 
         if t.est_achat:
             pos.quantite += t.quantite
             pos.cout_total_eur += montant_eur
+            pos.cout_total_usd += montant_usd
         else:  # vente
             if pos.quantite <= 1e-9:
                 message = (
@@ -315,14 +333,18 @@ def calculer_positions(
                 anomalies.append(message)
                 continue
             pru_instant = pos.cout_total_eur / pos.quantite
+            pru_instant_usd = pos.cout_total_usd / pos.quantite
             pos.cout_total_eur -= pru_instant * t.quantite
+            pos.cout_total_usd -= pru_instant_usd * t.quantite
             pos.quantite -= t.quantite
             if pos.quantite <= 1e-9:
                 pos.quantite = 0.0
                 pos.cout_total_eur = 0.0
+                pos.cout_total_usd = 0.0
 
     for pos in positions.values():
         pos.pru_eur = (pos.cout_total_eur / pos.quantite) if pos.quantite > 0 else 0.0
+        pos.pru_usd = (pos.cout_total_usd / pos.quantite) if pos.quantite > 0 else 0.0
 
     return positions
 
@@ -339,16 +361,28 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
         if pos.quantite <= 0:
             continue
         try:
+            jour = date or dt.date.today().isoformat()
             prix = prices.cours(pos.ticker, date)
-            taux = fx.taux(pos.devise_cotation, date or dt.date.today().isoformat(), "EUR")
+            taux = fx.taux(pos.devise_cotation, jour, "EUR")
+            if pos.devise_cotation == "USD":
+                taux_usd = 1.0
+            else:
+                try:
+                    taux_usd = fx.taux(pos.devise_cotation, jour, "USD")
+                except Exception:
+                    taux_usd = taux
             valeur_eur = pos.quantite * prix * taux
+            valeur_usd = pos.quantite * prix * taux_usd
             pos.prix = prix
             pos.valeur_eur = valeur_eur
             pos.pv_latente_eur = valeur_eur - pos.cout_total_eur
+            pos.valeur_usd = valeur_usd
+            pos.pv_latente_usd = valeur_usd - pos.cout_total_usd
             actifs.append(Actif(
                 ticker=pos.ticker, classe=pos.classe, devise_cotation=pos.devise_cotation,
                 poche=pos.poche, quantite=pos.quantite, prix=prix,
-                valeur_eur=valeur_eur, dernier_taux=taux,
+                valeur_eur=valeur_eur, valeur_usd=valeur_usd,
+                dernier_taux=taux, dernier_taux_usd=taux_usd,
             ))
         except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
             log.warning("Valorisation impossible : %s", exc)
@@ -367,6 +401,7 @@ class EtatPoche:
 
     poche: Poche
     valeur_eur: float = 0.0
+    valeur_usd: float = 0.0
     poids_reel: float = 0.0
     poids_cible: float = 0.0
     actifs: list[Actif] = field(default_factory=list)
@@ -417,6 +452,7 @@ def agreger_par_poche(
             )))
         etat.actifs.append(a)
         etat.valeur_eur += a.valeur_eur
+        etat.valeur_usd += getattr(a, "valeur_usd", a.valeur_eur)
 
     if total_investi_eur > 0:
         for etat in etats.values():

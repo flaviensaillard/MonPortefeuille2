@@ -43,7 +43,7 @@ with st.expander("➕ Nouveau mouvement", expanded=not ctx.apports.empty):
         c1, c2, c3 = st.columns(3)
         date_mvt = c1.date_input("Date", value=dt.date.today())
         sens = c2.radio("Sens", ["Apport", "Retrait"], horizontal=True)
-        devise_saisie = c3.selectbox("Devise", ["EUR", "USD", "CHF"])
+        devise_saisie = c3.selectbox("Devise", ["USD", "EUR", "CHF"])
 
         c4, c5 = st.columns(2)
         montant = c4.number_input("Montant", min_value=0.0, format="%.2f")
@@ -80,7 +80,7 @@ with st.expander("➕ Nouveau mouvement", expanded=not ctx.apports.empty):
                             "compte": compte,
                         }])
                         st.success(
-                            f"✅ {sens} de {ui.eur(montant_eur)} enregistré "
+                            f"✅ {sens} de {ui.usd_eur(montant * taux_usd, montant_eur)} enregistré "
                             f"({onces:.4f} oz d'or au cours du jour)."
                         )
                         S.vider_cache()
@@ -103,14 +103,22 @@ else:
     ui.tableau(pd.DataFrame([{
         "Date": pd.to_datetime(r["date"]).strftime("%d/%m/%Y"),
         "Sens": "↗ Apport" if r["sens"] == "apport" else "↘ Retrait",
-        "Montant": ui.eur(float(r["montant_eur"])),
+        "Montant ($ / €)": ui.usd_eur(
+            float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else float(r["montant_eur"]) * ctx.taux_eur_usd,
+            float(r["montant_eur"]),
+        ),
         "Équivalent or": f"{float(r['montant_or']):.4f} oz" if pd.notna(r.get("montant_or")) else "—",
         "Cours or": f"{float(r['cours_or']):,.0f} $/oz" if pd.notna(r.get("cours_or")) else "—",
         "Compte": r.get("compte", "—"),
     } for _, r in df.iterrows()]))
 
-    apports_nets = sum(
+    apports_nets_eur = sum(
         float(r["montant_eur"]) * (1 if r["sens"] == "apport" else -1)
         for _, r in df.iterrows()
     )
-    st.metric("Apports nets cumulés", ui.eur(apports_nets))
+    apports_nets_usd = sum(
+        (float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else float(r["montant_eur"]) * ctx.taux_eur_usd)
+        * (1 if r["sens"] == "apport" else -1)
+        for _, r in df.iterrows()
+    )
+    st.metric("Apports nets cumulés", ui.usd_eur(apports_nets_usd, apports_nets_eur))

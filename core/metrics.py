@@ -504,7 +504,7 @@ def controle_apports(
             f"({variation:+.1%}). Si vous avez versé de l'argent sur la période, "
             "il n'est PAS dans la base : la performance ci-dessus compte donc "
             "vos versements comme du rendement. Lancez le diagnostic (onglet "
-            "Actions).".replace(",", " ")
+            "Actions)."
         )
     return alertes
 
@@ -689,6 +689,11 @@ def fluxs_sans_effet(
         trouves.append({
             "i": i,
             "date": dates[i],
+            # La date du point précédent : c'est le DÉBUT de la période, et sans
+            # elle le message ne peut pas dire où chercher. Le versement fautif
+            # est daté du 29/04/2024, pas du 30/04 — la date du snapshot. Sans
+            # les deux bornes, on cherche la mauvaise ligne.
+            "date_avant": dates[i - 1],
             "avant": avant,
             "apres": apres,
             "flux": f,
@@ -699,23 +704,52 @@ def fluxs_sans_effet(
 
 
 def anomalie_flux_sans_effet(flux_sans_effet: dict) -> str:
-    """Le message à afficher pour un flux que la valeur n'a pas suivi."""
-    jour = flux_sans_effet["date"]
-    jour = jour.date() if hasattr(jour, "date") else jour
+    """Le message à afficher pour un flux que la valeur n'a pas suivi.
+
+    Le message donne les DEUX bornes de la période — et non la seule date du
+    snapshot. Vérifié sur le cas réel : le versement litigieux est daté du
+    29/04/2024 dans le journal, alors que le snapshot qui le révèle porte le
+    30/04/2024. Un message qui n'aurait dit que « 2024-04-30 » aurait envoyé
+    chercher une ligne qui n'existe pas.
+    """
+    # `metrics` ne dépend pas de `ui` — et ne doit pas : `ui` importe streamlit,
+    # et le calcul doit rester utilisable dans un robot. Le formatage se fait donc
+    # ici, en trois lignes, plutôt que par un import croisé.
+    def _jour(v) -> str:
+        return v.strftime("%d/%m/%Y") if hasattr(v, "strftime") else "—"
+
+    def fmt(m: float, signe: bool = False, decimales: int = 0) -> str:
+        """Un nombre à la française : 11 050, et +23 pour un signe.
+
+        Le millier est une espace, la décimale une virgule — comme `ui.eur`.
+        Le remplacement porte sur le NOMBRE, jamais sur la phrase : appliqué à
+        la phrase, il effaçait toutes les virgules de ponctuation. Le défaut
+        était visible à l'écran (« L'écart est de 11 027 € soit 37.2 % ») et il
+        rendait les messages pénibles à lire, ce qui est exactement ce qu'on ne
+        veut pas d'une alerte.
+        """
+        return f"{m:+,.{decimales}f}".replace(",", " ").replace(".", ",") \
+            if signe else f"{m:,.{decimales}f}".replace(",", " ").replace(".", ",")
+
+    debut = _jour(flux_sans_effet.get("date_avant"))
+    fin_d = _jour(flux_sans_effet["date"])
+
     f = flux_sans_effet["flux"]
     bouge = flux_sans_effet["apres"] - flux_sans_effet["avant"]
     sens = "un apport" if f > 0 else "un retrait"
+    periode = (f"entre le {debut} et le {fin_d}" if debut != "—"
+               else f"au {fin_d}")
 
     return (
-        f"**{sens} de {abs(f):,.0f} € enregistré, et la valeur ne suit pas — "
-        f"{jour}.** Le portefeuille ne varie que de {bouge:+,.0f} € alors qu'il "
-        f"devrait varier d'au moins {abs(f):,.0f} € de ce seul fait. L'écart est "
-        f"de {abs(flux_sans_effet['residuel']):,.0f} €, soit "
+        f"**{sens} de {fmt(abs(f))} € enregistré {periode}, et la valeur ne "
+        f"suit pas.** Le portefeuille ne varie que de {fmt(bouge, signe=True)} € "
+        f"alors qu'il devrait varier d'au moins {fmt(abs(f))} € de ce seul fait. "
+        f"L'écart est de {fmt(abs(flux_sans_effet['residuel']))} €, soit "
         f"{abs(flux_sans_effet['residuel_pct']):.1%} du portefeuille : aucun "
         "marché ne produit ça. Le versement a été saisi deux fois, porte une "
         "mauvaise date, ou n'a jamais eu lieu — et dans ce dernier cas c'est la "
         "valorisation de ce mois qui manque. Votre relevé tranchera."
-    ).replace(",", " ")
+    )
 
 
 def flux_corrige_des_sauts(flux: list[float], sauts: list[dict]) -> list[float]:
@@ -736,18 +770,27 @@ def flux_corrige_des_sauts(flux: list[float], sauts: list[dict]) -> list[float]:
 
 def anomalie_saut(saut: dict) -> str:
     """Le message à afficher pour un saut non expliqué."""
-    jour = saut["date"]
-    jour = jour.date() if hasattr(jour, "date") else jour
+    brut = saut["date"]
+    # Format français comme partout ailleurs : une date ISO se survole, une date
+    # jj/mm/aaaa se lit.
+    jour = brut.strftime("%d/%m/%Y") if hasattr(brut, "strftime") else str(brut)
     residuel = saut["residuel"]
     sens = "apparaissent" if residuel > 0 else "disparaissent"
 
+    # Même règle que dans `anomalie_flux_sans_effet` : on formate les NOMBRES,
+    # jamais la phrase. Le `.replace(",", " ")` global qui vivait ici effaçait
+    # les virgules de ponctuation du message.
+    def n(x: float, signe: bool = False) -> str:
+        return f"{x:+,.0f}".replace(",", " ").replace(".", ",") if signe \
+            else f"{x:,.0f}".replace(",", " ").replace(".", ",")
+
     return (
-        f"**{residuel:+,.0f} € {sens} le {jour} sans flux enregistré.** "
-        f"La valeur investie passe de {saut['avant']:,.0f} € à "
-        f"{saut['apres']:,.0f} €, alors que {saut['flux']:,.0f} € de flux sont "
+        f"**{n(residuel, signe=True)} € {sens} le {jour} sans flux enregistré.** "
+        f"La valeur investie passe de {n(saut['avant'])} € à "
+        f"{n(saut['apres'])} €, alors que {n(saut['flux'])} € de flux sont "
         f"enregistrés ce jour-là — soit {saut['residuel_pct']:+.1%} que le TWR "
         "compte comme du rendement. Un portefeuille diversifié ne bouge pas "
         "ainsi en une séance : c'est un virement interne, une position ajoutée à "
         "la main, ou un versement non saisi. Dans les trois cas, ce n'est pas de "
         "la performance, et les chiffres ci-dessus sont trop flatteurs."
-    ).replace(",", " ")
+    )

@@ -34,16 +34,20 @@ if not ctx.actifs:
     st.info("Aucune position. Enregistrez une transaction depuis la page Rééquilibrage.")
     st.stop()
 
+m1, m2 = st.columns(2)
+m1.metric("Actifs stratégiques (investi)",
+          ui.usd_eur(ctx.total_investi_usd, ctx.total_investi_eur))
+m2.metric("Patrimoine total",
+          ui.usd_eur(ctx.patrimoine_total_usd, ctx.patrimoine_total_eur))
+
 # ---------------------------------------------------------------------------
 # Positions
 # ---------------------------------------------------------------------------
 lignes = []
-# `-x.valeur_eur` lève `TypeError` si une valeur manque. `valoriser()` écarte les
-# actifs en échec, donc cela ne devrait pas arriver — mais si un jour un actif
-# sans valeur passait, mieux vaut le voir en bas de liste qu'une page blanche.
-for a in sorted(ctx.actifs, key=lambda x: -(x.valeur_eur or 0.0)):
+for a in sorted(ctx.actifs, key=lambda x: -(getattr(x, "valeur_usd", x.valeur_eur) or 0.0)):
     pos = ctx.positions.get(a.ticker)
     poche = POCHES_PAR_CLE.get(a.poche)
+    val_u = getattr(a, "valeur_usd", a.valeur_eur)
     lignes.append({
         "Actif": a.ticker,
         "Poche": poche.nom if poche else "Non classé",
@@ -52,13 +56,13 @@ for a in sorted(ctx.actifs, key=lambda x: -(x.valeur_eur or 0.0)):
         "Qté": ui.quantite(a.quantite),
         "Cours": f"{a.prix:,.4f}".replace(",", " "),
         "Devise": a.devise_cotation,
-        "Valeur": ui.eur(a.valeur_eur),
-        "Poids (investi)": ui.pct(a.valeur_eur / ctx.total_investi_eur)
-        if ctx.total_investi_eur > 0 and a.est_investi else "—",
-        "PRU": ui.eur(pos.pru_eur) if pos and pos.pru_eur else "—",
-        "Perf.": ui.pct((a.valeur_eur / (pos.pru_eur * a.quantite)) - 1, signe=True)
-        if pos and pos.pru_eur > 0 and a.quantite else "—",
-        "PV latente": ui.eur(pos.pv_latente_eur) if pos else "—",
+        "Valeur ($ / €)": ui.usd_eur(val_u, a.valeur_eur),
+        "Poids (investi)": ui.pct(val_u / ctx.total_investi_usd)
+        if ctx.total_investi_usd > 0 and a.est_investi else "—",
+        "PRU ($)": ui.usd(pos.pru_usd) if pos and pos.pru_usd else "—",
+        "Perf. ($)": ui.pct(pos.perf_globale_usd, decimales=2, signe=True)
+        if pos and pos.perf_globale_usd is not None else "—",
+        "PV latente ($ / €)": ui.usd_eur(pos.pv_latente_usd, pos.pv_latente_eur) if pos else "—",
     })
 
 df = pd.DataFrame(lignes)
@@ -81,7 +85,7 @@ for cle, etat in ctx.etats.items():
     }.get(p.perimetre.value, p.perimetre.value)
 
     with st.expander(
-        f"**{p.nom}** — {ui.eur(etat.valeur_eur)} · {perimetre}", expanded=False
+        f"**{p.nom}** — {ui.usd_eur(etat.valeur_usd, etat.valeur_eur)} · {perimetre}", expanded=False
     ):
         if p.description:
             st.caption(p.description)
@@ -93,7 +97,7 @@ for cle, etat in ctx.etats.items():
         lignes_poche = [{
             "Actif": a.ticker,
             "Qté": ui.quantite(a.quantite),
-            "Valeur": ui.eur(a.valeur_eur),
+            "Valeur ($ / €)": ui.usd_eur(getattr(a, "valeur_usd", a.valeur_eur), a.valeur_eur),
             "Part de la poche": ui.pct(a.valeur_eur / etat.valeur_eur)
             if etat.valeur_eur else "—",
         } for a in etat.actifs]

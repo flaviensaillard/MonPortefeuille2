@@ -50,18 +50,29 @@ st.caption(
 
 import plotly.express as px
 
+col_inv = "patrimoine_investi_usd" if "patrimoine_investi_usd" in df.columns else "patrimoine_investi_eur"
+col_prec = "precaution_usd" if "precaution_usd" in df.columns else "precaution_eur"
+cols_courbe = [col_inv, col_prec]
+if "capital_investi_usd" in df.columns and df["capital_investi_usd"].notna().any():
+    cols_courbe.append("capital_investi_usd")
+
 fig = px.line(
     df,
     x="Date",
-    y=["patrimoine_investi_eur", "precaution_eur"],
-    labels={"value": "Euros", "variable": ""},
+    y=cols_courbe,
+    labels={"value": "Dollars ($)", "variable": ""},
     color_discrete_map={
-        "patrimoine_investi_eur": "#2ecc71",
-        "precaution_eur": "#f39c12",
+        col_inv: "#2ecc71",
+        col_prec: "#f39c12",
+        "capital_investi_usd": "#3498db",
     },
 )
 fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5))
-newnames = {"patrimoine_investi_eur": "Portefeuille investi", "precaution_eur": "Épargne de précaution"}
+newnames = {
+    col_inv: "Actifs stratégiques ($)",
+    col_prec: "Épargne de précaution ($)",
+    "capital_investi_usd": "Capital investi ($)",
+}
 fig.for_each_trace(lambda t: t.update(name=newnames.get(t.name, t.name)))
 st.plotly_chart(fig, use_container_width=True)
 
@@ -138,17 +149,14 @@ if len(presentes) >= 2:
 st.divider()
 st.subheader("Détail des snapshots")
 
+df_desc = df.sort_values("Date", ascending=False)
 affichage = pd.DataFrame([{
     "Date": r["Date"].strftime("%d/%m/%Y"),
-    "Patrimoine total": ui.eur(r["patrimoine_total_eur"]),
-    "Investi": ui.eur(r["patrimoine_investi_eur"]),
-    "Précaution": ui.eur(r["precaution_eur"]),
-    "Courant": ui.eur(r["courant_eur"]),
+    "Capital investi ($ / €)": ui.usd_eur(r.get("capital_investi_usd")) if pd.notna(r.get("capital_investi_usd")) else "—",
+    "Actifs stratégiques ($ / €)": ui.usd_eur(r.get("patrimoine_investi_usd", r["patrimoine_investi_eur"]), r["patrimoine_investi_eur"]),
+    "Patrimoine total ($ / €)": ui.usd_eur(r.get("patrimoine_total_usd", r["patrimoine_total_eur"]), r["patrimoine_total_eur"]),
+    "Précaution ($ / €)": ui.usd_eur(r.get("precaution_usd", r["precaution_eur"]), r["precaution_eur"]),
     "Or (oz)": f"{r['equivalent_or_oz']:.2f}" if pd.notna(r.get("equivalent_or_oz")) else "—",
-    "RV": ui.eur(r["poche_rv_eur"]) if pd.notna(r.get("poche_rv_eur")) else "—",
-    "Énergie": ui.eur(r["poche_energie_eur"]) if pd.notna(r.get("poche_energie_eur")) else "—",
-    "Asie": ui.eur(r["poche_asie_eur"]) if pd.notna(r.get("poche_asie_eur")) else "—",
-    "JGB": ui.eur(r["poche_jgb_eur"]) if pd.notna(r.get("poche_jgb_eur")) else "—",
-} for _, r in df.iterrows()])
+} for _, r in df_desc.iterrows()])
 
 ui.tableau(affichage)
