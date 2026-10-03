@@ -23,9 +23,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import metrics, prices
+import importlib
+from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
+
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites"):
+    importlib.reload(db)
+    importlib.reload(metrics)
+    importlib.reload(rebalance)
+    importlib.reload(S)
 
 st.set_page_config(page_title="Mon Portefeuille", page_icon="📊", layout="wide")
 

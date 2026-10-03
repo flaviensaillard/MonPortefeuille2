@@ -28,8 +28,15 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from core import metrics, session as S
+import importlib
+from core import db, metrics, rebalance, session as S
 from core import ui
+
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites"):
+    importlib.reload(db)
+    importlib.reload(metrics)
+    importlib.reload(rebalance)
+    importlib.reload(S)
 
 st.set_page_config(page_title="Retraite", page_icon="🌴", layout="wide")
 st.title("🌴 Projection retraite")

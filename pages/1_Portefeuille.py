@@ -13,10 +13,18 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from core import db, fx, prices, session as S
+import importlib
+from core import db, fx, metrics, prices, rebalance, session as S
 from core import ui
 from core.models import POCHES_PAR_CLE
 from core.portfolio import devise_cotation_de
+
+if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(metrics, "calculer_rente_mensuelle_reelle"):
+    importlib.reload(db)
+    importlib.reload(metrics)
+    importlib.reload(rebalance)
+    importlib.reload(S)
+
 from core.rebalance import generer_ordres
 
 st.set_page_config(page_title="Portefeuille & Opérations", page_icon="💼", layout="wide")
