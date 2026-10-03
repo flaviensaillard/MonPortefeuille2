@@ -15,7 +15,6 @@ affiche un bandeau listant les titres concernés.
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 
 import pandas as pd

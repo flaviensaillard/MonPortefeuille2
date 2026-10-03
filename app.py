@@ -124,7 +124,7 @@ ui.metric_pct(
     c3,
     "Performance depuis le début",
     perf_origine_usd,
-    sous_texte_bleu=f"Gain : {ui.usd(gain_origine_usd, signe=True)} / {ui.eur(gain_origine_eur)}" if not prog_origine.get("vide") else None,
+    sous_texte_bleu=f"Gain : {ui.usd(gain_origine_usd, signe=True)} / {ui.eur(gain_origine_eur, signe=True)}" if not prog_origine.get("vide") else None,
     help="Performance cumulée (TWR) de votre portefeuille investi depuis le tout premier snapshot (avril 2023), corrigée des apports.",
 )
 ui.metric_usd_eur(

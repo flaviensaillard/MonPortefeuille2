@@ -43,7 +43,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import fiscal_bars as fb
-from .models import Classe
 
 
 @dataclass

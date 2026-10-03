@@ -32,13 +32,15 @@ import importlib
 from core import db, metrics, rebalance, session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
+    importlib.reload(ui)
     importlib.reload(S)
 
 st.set_page_config(page_title="Retraite", page_icon="🌴", layout="wide")
+ui.styliser_navigation()
 st.title("🌴 Projection retraite")
 
 ctx = S.charger()
@@ -95,8 +97,8 @@ inflation_b = cC.number_input(
 )
 
 st.caption(
-    "⚠️ Les deux scénarios projettent en **euros**. Votre portefeuille est libellé "
-    "en dollars, en yens et en francs suisses : la projection suppose un taux de "
+    "⚠️ Les deux scénarios projettent en **dollars ($)** avec l'équivalent en **euros (€)** affiché en dessous. "
+    "Votre portefeuille est libellé en dollars, en yens et en francs suisses : la conversion en euros suppose un taux de "
     "change stable. C'est l'hypothèse la plus fragile du modèle — voir la "
     "sensibilité en bas de page."
 )
@@ -242,15 +244,20 @@ st.caption(
 )
 
 lignes = []
+taux_actuel = ctx.taux_eur_usd if ctx.taux_eur_usd > 0 else 1.125
+cap_nom_usd = float(fin_a["Capital nominal"])
+cap_reel_usd = float(fin_a["Capital réel"])
+eur_base_reel = cap_reel_usd / taux_actuel
 for variation in (-0.30, -0.15, 0.0, 0.15, 0.30):
-    facteur = 1 + variation
-    cap = fin_a["Capital nominal"] * facteur
-    reel = metrics.pouvoir_achat(cap, inflation_a / 100, len(annees))
+    taux_sim = taux_actuel * (1 + variation)
+    cap_nom_eur = cap_nom_usd / taux_sim
+    cap_reel_eur = cap_reel_usd / taux_sim
+    ecart_eur_pct = (cap_reel_eur / eur_base_reel - 1.0) if eur_base_reel > 0 else 0.0
     lignes.append({
-        "Variation EUR/USD": ui.pct(variation, signe=True),
-        "Capital nominal ($ / €)": ui.usd_eur(cap),
-        "Pouvoir d'achat ($ / €)": ui.usd_eur(reel),
-        "vs hypothèse stable": ui.pct(variation, signe=True),
+        "Variation EUR/USD": f"{ui.pct(variation, signe=True)} (1 € = {taux_sim:.3f} $)",
+        "Capital nominal ($ / €)": ui.usd_eur(cap_nom_usd, cap_nom_eur),
+        "Pouvoir d'achat ($ / €)": ui.usd_eur(cap_reel_usd, cap_reel_eur),
+        "Impact en € vs taux actuel": ui.pct(ecart_eur_pct, signe=True),
     })
 ui.tableau(pd.DataFrame(lignes))
 

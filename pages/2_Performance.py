@@ -20,6 +20,7 @@ CORRECTIONS PAR RAPPORT À LA V1
 from __future__ import annotations
 
 
+import importlib
 import pandas as pd
 import streamlit as st
 
@@ -27,7 +28,12 @@ from core import metrics, session as S
 from core import dates
 from core import ui
 
+if not hasattr(ui, "_NAV_V2") or not hasattr(ui, "metric_pct"):
+    importlib.reload(ui)
+    importlib.reload(S)
+
 st.set_page_config(page_title="Performance", page_icon="📈", layout="wide")
+ui.styliser_navigation()
 st.title("📈 Performance")
 
 ctx = S.charger()
@@ -150,7 +156,7 @@ if fantomes:
                 detail = " · ".join(
                     f"**{ui.jour(r['_d'])}** — "
                     f"{'apport' if str(r['sens']).lower().startswith('app') else 'retrait'} "
-                    f"de {ui.eur(float(r['montant_eur']))}"
+                    f"de {ui.usd_eur(float(r['montant_usd']) if pd.notna(r.get('montant_usd')) else float(r['montant_eur']) * ctx.taux_eur_usd, float(r['montant_eur']))}"
                     for _, r in dedans.sort_values("_d").iterrows()
                 )
                 st.caption(f"Versements enregistrés sur cette période : {detail}")

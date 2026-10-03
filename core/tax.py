@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING
 from . import fiscal_bars as fb
 from .models import Classe
 
+_QF_CORRIGE_197 = True
+
 if TYPE_CHECKING:                     # annotations seulement : pas d'import à l'exécution
     from .portfolio import Position, Transaction
 
@@ -75,17 +77,16 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> 
 
 
 def _quotient_plafonne(revenu: float, parts: float, parts_couple: float = 2.0) -> float:
-    """Plafonne le gain procuré par les parts au-delà de 2.
+    """Plafonne le gain procuré par les parts au-delà de `parts_couple`.
 
-    Règle : l'avantage en impôt procuré par chaque demi-part supplémentaire est
-    plafonné. Sans ce plafond, un foyer à 3 parts est sur-avantagé.
-    À VÉRIFIER : le plafond exact pour 2026.
+    Règle (CGI art. 197 I-2) : l'avantage en impôt procuré par chaque demi-part
+    supplémentaire est plafonné à 1 759 € par demi-part.
     """
     if parts <= parts_couple:
         return revenu / parts
-    demi_parts = (parts - parts_couple) * 2
+    demi_parts = (parts - parts_couple) * 2.0
     plafond_par_demi_part = 1_759.0
-    gain_max = demi_parts * plafond_par_demi_part / 2.0
+    gain_max = demi_parts * plafond_par_demi_part
 
     impot_sans = _impot_par_part(revenu / parts_couple) * parts_couple
     impot_avec = _impot_par_part(revenu / parts) * parts
@@ -118,7 +119,7 @@ def impot_revenu(
     statut: str = "Célibataire",
     avec_decote: bool = True,
 ) -> ResultatIR:
-    """Impôt sur le revenu selon le barème de `annee`.
+    """Impôt sur le revenu selon le barème de `annee` (CGI art. 197).
 
     `parts` = nombre de parts fiscales (2 pour un couple, +0,5 puis +0,5 puis +1
     par enfant à partir du troisième).
@@ -127,13 +128,21 @@ def impot_revenu(
     revenu = max(0.0, float(revenu))
     parts = max(0.5, float(parts))
     couple = _est_couple(statut)
+    parts_base = 2.0 if couple else 1.0
 
-    if couple:
-        qf = _quotient_plafonne(revenu, parts, parts_couple=2.0)
-        impot = _impot_par_part(qf, bareme) * 2.0
+    qf = revenu / parts
+    impot_non_plafonne = _impot_par_part(qf, bareme) * parts
+    if parts > parts_base:
+        impot_base = _impot_par_part(revenu / parts_base, bareme) * parts_base
+        demi_parts_supp = (parts - parts_base) * 2.0
+        gain_max = demi_parts_supp * 1_759.0
+        if (impot_base - impot_non_plafonne) > gain_max:
+            impot = max(0.0, impot_base - gain_max)
+            qf = revenu / parts_base
+        else:
+            impot = impot_non_plafonne
     else:
-        qf = revenu / parts
-        impot = _impot_par_part(qf, bareme) * parts
+        impot = impot_non_plafonne
 
     tmi = 0.0
     for i, plafond in enumerate(bareme.tranches):

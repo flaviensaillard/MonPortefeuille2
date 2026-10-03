@@ -14,8 +14,9 @@ from core import guide_fiscal as guide
 from core import session as S, tax
 from core import ui
 
-if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_prompt_maj_baremes") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_prompt_maj_baremes") or not hasattr(tax, "_QF_CORRIGE_197") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(fb)
+    importlib.reload(tax)
     importlib.reload(ui)
     importlib.reload(S)
 
@@ -645,10 +646,10 @@ with st.expander(f"📁 Formulaire 3916 / 3916-bis (Comptes à l'étranger — {
         )
 
 # ---------------------------------------------------------------------------
-# 4. RECOMMANDATION PFU vs BARÈME, BILAN DE L'IMPÔT & TAUX DE PAS
+# 3. RECOMMANDATION PFU vs BARÈME, BILAN DE L'IMPÔT & TAUX DE PAS
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("💡 4. Arbitrage PFU vs Barème, Bilan de votre Impôt & Taux de Prélèvement à la Source")
+st.subheader("💡 3. Arbitrage PFU vs Barème, Bilan de votre Impôt & Taux de Prélèvement à la Source")
 
 arb = sim["arbitrage"]
 if arb is not None:

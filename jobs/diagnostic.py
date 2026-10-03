@@ -146,7 +146,9 @@ def sonder_connexion() -> None:
     _titre("0. LA CONNEXION, ET TOUTES VOS TABLES")
 
     try:
-        import supabase  # noqa: F401
+        import importlib.util
+        if importlib.util.find_spec("supabase") is None:
+            raise ImportError
     except ImportError:
         connexion_ok = False
         log.info("  Le module « supabase » n'est pas installé.")

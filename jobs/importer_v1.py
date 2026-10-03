@@ -13,7 +13,6 @@ les lignes qu'il a dû corriger. Sans ça, le bug serait importé tel quel.
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import logging
 import os
 import sys

@@ -388,7 +388,7 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     ctx.total_courant_usd = perimetres_usd[Perimetre.COURANT.value]
     ctx.patrimoine_total_usd = sum(perimetres_usd.values())
 
-    ctx.etats = agreger_par_poche(ctx.actifs, ctx.total_investi_eur)
+    ctx.etats = agreger_par_poche(ctx.actifs, ctx.total_investi_eur, ctx.total_investi_usd)
 
     # --- Or : l'étalon de Gave ---
     try:
@@ -437,7 +437,8 @@ def _completer_liquidites_v1(ctx: Contexte, jour_iso: str) -> None:
 
     for _, r in df_d.iterrows():
         t = str(r.get("Ticker", "")).upper().strip()
-        if t not in ("CHF", "CNY", "USD", "EUR") or t in deja:
+        typ_r = str(r.get("Type", "") or "")
+        if (t not in ("CHF", "CNY", "USD", "EUR") and "cash" not in typ_r.lower()) or t in deja:
             continue
         try:
             qte = float(str(r.get("Quantité", 0) or 0).replace(" ", "").replace(",", "."))
@@ -451,11 +452,15 @@ def _completer_liquidites_v1(ctx: Contexte, jour_iso: str) -> None:
         except Exception:
             continue
         poche = poche_de(t)
+        cle_poche = (
+            poche.cle if poche
+            else ("precaution" if "réserve" in typ_r.lower() else "courant")
+        )
         ctx.actifs.append(Actif(
             ticker=t,
             classe=Classe.ESPECE,
             devise_cotation=t,
-            poche=poche.cle if poche else "precaution",
+            poche=cle_poche,
             quantite=qte,
             prix=1.0,
             valeur_eur=qte * t_eur,

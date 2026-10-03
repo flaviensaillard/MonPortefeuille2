@@ -179,9 +179,11 @@ with tab_reeq:
     st.divider()
     st.subheader("Diagnostic par poche")
 
+    orig_courant_usd = ctx.total_courant_usd
+    orig_courant_eur = ctx.total_courant_eur
     if apport_simule_usd > 0:
-        ctx.total_courant_usd += apport_simule_usd
-        ctx.total_courant_eur += apport_simule_eur
+        ctx.total_courant_usd = orig_courant_usd + apport_simule_usd
+        ctx.total_courant_eur = orig_courant_eur + apport_simule_eur
 
     if not ctx.ecarts:
         st.info("Aucune poche investie.")
@@ -211,6 +213,8 @@ with tab_reeq:
             st.success("Toutes les poches sont dans leur bande de tolérance.")
 
         ordres, a_surveiller = generer_ordres(ctx.ecarts, seuil_min_eur=250.0)
+        ctx.total_courant_usd = orig_courant_usd
+        ctx.total_courant_eur = orig_courant_eur
 
         if ordres:
             st.divider()
@@ -537,6 +541,9 @@ with tab_fonds:
             "💵 Compte courant AUD (A$ — Dollar australien)": ("AUD", "💵 Cash", "courant_aud"),
             "💵 Compte courant HKD (HK$ — Dollar de Hong Kong)": ("HKD", "💵 Cash", "courant_hkd"),
             "💵 Compte courant SGD (S$ — Dollar de Singapour)": ("SGD", "💵 Cash", "courant_sgd"),
+            "💵 Compte courant NOK (kr — Couronne norvégienne)": ("NOK", "💵 Cash", "courant_nok"),
+            "💵 Compte courant SEK (kr — Couronne suédoise)": ("SEK", "💵 Cash", "courant_sek"),
+            "💵 Compte courant DKK (kr — Couronne danoise)": ("DKK", "💵 Cash", "courant_dkk"),
             "🏦 Réserve GBP (£ — Épargne de précaution)": ("GBP", "🏦 Cash réserve", "reserve_gbp"),
             "🏦 Réserve JPY (¥ — Épargne de précaution)": ("JPY", "🏦 Cash réserve", "reserve_jpy"),
         }
@@ -685,6 +692,9 @@ with tab_fonds:
         "courant_aud": "💵 Compte courant AUD (A$)",
         "courant_hkd": "💵 Compte courant HKD (HK$)",
         "courant_sgd": "💵 Compte courant SGD (S$)",
+        "courant_nok": "💵 Compte courant NOK (kr)",
+        "courant_sek": "💵 Compte courant SEK (kr)",
+        "courant_dkk": "💵 Compte courant DKK (kr)",
         "reserve_gbp": "🏦 Réserve GBP (£)",
         "reserve_jpy": "🏦 Réserve JPY (¥)",
         "import_v1": "📦 Historique v1",

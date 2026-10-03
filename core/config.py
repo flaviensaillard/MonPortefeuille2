@@ -14,7 +14,7 @@ clé manquante prend sa valeur par défaut déclarée. Pas de doublon possible.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .models import POCHES, Perimetre
 

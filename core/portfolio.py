@@ -23,7 +23,6 @@ from . import dates
 
 from . import fx, prices
 from .models import (
-    ACTIF_VERS_POCHE,
     POCHES_PAR_CLE,
     Actif,
     Classe,
@@ -59,6 +58,15 @@ DEVISES_COTATION: dict[str, str] = {
     "CNY": "CNY",
     "EUR": "EUR",
     "USD": "USD",
+    "GBP": "GBP",
+    "JPY": "JPY",
+    "CAD": "CAD",
+    "AUD": "AUD",
+    "HKD": "HKD",
+    "SGD": "SGD",
+    "NOK": "NOK",
+    "SEK": "SEK",
+    "DKK": "DKK",
 }
 
 
@@ -67,7 +75,7 @@ def classe_de(ticker: str) -> Classe:
     if t in CLASSES:
         return CLASSES[t]
     # Devises et espèces : pas de plus-value mobilière.
-    if t in ("EUR", "USD", "CHF", "CNY", "GBP", "JPY", "CAD", "AUD"):
+    if t in ("EUR", "USD", "CHF", "CNY", "GBP", "JPY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"):
         return Classe.ESPECE
     # Défaut prudent : tout ticker inconnu est traité comme une action/ETF.
     log.warning("Ticker %s non classifié : traité comme action/ETF", t)
@@ -445,12 +453,13 @@ class EtatPoche:
 def agreger_par_poche(
     actifs: list[Actif],
     total_investi_eur: float,
+    total_investi_usd: float | None = None,
 ) -> dict[str, EtatPoche]:
     """Répartit les actifs par poche et calcule les poids.
 
-    `total_investi_eur` est le dénominateur : **uniquement** le patrimoine investi.
-    L'épargne de précaution et le compte courant n'y entrent pas — leur pondération
-    n'a aucun sens. C'est exactement l'erreur de la v1, en sens inverse.
+    `total_investi_eur` (ou `total_investi_usd`) est le dénominateur : **uniquement**
+    le patrimoine investi. L'épargne de précaution et le compte courant n'y entrent
+    pas — leur pondération n'a aucun sens. C'est exactement l'erreur de la v1, en sens inverse.
     """
     etats: dict[str, EtatPoche] = {}
     for p in POCHES_PAR_CLE.values():
@@ -467,13 +476,18 @@ def agreger_par_poche(
         etat.valeur_eur += a.valeur_eur
         etat.valeur_usd += getattr(a, "valeur_usd", a.valeur_eur)
 
-    if total_investi_eur > 0:
+    if total_investi_eur > 0 or (total_investi_usd and total_investi_usd > 0):
         for etat in etats.values():
             # Une poche hors portefeuille n'a pas de poids d'allocation : lui en
             # attribuer un serait revenir au bug de la v1, où l'épargne de
             # précaution entrait dans l'assiette de rééquilibrage.
             if etat.poche.perimetre == Perimetre.INVESTI:
-                etat.poids_reel = etat.valeur_eur / total_investi_eur
+                if total_investi_usd and total_investi_usd > 0 and etat.valeur_usd > 0:
+                    etat.poids_reel = etat.valeur_usd / total_investi_usd
+                elif total_investi_eur > 0:
+                    etat.poids_reel = etat.valeur_eur / total_investi_eur
+                else:
+                    etat.poids_reel = 0.0
             else:
                 etat.poids_reel = 0.0
 

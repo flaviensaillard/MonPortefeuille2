@@ -307,3 +307,24 @@ class TestBaremeTable:
         La CSG deductible reste figee a 6,8 points (CGI art. 154 quinquies).
         """
         assert fb.CSG_DEDUCTIBLE == pytest.approx(0.068)
+
+
+class TestQuotientFamilialCoupleEnfants:
+    def test_couple_3_parts_multiplie_par_3_et_non_par_2(self):
+        """CGI art. 197 I-1 : hors plafonnement, l'impôt brut d'un couple avec
+        2 enfants (3 parts) vaut `_impot_par_part(R / 3) * 3` et non `* 2`."""
+        res = tax.impot_revenu(50_545.0, parts=3.0, annee=2025, statut="Marié(e) / Pacsé(e)")
+        # QF = 50 545 / 3 = 16 848,33 € ; impôt par part = (16 848,33 - 11 600) * 11 % = 577,3167 €
+        # Impôt brut sur 3 parts = 577,3167 * 3 = 1 731,95 €
+        assert res.impot_brut == pytest.approx(1_731.95, abs=0.01)
+        b25 = fb.bareme_de(2025)
+        decote_attendue = b25.decote_base_couple - 0.4525 * res.impot_brut
+        assert res.decote == pytest.approx(decote_attendue, abs=0.01)
+        assert res.impot_net == pytest.approx(res.impot_brut - res.decote, abs=0.01)
+
+    def test_plafonnement_quotient_familial_couple_3_parts(self):
+        """CGI art. 197 I-2 : l'avantage procuré par les 2 demi-parts des 2 enfants
+        est plafonné à 2 × 1 759 € = 3 518 €."""
+        res_3p = tax.impot_revenu(180_000.0, parts=3.0, annee=2025, statut="Marié(e) / Pacsé(e)")
+        res_2p = tax.impot_revenu(180_000.0, parts=2.0, annee=2025, statut="Marié(e) / Pacsé(e)")
+        assert res_2p.impot_brut - res_3p.impot_brut == pytest.approx(2 * 1_759.0, abs=0.05)

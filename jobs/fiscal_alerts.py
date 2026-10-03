@@ -112,7 +112,7 @@ def main() -> int:
         alertes += 1
 
     # --- 4. Contrats obligataires en euros : le principe d'exclusion de Gave ---
-    positions_actives = calculer_positions(transactions)
+    positions_actives = calculer_positions(transactions, anomalies=[])
     en_euros = sorted({
         pos.ticker for pos in positions_actives.values()
         if pos.quantite > 0

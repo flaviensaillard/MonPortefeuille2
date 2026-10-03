@@ -282,7 +282,10 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
     assert sim["case_1bj"] == 29772
     assert sim["case_1bk"] == 5741
     assert sim["case_2tr"] == 200
-    assert sim["cocher_2op"] is True
+    # Avec 50 545 € de revenu imposable et 3 parts, le foyer est dans la zone de
+    # décote (IR brut = 1 731,95 € < plafond couple), où le taux marginal effectif
+    # au barème est de 11 % × 1,4525 × (1 - 0,068) = 14,89 % > 12,8 % (PFU).
+    assert sim["cocher_2op"] is False
 
 
 def test_formulaires_fiscaux_fermes_par_defaut():
