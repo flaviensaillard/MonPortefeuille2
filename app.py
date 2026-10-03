@@ -333,7 +333,7 @@ if lignes:
     hors = ctx.besoins_reequilibrage
     if hors:
         st.warning(
-            f"**{len(hors)} poche(s) hors bande.** Voir la page Rééquilibrage pour "
+            f"**{len(hors)} poche(s) hors bande.** Voir l'onglet **💼 Portefeuille & Opérations (⚖️ 2. Rééquilibrage & Transactions)** pour "
             "les ordres proposés."
         )
     else:

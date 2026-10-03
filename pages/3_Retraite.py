@@ -62,8 +62,8 @@ apport_mensuel = c2.number_input(
 )
 taux_pv = c3.number_input(
     "Imposition des plus-values (%)", min_value=0.0, max_value=60.0,
-    step=0.5, value=30.8,
-    help="PFU : 12,8 % d'IR + 17,2 % de prélèvements sociaux.",
+    step=0.5, value=31.4,
+    help="PFU 2026 : 12,8 % d'IR + 18,6 % de prélèvements sociaux (31,4 %).",
 ) / 100.0
 
 # Scénario A : le CAGR historique du portefeuille.
@@ -104,17 +104,24 @@ st.caption(
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-capital_initial = ctx.total_investi_usd or ctx.total_investi_eur
+capital_initial = (ctx.total_investi_usd + ctx.total_courant_usd) or ctx.total_investi_eur
+apports_auj_usd = capital_initial
+if not ctx.snapshots.empty and "capital_investi_usd" in ctx.snapshots.columns:
+    s_cap = ctx.snapshots["capital_investi_usd"].dropna()
+    s_cap_pos = s_cap[s_cap > 0]
+    if not s_cap_pos.empty:
+        apports_auj_usd = float(s_cap_pos.iloc[-1])
+
 annees = list(range(annee_courante, annee_depart + 1))
 
 
 def simuler(rendement: float, inflation: float) -> pd.DataFrame:
-    """Projection en euros. Chaque scénario fait croître ses apports à SA inflation."""
+    """Projection en dollars ($). Chaque scénario fait croître ses apports à SA inflation."""
     r_m = (1 + rendement) ** (1 / 12) - 1
     cap = capital_initial
     apport = apport_mensuel
     trajectoire = []
-    apports_cumules = capital_initial
+    apports_cumules = apports_auj_usd
 
     for i, annee in enumerate(annees):
         mois = 12 if annee > annee_courante else max(1, 13 - dt.date.today().month)
@@ -145,12 +152,6 @@ st.caption(
     "Calculée sur votre capital actuel avec vos paramètres des Scénarios A et B ci-dessus "
     "(retrait du seul rendement réel au-dessus de l'inflation, fiscalité appliquée uniquement à la part de plus-value)."
 )
-apports_auj_usd = capital_initial
-if not ctx.snapshots.empty and "capital_investi_usd" in ctx.snapshots.columns:
-    s_cap = ctx.snapshots["capital_investi_usd"].dropna()
-    s_cap_pos = s_cap[s_cap > 0]
-    if not s_cap_pos.empty:
-        apports_auj_usd = float(s_cap_pos.iloc[-1])
 
 rente_imm_a = metrics.calculer_rente_mensuelle_reelle(
     capital_usd=capital_initial,
@@ -221,9 +222,9 @@ courbe = pd.DataFrame({
     "Année": traj_a["Année"],
     "Scénario A": traj_a["Capital réel"],
     "Scénario B": traj_b["Capital réel"],
-}).melt(id_vars="Année", var_name="Scénario", value_name="Pouvoir d'achat (€)")
+}).melt(id_vars="Année", var_name="Scénario", value_name="Pouvoir d'achat ($)")
 
-fig = px.line(courbe, x="Année", y="Pouvoir d'achat (€)", color="Scénario",
+fig = px.line(courbe, x="Année", y="Pouvoir d'achat ($)", color="Scénario",
               color_discrete_map={"Scénario A": "#2ecc71", "Scénario B": "#3498db"})
 fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5))
 st.plotly_chart(fig, width="stretch")

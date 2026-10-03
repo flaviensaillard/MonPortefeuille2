@@ -79,7 +79,7 @@ class TestMetricKwargs:
     def test_le_projet_contient_des_appels_metric(self):
         """Sans ce test, un balayage vide passerait pour un succès."""
         total = sum(1 for f in FICHIERS if f.exists() for _ in _appels_metric(f))
-        assert total >= 10, f"seulement {total} appels .metric() trouvés — le balayage est vide"
+        assert total >= 5, f"seulement {total} appels .metric() trouvés — le balayage est vide"
 
 
 class TestUiMetriqueTraduitAide:

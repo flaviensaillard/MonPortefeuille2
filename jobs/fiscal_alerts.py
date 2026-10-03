@@ -21,7 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import db, fiscal_bars as fb  # noqa: E402
+from core import db, fiscal_bars as fb, fx  # noqa: E402
 from core.models import Classe  # noqa: E402
 from core.portfolio import calculer_positions, charger_transactions, classe_de  # noqa: E402
 
@@ -71,7 +71,13 @@ def main() -> int:
         if t.est_vente and t.date.year == annee and classe_de(t.ticker) == Classe.CRYPTO
     ]
     if ventes_crypto:
-        total = sum(t.montant_net for t in ventes_crypto)
+        total = 0.0
+        for t in ventes_crypto:
+            try:
+                taux_eur = 1.0 if t.devise == "EUR" else float(fx.taux(t.devise, t.date.isoformat(), "EUR"))
+            except Exception:
+                taux_eur = 1.0 / 1.125 if t.devise == "USD" else 1.0
+            total += t.montant_net * taux_eur
         franchise = fb.CRYPTO_FRANCHISE_CESSIONS
         if total <= franchise:
             message = (
@@ -105,16 +111,18 @@ def main() -> int:
         )
         alertes += 1
 
-    # --- 4. Positions en euros : le principe d'exclusion de Gave ---
+    # --- 4. Contrats obligataires en euros : le principe d'exclusion de Gave ---
+    positions_actives = calculer_positions(transactions)
     en_euros = sorted({
-        t.ticker for t in transactions
-        if classe_de(t.ticker) in (Classe.ACTION_ETF, Classe.OBLIGATION_ETF)
-        and t.devise == "EUR"
+        pos.ticker for pos in positions_actives.values()
+        if pos.quantite > 0
+        and pos.classe == Classe.OBLIGATION_ETF
+        and pos.devise_cotation == "EUR"
     })
     if en_euros:
         db.ajouter_alerte(
             "Principe d'exclusion violé",
-            "Actifs libellés en euros : " + ", ".join(en_euros) + ". "
+            "Contrats obligataires libellés en euros : " + ", ".join(en_euros) + ". "
             "Gave : « N'ayez aucun contrat (cash ou obligation) dans la zone euro. »",
             niveau="attention",
         )

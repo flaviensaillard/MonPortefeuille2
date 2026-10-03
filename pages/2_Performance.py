@@ -109,7 +109,7 @@ if sauts:
         "**Comment corriger.** Chaque saut est un mouvement réel qui n'a pas "
         "été saisi : un virement depuis le livret CHF, une position ajoutée à "
         "la main, ou un versement oublié. Déclarez-le comme un **apport** à sa "
-        "date dans 🪙 Mouvements de fonds, et le chiffre se corrige tout seul. "
+        "date dans **💼 Portefeuille & Opérations (onglet 💰 3. Fonds & Comptes de liquidités)**, et le chiffre se corrige tout seul. "
         "Pour ce portefeuille, c'est environ **"
         f"{ui.usd_eur(sum(s['residuel'] for s in sauts))}** à répartir sur "
         f"{len(sauts)} date(s)."
@@ -201,12 +201,16 @@ with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=
 st.subheader("Ce que la stratégie a produit")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("TWR cumulé ($)", ui.pct(twr_total, decimales=2, signe=True),
-          help="Time-Weighted Return en dollars ($) : neutralise l'effet de vos apports.")
-c2.metric("TWR annualisé ($)", ui.pct(twr_ann, decimales=2, signe=True),
-          help=f"Sur {jours} jours ({jours / 365.25:.1f} ans).")
+ui.metric_pct(
+    c1, "TWR cumulé ($)", twr_total,
+    help="Time-Weighted Return en dollars ($) : neutralise l'effet de vos apports.",
+)
+ui.metric_pct(
+    c2, "TWR annualisé ($)", twr_ann,
+    help=f"Sur {jours} jours ({jours / 365.25:.1f} ans).",
+)
 periodicite_estimee = max(1, round(len(rendements) * 365.25 / max(jours, 1)))
-c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements, periodicite=periodicite_estimee), decimales=2, signe=True),
+c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements, periodicite=periodicite_estimee), decimales=2),
           help="Écart-type des rendements de sous-période annualisé.")
 
 # ---------------------------------------------------------------------------
@@ -233,11 +237,15 @@ perf_reel = (1.0 + perf_usd) / infl_periode - 1.0 if infl_periode > 0 else None
 perf_or = S.twr_en_or_portefeuille(ctx)
 
 d1, d2, d3 = st.columns(3)
-d1.metric("En dollars ($)", ui.pct(perf_usd, decimales=2, signe=True))
-d2.metric("Hors inflation (réelle)", ui.pct(perf_reel, decimales=2, signe=True) if perf_reel is not None else "—",
-          help="Déflaté par l'inflation officielle.")
-d3.metric("En onces d'or", ui.pct(perf_or, decimales=2, signe=True) if perf_or is not None else "—",
-          help="L'étalon de Gave.")
+ui.metric_pct(d1, "En dollars ($)", perf_usd)
+ui.metric_pct(
+    d2, "Hors inflation (réelle)", perf_reel,
+    help="Déflaté par l'inflation officielle.",
+)
+ui.metric_pct(
+    d3, "En onces d'or", perf_or,
+    help="L'étalon de Gave.",
+)
 
 if perf_or is not None and perf_or < perf_usd:
     st.warning(
@@ -252,19 +260,18 @@ if perf_or is not None and perf_or < perf_usd:
 st.divider()
 st.subheader("Ce que vous, personnellement, avez gagné")
 
-flux_irr = []
-for i, d in enumerate(snaps["Date"]):
-    if i == 0:
-        flux_irr.append((d.date(), -valeurs[0]))
-    elif i == len(valeurs) - 1:
-        flux_irr.append((d.date(), valeurs[-1]))
-    else:
-        flux_irr.append((d.date(), -flux[i]))
+flux_irr = [(snaps["Date"].iloc[0].date(), -valeurs[0])]
+for i in range(1, len(valeurs)):
+    if abs(flux[i]) > 1e-6:
+        flux_irr.append((snaps["Date"].iloc[i].date(), -flux[i]))
+flux_irr.append((snaps["Date"].iloc[-1].date(), valeurs[-1]))
 
 taux_irr = metrics.irr(flux_irr)
 c1, c2 = st.columns(2)
-c1.metric("IRR (rendement pondéré)", ui.pct(taux_irr, signe=True) if taux_irr is not None else "—",
-          help="Tient compte de votre calendrier d'apports réel.")
+ui.metric_pct(
+    c1, "IRR (rendement pondéré)", taux_irr,
+    help="Tient compte de votre calendrier d'apports réel.",
+)
 c2.metric("Écart TWR / IRR",
           ui.points((taux_irr - twr_ann) * 100, 2) if taux_irr is not None else "—",
           help="Positif : vos apports ont été bien placés. Négatif : vous avez "
@@ -299,12 +306,17 @@ for annee, perf in rendements_annuels.items():
     infl = inflation.get(annee)
     reel = (1 + perf) / (1 + infl) - 1.0 if infl is not None else None
     val_fin_u = float(bilan_par_annee.loc[annee, "_val_usd"]) if annee in bilan_par_annee.index else None
+    val_fin_e = (
+        float(bilan_par_annee.loc[annee, "patrimoine_investi_eur"])
+        if (annee in bilan_par_annee.index and "patrimoine_investi_eur" in bilan_par_annee.columns and pd.notna(bilan_par_annee.loc[annee, "patrimoine_investi_eur"]))
+        else None
+    )
     lignes.append({
         "Année": int(annee),
         "Performance ($)": ui.pct(perf, decimales=2, signe=True),
         "Inflation": ui.pct(infl, decimales=2, signe=True) if infl is not None else "⚠️ non renseignée",
         "Réelle": ui.pct(reel, decimales=2, signe=True) if reel is not None else "—",
-        "Valeur bilan ($ / €)": ui.usd_eur(val_fin_u) if val_fin_u is not None else "—",
+        "Valeur bilan ($ / €)": ui.usd_eur(val_fin_u, val_fin_e) if val_fin_u is not None else "—",
     })
 
 if lignes:
