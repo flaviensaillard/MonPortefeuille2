@@ -259,3 +259,12 @@ def test_html_usd_eur_dollar_blanc_dessus_euro_bleu_dessous():
     cell = ui._formater_cellule_html("79 007,00 $ / 70 259,67 €")
     assert "#ffffff" in cell and "#38bdf8" in cell
     assert cell.index("79 007,00 $") < cell.index("70 259,67 €")
+
+
+
+def test_couleurs_indicateurs_vert_rouge_bleu():
+    """Vert (#2ecc71) si ça monte, rouge (#e74c3c) si ça baisse, bleu (#38bdf8) si stable."""
+    assert ui._couleur_variation(125.0) == "#2ecc71"
+    assert ui._couleur_variation(-42.5) == "#e74c3c"
+    assert ui._couleur_variation(0.0) == "#38bdf8"
+    assert ui._couleur_variation(None) == "#38bdf8"

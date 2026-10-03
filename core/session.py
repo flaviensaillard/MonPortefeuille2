@@ -681,34 +681,26 @@ def progression_periode(
     if col_val_usd not in df_p.columns:
         col_val_usd = "patrimoine_investi_eur"
 
-    # S'assurer que le point du jour reflète la valorisation en direct
-    aujourd_hui = pd.Timestamp(dt.date.today())
+    # Le dernier point de `df_p` porte la valorisation en direct d'aujourd'hui
+    # (et `df_p.iloc[-2]` est la clôture de la veille) : on ne duplique jamais
+    # la dernière ligne afin que `df_p.tail(2)` mesure exactement la variation
+    # depuis la veille (`iloc[-2]` -> `iloc[-1]`).
     val_live_usd = (
         ctx.total_investi_usd if perimetre == "Portefeuille investi" else ctx.patrimoine_total_usd
     )
     if val_live_usd > 0 and not df_p.empty:
-        if df_p["date_dt"].iloc[-1].date() == aujourd_hui.date():
-            df_p.loc[df_p.index[-1], col_val_usd] = round(val_live_usd, 2)
-        else:
-             nouvelle_ligne = df_p.iloc[-1].to_dict()
-             nouvelle_ligne["Date"] = aujourd_hui
-             nouvelle_ligne["date_dt"] = aujourd_hui
-             nouvelle_ligne["date"] = aujourd_hui.strftime("%Y-%m-%d")
-             nouvelle_ligne["patrimoine_investi_usd"] = round(ctx.total_investi_usd, 2)
-             nouvelle_ligne["patrimoine_total_usd"] = round(ctx.patrimoine_total_usd, 2)
-             nouvelle_ligne["_flux_usd"] = 0.0
-             df_p = pd.concat([df_p, pd.DataFrame([nouvelle_ligne])], ignore_index=True)
+        df_p.loc[df_p.index[-1], col_val_usd] = round(val_live_usd, 2)
 
     d_min = df_p["date_dt"].min().date()
     d_max = df_p["date_dt"].max().date()
     label_periode = mode_periode
 
     if mode_periode == "Progression journalière":
+        # Progression journalière = progression depuis la veille (dernier snapshot antérieur au dernier point -> point actuel)
         df_graphe = df_p.tail(min(len(df_p), 90)).copy()
         df_calc = df_p.tail(min(len(df_p), 2)).copy()
     elif mode_periode == "Progression mensuelle":
         df_p["_ym"] = df_p["date_dt"].dt.to_period("M")
-        # Pour une vue mensuelle, le flux d'un mois est la somme des flux quotidiens du mois
         flux_mensuel = df_p.groupby("_ym")["_flux_usd"].sum()
         df_graphe = df_p.groupby("_ym", as_index=False).last().sort_values("date_dt").reset_index(drop=True)
         df_graphe["_flux_usd"] = [float(flux_mensuel.get(ym, 0.0)) for ym in df_graphe["_ym"]]
@@ -723,6 +715,12 @@ def progression_periode(
         debut_an = pd.Timestamp(d_max.year, 1, 1)
         avant = df_p[df_p["date_dt"] < debut_an]
         dans = df_p[df_p["date_dt"] >= debut_an]
+        df_graphe = pd.concat([avant.tail(1), dans], ignore_index=True) if not avant.empty else dans.copy()
+        df_calc = df_graphe.copy()
+    elif mode_periode == "Depuis 1 an":
+        un_an = pd.Timestamp(d_max - dt.timedelta(days=365))
+        avant = df_p[df_p["date_dt"] <= un_an]
+        dans = df_p[df_p["date_dt"] > un_an]
         df_graphe = pd.concat([avant.tail(1), dans], ignore_index=True) if not avant.empty else dans.copy()
         df_calc = df_graphe.copy()
     elif mode_periode == "Période choisie":
@@ -741,7 +739,8 @@ def progression_periode(
     if len(df_calc) >= 2:
         d0_str = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
         d1_str = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
-        label_periode = f"{mode_periode} ({d0_str} → {d1_str})"
+        prefixe_lbl = "Progression depuis la veille" if mode_periode == "Progression journalière" else mode_periode
+        label_periode = f"{prefixe_lbl} ({d0_str} → {d1_str})"
 
         valeurs_c = [float(v) for v in df_calc[col_val_usd].tolist()]
         flux_c = [0.0] + [float(f) for f in df_calc["_flux_usd"].iloc[1:].tolist()]

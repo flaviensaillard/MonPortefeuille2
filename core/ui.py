@@ -236,6 +236,36 @@ def html_usd_eur(
     )
 
 
+def _couleur_variation(val: float | None) -> str:
+    """Retourne vert (#2ecc71) si > 0, rouge (#e74c3c) si < 0, bleu (#38bdf8) si stable (== 0)."""
+    if val is None or abs(float(val)) <= 1e-6:
+        return "#38bdf8"
+    return "#2ecc71" if float(val) > 0 else "#e74c3c"
+
+
+def _couleur_delta_texte(delta_str: str) -> str:
+    """Détermine la couleur d'un texte delta : vert si positif, rouge si négatif, bleu si stable (0)."""
+    s = str(delta_str).strip()
+    # Chercher s'il y a un nombre non nul dans la chaîne
+    import re
+    m = re.search(r"([+-]?\d+(?:[.,]\d+)?)", s)
+    if m:
+        try:
+            v = float(m.group(1).replace(",", "."))
+            if abs(v) <= 1e-6:
+                return "#38bdf8"
+            if "-" in s[:m.start() + 1]:
+                return "#e74c3c"
+            return "#2ecc71" if v > 0 else "#e74c3c"
+        except Exception:
+            pass
+    if s.startswith("-"):
+        return "#e74c3c"
+    if s.startswith("+"):
+        return "#2ecc71"
+    return "#38bdf8"
+
+
 def metric_usd_eur(
     conteneur,
     label: str,
@@ -246,28 +276,102 @@ def metric_usd_eur(
     decimales: int = 2,
     signe: bool = False,
 ) -> None:
-    """Affiche un indicateur avec le montant en dollars ($) en blanc en haut
-    et le montant en euros (€) en bleu juste en dessous."""
+    """Affiche un indicateur avec le montant en dollars ($) en haut et en euros (€) en dessous.
+
+    - Si `signe=False` (montant patrimonial statique) : $ en blanc (#ffffff) en haut, € en bleu (#38bdf8) en dessous.
+    - Si `signe=True` (indicateur de variation/progression) : en vert (#2ecc71) si > 0,
+      en rouge (#e74c3c) si < 0, en bleu (#38bdf8) si stable (0).
+    """
     cible = conteneur if conteneur is not None else st
     v_usd = _nombre(montant_usd)
     if v_usd is None:
-        bloc_val = "<div style='font-size:1.75rem;font-weight:600;color:#ffffff;'>—</div>"
+        bloc_val = "<div style='font-size:1.75rem;font-weight:600;color:#38bdf8;'>—</div>"
     else:
         v_eur = _nombre(montant_eur)
         if v_eur is None:
             t = _TAUX_EUR_USD
             v_eur = (v_usd / t) if (t and t > 0) else v_usd
-        fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
-        s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
-        s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+        if signe and abs(v_usd) <= 1e-6:
+            s_usd = f"{0.0:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+            s_eur = f"{0.0:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+        else:
+            fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
+            s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
+            s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+
+        if signe:
+            c_haut = _couleur_variation(v_usd)
+            c_bas = "#38bdf8"
+        else:
+            c_haut = "#ffffff"
+            c_bas = "#38bdf8"
+
         bloc_val = (
-            f"<div style='font-size:1.7rem;font-weight:600;color:#ffffff;line-height:1.15;'>{s_usd}</div>"
-            f"<div style='font-size:1.05rem;font-weight:500;color:#38bdf8;line-height:1.25;margin-top:0.15rem;'>{s_eur}</div>"
+            f"<div style='font-size:1.7rem;font-weight:600;color:{c_haut};line-height:1.15;'>{s_usd}</div>"
+            f"<div style='font-size:1.05rem;font-weight:500;color:{c_bas};line-height:1.25;margin-top:0.15rem;'>{s_eur}</div>"
         )
 
     delta_html = ""
     if delta:
-        couleur_d = "#2ecc71" if not str(delta).lstrip().startswith("-") else "#e74c3c"
+        couleur_d = _couleur_delta_texte(str(delta))
+        delta_html = (
+            f"<div style='font-size:0.85rem;font-weight:500;color:{couleur_d};margin-top:0.2rem;'>"
+            f"{delta}</div>"
+        )
+
+    aide_attr = ""
+    aide_icone = ""
+    if help:
+        echappe = str(help).replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        aide_attr = f' title="{echappe}"'
+        aide_icone = f" <span title='{echappe}' style='cursor:help;opacity:0.6;font-size:0.8em;'>ⓘ</span>"
+
+    cible.markdown(
+        f"<div style='margin-bottom:0.85rem;'{aide_attr}>"
+        f"<div style='font-size:0.875rem;color:rgba(250,250,250,0.75);margin-bottom:0.2rem;'>{label}{aide_icone}</div>"
+        f"{bloc_val}"
+        f"{delta_html}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+
+
+
+def metric_pct(
+    conteneur,
+    label: str,
+    valeur_fraction: float | None,
+    delta: str | None = None,
+    help: str | None = None,
+    decimales: int = 2,
+    sous_texte_bleu: str | None = None,
+) -> None:
+    """Affiche un indicateur de pourcentage coloré :
+    - Vert (#2ecc71) si > 0 (ça monte)
+    - Rouge (#e74c3c) si < 0 (ça baisse)
+    - Bleu (#38bdf8) si == 0 (stable)
+    """
+    cible = conteneur if conteneur is not None else st
+    v = _nombre(valeur_fraction)
+    if v is None:
+        bloc_val = "<div style='font-size:1.7rem;font-weight:600;color:#38bdf8;'>—</div>"
+    else:
+        c_val = _couleur_variation(v)
+        txt_pct = pct(0.0 if abs(v) <= 1e-6 else v, decimales=decimales, signe=(abs(v) > 1e-6))
+        sous_html = (
+            f"<div style='font-size:1.0rem;font-weight:500;color:#38bdf8;line-height:1.25;margin-top:0.15rem;'>{sous_texte_bleu}</div>"
+            if sous_texte_bleu else ""
+        )
+        bloc_val = (
+            f"<div style='font-size:1.7rem;font-weight:600;color:{c_val};line-height:1.15;'>{txt_pct}</div>"
+            f"{sous_html}"
+        )
+
+    delta_html = ""
+    if delta:
+        couleur_d = _couleur_delta_texte(str(delta))
         delta_html = (
             f"<div style='font-size:0.85rem;font-weight:500;color:{couleur_d};margin-top:0.2rem;'>"
             f"{delta}</div>"

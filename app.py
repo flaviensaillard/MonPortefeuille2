@@ -28,8 +28,7 @@ from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
 
-import inspect
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or "signe" not in inspect.signature(ui.metric_usd_eur).parameters:
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -106,7 +105,12 @@ if ctx.erreurs:
 # ---------------------------------------------------------------------------
 st.caption(f"Au {dt.date.today().strftime('%d/%m/%Y')}")
 
-c1, c2, c3, c4 = st.columns(4)
+perf_origine_usd = S.twr_portefeuille(ctx)
+prog_origine = S.progression_periode(ctx, "Depuis le début", "Portefeuille investi") if not ctx.snapshots.empty else {"vide": True}
+gain_origine_usd = prog_origine.get("gain_marche_usd", 0.0) if not prog_origine.get("vide") else 0.0
+gain_origine_eur = prog_origine.get("gain_marche_eur", 0.0) if not prog_origine.get("vide") else 0.0
+
+c1, c2, c3, c4, c5 = st.columns(5)
 ui.metric_usd_eur(
     c1, "Patrimoine total", ctx.patrimoine_total_usd, ctx.patrimoine_total_eur,
     help="Investi + épargne de précaution + compte courant.",
@@ -115,12 +119,19 @@ ui.metric_usd_eur(
     c2, "Portefeuille investi", ctx.total_investi_usd, ctx.total_investi_eur,
     help="Actifs stratégiques soumis à l'allocation cible.",
 )
+ui.metric_pct(
+    c3,
+    "Performance depuis le début",
+    perf_origine_usd,
+    sous_texte_bleu=f"Gain : {ui.usd(gain_origine_usd, signe=True)} / {ui.eur(gain_origine_eur)}" if not prog_origine.get("vide") else None,
+    help="Performance cumulée (TWR) de votre portefeuille investi depuis le tout premier snapshot (avril 2023), corrigée des apports.",
+)
 ui.metric_usd_eur(
-    c3, "Épargne de précaution", ctx.total_precaution_usd, ctx.total_precaution_eur,
+    c4, "Épargne de précaution", ctx.total_precaution_usd, ctx.total_precaution_eur,
     help="Réserve CHF / CNY disponible en 5 minutes. Jamais rééquilibrée.",
 )
 ui.metric_usd_eur(
-    c4, "Cash disponible (Compte courant)", ctx.total_courant_usd, ctx.total_courant_eur,
+    c5, "Cash disponible (Compte courant)", ctx.total_courant_usd, ctx.total_courant_eur,
     help="Liquidités courantes ($) incluses dans l'assiette de rééquilibrage.",
 )
 
@@ -140,6 +151,7 @@ if not ctx.snapshots.empty:
                 "Progression mensuelle",
                 "Depuis le début du mois",
                 "Depuis le début de l'année",
+                "Depuis 1 an",
                 "Depuis le début",
                 "Période choisie",
             ],
@@ -182,11 +194,12 @@ if not ctx.snapshots.empty:
             signe=True,
             help="Gain ou perte purement généré par le marché sur la période (hors apports/retraits).",
         )
-        p2.metric(
+        ui.metric_pct(
+            p2,
             "Performance (TWR) sur la période",
-            ui.pct(prog["twr_per"], decimales=2, signe=True),
+            prog["twr_per"],
             delta=f"Variation brute : {ui.pct(prog['pct_brut'], decimales=2, signe=True)}",
-            help="Rendement pondéré par le temps (neutralise l'effet des apports).",
+            help="Rendement pondéré par le temps sur la période sélectionnée (neutralise l'effet des apports).",
         )
         ui.metric_usd_eur(
             p3, "Variation totale de valeur", prog["delta_val_usd"], prog["delta_val_eur"],
@@ -207,9 +220,12 @@ if not ctx.snapshots.empty:
             y=df_graphe[col_val_usd],
             name=f"{perimetre_graphe} ($)",
             mode="lines+markers" if len(df_graphe) <= 45 else "lines",
-            line=dict(color="#58a6ff", width=2.8),
+            line=dict(color=ui._couleur_variation(prog["gain_marche_usd"]), width=2.8),
             fill="tozeroy",
-            fillcolor="rgba(88, 166, 255, 0.10)",
+            fillcolor=(
+                "rgba(46, 204, 113, 0.12)" if prog["gain_marche_usd"] > 1e-6
+                else ("rgba(231, 76, 60, 0.12)" if prog["gain_marche_usd"] < -1e-6 else "rgba(56, 189, 248, 0.10)")
+            ),
             hovertemplate="%{x|%d/%m/%Y}<br><b>$ %{y:,.2f}</b><extra></extra>",
         ))
         if "capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi":
@@ -264,11 +280,13 @@ if not ctx.snapshots.empty and "equivalent_or_oz" in ctx.snapshots.columns:
 
 perf_usd = S.twr_portefeuille(ctx)
 if perf_or is not None:
-    g3.metric("Performance en or", ui.pct(perf_or, signe=True),
-              delta=ui.pct(perf_usd, signe=True) if perf_usd is not None else None,
-              help="Depuis le premier snapshot. Le delta compare à la performance en dollars ($).")
+    ui.metric_pct(
+        g3, "Performance en or (depuis le début)", perf_or,
+        delta=f"Portefeuille en $ : {ui.pct(perf_usd, decimales=2, signe=True)}" if perf_usd is not None else None,
+        help="Depuis le premier snapshot. Le delta rappelle la performance de votre portefeuille en dollars ($).",
+    )
 elif perf_usd is not None:
-    g3.metric("Performance ($)", ui.pct(perf_usd, decimales=2, signe=True))
+    ui.metric_pct(g3, "Performance ($)", perf_usd)
 else:
     g3.metric("Performance", "—", help="Aucun snapshot enregistré.")
 
