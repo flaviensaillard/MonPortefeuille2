@@ -247,3 +247,15 @@ def test_usd_eur_affiche_dollar_puis_euro():
     ui.definir_taux_eur_usd(1.1245)
     assert ui.usd_eur(79007.0, 70259.67) == "79 007,00 $ / 70 259,67 €"
     assert ui.usd_eur(1124.50) == "1 124,50 $ / 1 000,00 €"
+
+
+
+def test_html_usd_eur_dollar_blanc_dessus_euro_bleu_dessous():
+    from core import ui
+    html = ui.html_usd_eur(79007.0, 70259.67)
+    assert "#ffffff" in html
+    assert "#38bdf8" in html
+    assert html.index("79 007,00 $") < html.index("70 259,67 €")
+    cell = ui._formater_cellule_html("79 007,00 $ / 70 259,67 €")
+    assert "#ffffff" in cell and "#38bdf8" in cell
+    assert cell.index("79 007,00 $") < cell.index("70 259,67 €")

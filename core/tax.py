@@ -481,36 +481,55 @@ def cessions_de_lannee(
 ) -> dict[Classe, list[dict]]:
     """Cessions de l'année, au format attendu par `calculer`.
 
-    CORRECTION : `prix_cession_eur` était rempli avec `t.montant_net`, qui est
-    dans la devise de COTATION — dollars pour FLXC.L et BTCUSDT, yen pour
-    XJSE.SW. Le PRU, lui, est en euros. La plus-value mélangeait donc deux
-    monnaies, et était fausse pour tout actif non coté en euro. Chaque ligne est
-    désormais convertie à sa date avec le taux de change réel.
+    Suit le CUMP (PRU en euros) chronologique jusqu'à chaque vente, avec repli
+    sur `positions[ticker].pru_eur` lorsqu'un test unitaire ne fournit que les
+    ventes sans les achats antérieurs.
     """
     from . import fx
     from .portfolio import classe_de
 
+    triees = sorted(
+        transactions,
+        key=lambda x: (x.date, 0 if x.est_achat else 1),
+    )
+    soldes: dict[str, dict[str, float]] = {}
     cessions: dict[Classe, list[dict]] = {}
-    for t in transactions:
-        if not t.est_vente or t.date.year != annee:
+
+    for t in triees:
+        if t.date.year > annee:
             continue
-        classe = classe_de(t.ticker)
-        pos = positions.get(t.ticker)
         try:
             montant_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
         except fx.FXIndisponible:
-            # Pas de taux à cette date : on garde le montant brut plutôt que
-            # d'inventer une conversion. La plus-value sera fausse, mais au moins
-            # elle ne sera pas faussement précise.
             montant_eur = t.montant_net
-        cessions.setdefault(classe, []).append({
-            "actif": t.ticker,
-            "date": t.date,
-            "quantite": t.quantite,
-            "pru_eur": pos.pru_eur if pos else 0.0,
-            "prix_cession_eur": montant_eur,
-            "sens": "vente",
-        })
+
+        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0})
+        if t.est_achat:
+            etat["qte"] += t.quantite
+            etat["cout_eur"] += montant_eur
+        elif t.est_vente:
+            pos = positions.get(t.ticker)
+            if etat["qte"] > 1e-9:
+                pru_instant = etat["cout_eur"] / etat["qte"]
+                cout_sorti = pru_instant * t.quantite
+                etat["qte"] = max(0.0, etat["qte"] - t.quantite)
+                etat["cout_eur"] = max(0.0, etat["cout_eur"] - cout_sorti)
+                if etat["qte"] <= 1e-6:
+                    etat["qte"] = 0.0
+                    etat["cout_eur"] = 0.0
+            else:
+                pru_instant = pos.pru_eur if pos else 0.0
+
+            if t.date.year == annee:
+                classe = classe_de(t.ticker)
+                cessions.setdefault(classe, []).append({
+                    "actif": t.ticker,
+                    "date": t.date,
+                    "quantite": t.quantite,
+                    "pru_eur": pru_instant,
+                    "prix_cession_eur": montant_eur,
+                    "sens": "vente",
+                })
 
     crypto = cessions.get(Classe.CRYPTO)
     if crypto:
@@ -634,3 +653,383 @@ def calculer(transactions_par_classe: dict[Classe, list[dict]], annee: int,
         )
 
     return resultats
+
+
+
+# ===========================================================================
+# Détails complets pour le pré-remplissage des formulaires 2074, 2086 et 2042
+# ===========================================================================
+
+def detail_2074_de_lannee(
+    transactions: list["Transaction"],
+    annee: int,
+    choix_regime: str = "PFU",
+) -> dict:
+    """Calcule l'intégralité du Formulaire 2074 / 2074-CMV pour `annee` :
+    - Ligne 905 (plus-values) et Ligne 913 (moins-values)
+    - Cadre 5 (lignes 511 à 524) détaillé actif par actif
+    - Cadres 11 et 12 (Bloc 1133 : imputation des moins-values col. A à G)
+    - Tableau détaillé opération par opération.
+    """
+    from . import fx
+    from .portfolio import classe_de
+
+    classes_titres = {Classe.ACTION_ETF, Classe.OBLIGATION_ETF, Classe.OR}
+    triees = sorted(
+        (t for t in transactions if classe_de(t.ticker) in classes_titres),
+        key=lambda x: (x.date, 0 if x.est_achat else 1),
+    )
+
+    soldes: dict[str, dict[str, float]] = {}
+    operations: list[dict] = []
+
+    for t in triees:
+        if t.date.year > annee:
+            continue
+        try:
+            net_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
+        except fx.FXIndisponible:
+            net_eur = t.montant_net
+
+        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0})
+        if t.est_achat:
+            etat["qte"] += t.quantite
+            etat["cout_eur"] += net_eur
+        elif t.est_vente and etat["qte"] > 1e-9:
+            pru_eur = etat["cout_eur"] / etat["qte"]
+            acq_eur = pru_eur * t.quantite
+            pv_eur = net_eur - acq_eur
+            etat["qte"] = max(0.0, etat["qte"] - t.quantite)
+            etat["cout_eur"] = max(0.0, etat["cout_eur"] - acq_eur)
+            if etat["qte"] <= 1e-6:
+                etat["qte"] = 0.0
+                etat["cout_eur"] = 0.0
+
+            if t.date.year == annee:
+                operations.append({
+                    "actif": t.ticker,
+                    "date": t.date,
+                    "quantite": t.quantite,
+                    "pru_unitaire_eur": pru_eur,
+                    "acq_globale_eur": acq_eur,
+                    "cession_unitaire_eur": net_eur / t.quantite if t.quantite > 0 else 0.0,
+                    "cession_globale_eur": net_eur,
+                    "plus_value_eur": pv_eur,
+                })
+
+    # Agrégation annuelle par titre (Cadre 5 : lignes 511 à 524)
+    par_actif: list[dict] = []
+    actifs_distincts = sorted({op["actif"] for op in operations})
+    for actif in actifs_distincts:
+        ops_a = [op for op in operations if op["actif"] == actif]
+        qte_tot = sum(op["quantite"] for op in ops_a)
+        cession_tot = sum(op["cession_globale_eur"] for op in ops_a)
+        acq_tot = sum(op["acq_globale_eur"] for op in ops_a)
+        pv_tot = sum(op["plus_value_eur"] for op in ops_a)
+        par_actif.append({
+            "actif": actif,
+            "nb_operations": len(ops_a),
+            "ligne_511": f"{actif} (Agrégé annuel) — Swissquote Bank Europe SA",
+            "ligne_512": f"31/12/{annee}",
+            "ligne_514": cession_tot / qte_tot if qte_tot > 0 else 0.0,
+            "ligne_515": qte_tot,
+            "ligne_516": cession_tot,
+            "ligne_517": 0.0,
+            "ligne_518": cession_tot,
+            "ligne_520": acq_tot / qte_tot if qte_tot > 0 else 0.0,
+            "ligne_521": acq_tot,
+            "ligne_522": 0.0,
+            "ligne_523": acq_tot,
+            "ligne_524": pv_tot,
+        })
+
+    ligne_905 = sum(a["ligne_524"] for a in par_actif if a["ligne_524"] > 0)
+    ligne_913 = abs(sum(a["ligne_524"] for a in par_actif if a["ligne_524"] < 0))
+    bilan_net = ligne_905 - ligne_913
+
+    # Cadre 11 (Bloc 1133) : imputation des moins-values de l'année sur les gains
+    cadre_11: list[dict] = []
+    mv_restante = ligne_913
+    for a in par_actif:
+        if a["ligne_524"] <= 0:
+            continue
+        gain_a = a["ligne_524"]
+        imput = min(gain_a, mv_restante)
+        mv_restante = max(0.0, mv_restante - imput)
+        col_c = gain_a - imput
+        cadre_11.append({
+            "Titre (Bloc 1133)": a["actif"],
+            "Col A — Gain (€)": round(gain_a, 2),
+            "Col B — Perte de l'année imputée (€)": round(imput, 2),
+            "Col C — Solde (A − B) (€)": round(col_c, 2),
+            "Col D — Pertes antérieures (€)": 0.0,
+            "Col E — Gain net imposable (C − D) (€)": round(col_c, 2),
+            "Col F/G — Abattement durée détention (€)": 0.0,
+        })
+
+    return {
+        "annee": annee,
+        "operations": operations,
+        "par_actif": par_actif,
+        "ligne_905": round(ligne_905, 2),
+        "ligne_913": round(ligne_913, 2),
+        "bilan_net": round(bilan_net, 2),
+        "case_3vg": round(bilan_net, 2) if bilan_net > 0 else 0.0,
+        "case_3vh": round(abs(bilan_net), 2) if bilan_net < 0 else 0.0,
+        "cadre_11": cadre_11,
+        "choix_regime": choix_regime,
+    }
+
+
+def detail_2086_de_lannee(
+    transactions: list["Transaction"],
+    annee: int,
+) -> dict:
+    """Calcule l'intégralité du Formulaire 2086 (cryptomonnaies, art. 150 VH bis)
+    en suivant les achats et les fractions de capital déduites (ligne 221) depuis
+    l'origine du portefeuille jusqu'à la fin de `annee`."""
+    from . import fx, prices
+    from .portfolio import classe_de
+
+    triees = sorted(
+        (t for t in transactions if classe_de(t.ticker) is Classe.CRYPTO),
+        key=lambda x: (x.date, 0 if x.est_achat else 1),
+    )
+
+    cout_total_brut_eur = 0.0
+    somme_fractions_deduites = 0.0
+    quantites: dict[str, float] = {}
+    cessions_annee: list[dict] = []
+
+    for t in triees:
+        if t.date.year > annee:
+            continue
+        iso = t.date.isoformat()
+        try:
+            net_eur = t.montant_net * fx.taux(t.devise, iso, "EUR")
+        except fx.FXIndisponible:
+            net_eur = t.montant_net
+
+        if t.est_achat:
+            cout_total_brut_eur += net_eur
+            quantites[t.ticker] = quantites.get(t.ticker, 0.0) + t.quantite
+        elif t.est_vente:
+            prix_cession_eur = net_eur
+            prix_unitaire_implicite_eur = (
+                prix_cession_eur / t.quantite if t.quantite > 0 else 0.0
+            )
+            valeur_globale_eur = 0.0
+            for c_tick, c_qte in quantites.items():
+                if c_qte <= 1e-8:
+                    continue
+                if c_tick == t.ticker and prix_unitaire_implicite_eur > 0:
+                    valeur_globale_eur += c_qte * prix_unitaire_implicite_eur
+                else:
+                    try:
+                        px = prices.cours(c_tick, iso)
+                        tx = fx.taux("USD", iso, "EUR")
+                        valeur_globale_eur += c_qte * px * tx
+                    except Exception:
+                        pass
+
+            if valeur_globale_eur < prix_cession_eur:
+                valeur_globale_eur = prix_cession_eur
+
+            ligne_220 = cout_total_brut_eur
+            ligne_221 = somme_fractions_deduites
+            ligne_223 = max(0.0, ligne_220 - ligne_221)
+            fraction_capital = (
+                ligne_223 * (prix_cession_eur / valeur_globale_eur)
+                if valeur_globale_eur > 0 else 0.0
+            )
+            ligne_224 = prix_cession_eur - fraction_capital
+
+            somme_fractions_deduites += fraction_capital
+            quantites[t.ticker] = max(0.0, quantites.get(t.ticker, 0.0) - t.quantite)
+
+            if t.date.year == annee:
+                cessions_annee.append({
+                    "actif": t.ticker,
+                    "date": t.date,
+                    "quantite": t.quantite,
+                    "ligne_211": t.date.strftime("%d/%m/%Y"),
+                    "ligne_212": round(valeur_globale_eur, 2),
+                    "ligne_213": round(prix_cession_eur, 2),
+                    "ligne_214": 0.0,
+                    "ligne_215": round(prix_cession_eur, 2),
+                    "ligne_216": 0.0,
+                    "ligne_217": round(prix_cession_eur, 2),
+                    "ligne_218": round(prix_cession_eur, 2),
+                    "ligne_220": round(ligne_220, 2),
+                    "ligne_221": round(ligne_221, 2),
+                    "ligne_222": 0.0,
+                    "ligne_223": round(ligne_223, 2),
+                    "fraction_capital": round(fraction_capital, 2),
+                    "ligne_224": round(ligne_224, 2),
+                })
+
+    total_213 = round(sum(c["ligne_213"] for c in cessions_annee), 2)
+    total_224 = round(sum(c["ligne_224"] for c in cessions_annee), 2)
+    exonere_305 = bool(cessions_annee) and total_213 <= fb.CRYPTO_FRANCHISE_CESSIONS
+
+    if not cessions_annee or exonere_305:
+        case_3an = 0.0
+        case_3bn = 0.0
+    elif total_224 > 0:
+        case_3an = total_224
+        case_3bn = 0.0
+    else:
+        case_3an = 0.0
+        case_3bn = abs(total_224)
+
+    return {
+        "annee": annee,
+        "cessions": cessions_annee,
+        "total_cessions_213": total_213,
+        "plus_value_globale_224": total_224,
+        "exonere_305": exonere_305,
+        "case_3an": round(case_3an, 2),
+        "case_3bn": round(case_3bn, 2),
+    }
+
+
+def simuler_foyer_complet(
+    *,
+    annee: int,
+    statut: str,
+    enfants: int,
+    parts: float,
+    salaire_1: float,
+    utiliser_frais_reels_1: bool,
+    km_1: float,
+    cv_1: int,
+    jours_repas_1: int,
+    electrique_1: bool = False,
+    salaire_2: float = 0.0,
+    utiliser_frais_reels_2: bool = False,
+    km_2: float = 0.0,
+    cv_2: int = 5,
+    jours_repas_2: int = 0,
+    electrique_2: bool = False,
+    interets_etrangers_eur: float = 0.0,
+    pays_interets_etrangers: str = "Lituanie",
+    bilan_pv_actions_eur: float = 0.0,
+    bilan_pv_crypto_imposable_eur: float = 0.0,
+) -> dict:
+    """Calcule la déclaration complète du foyer (salaires, frais réels vs 10 %,
+    revenus mobiliers étrangers, arbitrage PFU vs Barème, IR net, TMI et taux de
+    prélèvement à la source neutre + individualisés)."""
+    couple = _est_couple(statut)
+    sal1 = max(0.0, float(salaire_1))
+    sal2 = max(0.0, float(salaire_2)) if couple else 0.0
+
+    # --- Déclarant 1 ---
+    abatt1 = fb.abattement_10_salaire(sal1, annee)
+    km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1)
+    rep1_val, rep1_txt = fb.frais_repas(jours_repas_1, annee)
+    frais_reels_1 = round(km1_val + rep1_val, 2) if utiliser_frais_reels_1 else 0.0
+    retenir_reels_1 = bool(utiliser_frais_reels_1 and frais_reels_1 > abatt1)
+    deduction_1 = frais_reels_1 if retenir_reels_1 else abatt1
+    note_1ak = (
+        f"Déclarant 1 ({annee}) — {km1_txt} ; {rep1_txt} ; Total frais réels (case 1AK) = " + f"{round(frais_reels_1):,} €".replace(",", " ")
+        if utiliser_frais_reels_1 else ""
+    )
+
+    # --- Déclarant 2 ---
+    abatt2 = fb.abattement_10_salaire(sal2, annee) if couple else 0.0
+    km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2) if couple else (0.0, "")
+    rep2_val, rep2_txt = fb.frais_repas(jours_repas_2, annee) if couple else (0.0, "")
+    frais_reels_2 = round(km2_val + rep2_val, 2) if (couple and utiliser_frais_reels_2) else 0.0
+    retenir_reels_2 = bool(couple and utiliser_frais_reels_2 and frais_reels_2 > abatt2)
+    deduction_2 = frais_reels_2 if retenir_reels_2 else abatt2
+    note_1bk = (
+        f"Déclarant 2 ({annee}) — {km2_txt} ; {rep2_txt} ; Total frais réels (case 1BK) = " + f"{round(frais_reels_2):,} €".replace(",", " ")
+        if (couple and utiliser_frais_reels_2) else ""
+    )
+
+    rev_net_1 = max(0.0, sal1 - deduction_1)
+    rev_net_2 = max(0.0, sal2 - deduction_2)
+    revenu_net_salaires = rev_net_1 + rev_net_2
+
+    ir_salaires = impot_revenu(revenu_net_salaires, parts, annee, statut, avec_decote=True)
+
+    # Assiette soumise à l'option globale PFU / Barème (case 2OP) :
+    # plus-values de valeurs mobilières (> 0) + intérêts étrangers (case 2TR).
+    pv_actions_pos = max(0.0, float(bilan_pv_actions_eur))
+    interets_pos = max(0.0, float(interets_etrangers_eur))
+    assiette_2op = pv_actions_pos + interets_pos
+
+    if assiette_2op > 0:
+        arbitrage = comparer_pfu_bareme(
+            assiette_2op, revenu_net_salaires, parts, annee, statut
+        )
+    else:
+        arbitrage = None
+
+    # Plus-value crypto imposable (> 305 € de cessions) : PFU 30 % / 31,4 %
+    pv_crypto_pos = max(0.0, float(bilan_pv_crypto_imposable_eur))
+    impot_crypto = pv_crypto_pos * fb.taux_pfu(annee)
+
+    impot_capital_retenu = (
+        min(arbitrage["pfu"]["total"], arbitrage["bareme"]["total"])
+        if arbitrage else 0.0
+    ) + impot_crypto
+
+    impot_total_foyer = ir_salaires.impot_net + impot_capital_retenu
+    revenu_brut_global = sal1 + sal2 + interets_pos + pv_actions_pos + pv_crypto_pos
+    taux_moyen_salaires = (
+        ir_salaires.impot_net / (sal1 + sal2) if (sal1 + sal2) > 0 else 0.0
+    )
+
+    # Taux de prélèvement à la source (PAS) individualisés (1 part chacun, sans décote)
+    ir_indiv_1 = impot_revenu(rev_net_1, 1.0, annee, "Célibataire", avec_decote=False)
+    ir_indiv_2 = impot_revenu(rev_net_2, 1.0, annee, "Célibataire", avec_decote=False) if couple else None
+    taux_pas_1 = ir_indiv_1.impot_net / sal1 if sal1 > 0 else 0.0
+    taux_pas_2 = (ir_indiv_2.impot_net / sal2) if (couple and sal2 > 0 and ir_indiv_2) else 0.0
+
+    return {
+        "annee": annee,
+        "statut": statut,
+        "couple": couple,
+        "enfants": enfants,
+        "parts": parts,
+        "salaire_1": sal1,
+        "abattement_10_1": round(abatt1, 2),
+        "frais_km_1": km1_val,
+        "frais_km_formule_1": km1_txt,
+        "frais_repas_1": rep1_val,
+        "frais_repas_formule_1": rep1_txt,
+        "frais_reels_1": frais_reels_1,
+        "retenir_frais_reels_1": retenir_reels_1,
+        "deduction_1": round(deduction_1, 2),
+        "case_1aj": round(sal1),
+        "case_1ak": round(frais_reels_1) if retenir_reels_1 else None,
+        "note_1ak": note_1ak,
+        "salaire_2": sal2,
+        "abattement_10_2": round(abatt2, 2),
+        "frais_km_2": km2_val,
+        "frais_km_formule_2": km2_txt,
+        "frais_repas_2": rep2_val,
+        "frais_repas_formule_2": rep2_txt,
+        "frais_reels_2": frais_reels_2,
+        "retenir_frais_reels_2": retenir_reels_2,
+        "deduction_2": round(deduction_2, 2),
+        "case_1bj": round(sal2) if couple and sal2 > 0 else None,
+        "case_1bk": round(frais_reels_2) if retenir_reels_2 else None,
+        "note_1bk": note_1bk,
+        "interets_etrangers_eur": round(interets_pos, 2),
+        "pays_interets_etrangers": pays_interets_etrangers,
+        "case_2tr": round(interets_pos) if interets_pos > 0 else None,
+        "revenu_net_imposable_salaires": round(revenu_net_salaires, 2),
+        "revenu_brut_global": round(revenu_brut_global, 2),
+        "ir_salaires": ir_salaires,
+        "arbitrage": arbitrage,
+        "cocher_2op": bool(arbitrage and arbitrage["choix"] == "Barème progressif"),
+        "impot_crypto": round(impot_crypto, 2),
+        "impot_capital_retenu": round(impot_capital_retenu, 2),
+        "impot_total_foyer": round(impot_total_foyer, 2),
+        "taux_moyen_salaires": taux_moyen_salaires,
+        "taux_pas_foyer": taux_moyen_salaires,
+        "taux_pas_1": taux_pas_1,
+        "taux_pas_2": taux_pas_2,
+    }

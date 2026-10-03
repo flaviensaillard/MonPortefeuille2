@@ -174,7 +174,7 @@ with st.expander("🔍 Traçabilité — ce sur quoi porte ce calcul", expanded=
         if "capital_investi_usd" in snaps.columns and snaps["capital_investi_usd"].notna().any()
         else sum(abs(f) for f in flux)
     )
-    t3.metric("Capital investi ($ / €)", ui.usd_eur(cap_total))
+    ui.metric_usd_eur(t3, "Capital investi", cap_total)
     annees_couvertes = sorted({int(a) for a in snaps["Date"].dt.year})
     inflation_dict = S.inflation_dict(ctx)
     manquantes = [a for a in annees_couvertes if a not in inflation_dict]

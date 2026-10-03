@@ -35,10 +35,12 @@ if not ctx.actifs:
     st.stop()
 
 m1, m2 = st.columns(2)
-m1.metric("Actifs stratégiques (investi)",
-          ui.usd_eur(ctx.total_investi_usd, ctx.total_investi_eur))
-m2.metric("Patrimoine total",
-          ui.usd_eur(ctx.patrimoine_total_usd, ctx.patrimoine_total_eur))
+ui.metric_usd_eur(
+    m1, "Actifs stratégiques (investi)", ctx.total_investi_usd, ctx.total_investi_eur,
+)
+ui.metric_usd_eur(
+    m2, "Patrimoine total", ctx.patrimoine_total_usd, ctx.patrimoine_total_eur,
+)
 
 # ---------------------------------------------------------------------------
 # Positions
@@ -59,7 +61,7 @@ for a in sorted(ctx.actifs, key=lambda x: -(getattr(x, "valeur_usd", x.valeur_eu
         "Valeur ($ / €)": ui.usd_eur(val_u, a.valeur_eur),
         "Poids (investi)": ui.pct(val_u / ctx.total_investi_usd)
         if ctx.total_investi_usd > 0 and a.est_investi else "—",
-        "PRU ($)": ui.usd(pos.pru_usd) if pos and pos.pru_usd else "—",
+        "PRU": ui.usd_eur(pos.pru_usd, pos.pru_eur) if pos and pos.pru_usd else "—",
         "Perf. ($)": ui.pct(pos.perf_globale_usd, decimales=2, signe=True)
         if pos and pos.perf_globale_usd is not None else "—",
         "PV latente ($ / €)": ui.usd_eur(pos.pv_latente_usd, pos.pv_latente_eur) if pos else "—",
@@ -85,7 +87,7 @@ for cle, etat in ctx.etats.items():
     }.get(p.perimetre.value, p.perimetre.value)
 
     with st.expander(
-        f"**{p.nom}** — {ui.usd_eur(etat.valeur_usd, etat.valeur_eur)} · {perimetre}", expanded=False
+        f"**{p.nom}** — {ui.usd(etat.valeur_usd)} (:blue[{ui.eur(etat.valeur_eur)}]) · {perimetre}", expanded=False
     ):
         if p.description:
             st.caption(p.description)

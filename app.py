@@ -112,18 +112,22 @@ if ctx.erreurs:
 st.caption(f"Au {dt.date.today().strftime('%d/%m/%Y')}")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Patrimoine total",
-          ui.usd_eur(ctx.patrimoine_total_usd, ctx.patrimoine_total_eur),
-          help="Investi + épargne de précaution + compte courant ($ avec indication €).")
-c2.metric("Portefeuille investi",
-          ui.usd_eur(ctx.total_investi_usd, ctx.total_investi_eur),
-          help="Actifs stratégiques soumis à l'allocation cible ($ avec indication €).")
-c3.metric("Épargne de précaution",
-          ui.usd_eur(ctx.total_precaution_usd, ctx.total_precaution_eur),
-          help="Réserve CHF / CNY disponible en 5 minutes. Jamais rééquilibrée.")
-c4.metric("Compte courant",
-          ui.usd_eur(ctx.total_courant_usd, ctx.total_courant_eur),
-          help="Liquidités courantes hors portefeuille d'investissement.")
+ui.metric_usd_eur(
+    c1, "Patrimoine total", ctx.patrimoine_total_usd, ctx.patrimoine_total_eur,
+    help="Investi + épargne de précaution + compte courant.",
+)
+ui.metric_usd_eur(
+    c2, "Portefeuille investi", ctx.total_investi_usd, ctx.total_investi_eur,
+    help="Actifs stratégiques soumis à l'allocation cible.",
+)
+ui.metric_usd_eur(
+    c3, "Épargne de précaution", ctx.total_precaution_usd, ctx.total_precaution_eur,
+    help="Réserve CHF / CNY disponible en 5 minutes. Jamais rééquilibrée.",
+)
+ui.metric_usd_eur(
+    c4, "Compte courant", ctx.total_courant_usd, ctx.total_courant_eur,
+    help="Liquidités courantes hors portefeuille d'investissement.",
+)
 
 # ---------------------------------------------------------------------------
 # L'étalon de Gave
@@ -207,8 +211,11 @@ if ctx.total_precaution_usd > 0 or ctx.total_precaution_eur > 0:
     st.divider()
     st.subheader("🏦 Épargne de précaution")
     mois = 6
-    st.caption(
-        f"{ui.usd_eur(ctx.total_precaution_usd, ctx.total_precaution_eur)} disponibles en 5 minutes. "
-        f"Soit environ {ui.usd_eur(ctx.total_precaution_usd / mois, ctx.total_precaution_eur / mois, decimales=0)}/mois sur {mois} mois "
-        "de dépenses — à ajuster selon votre besoin réel."
+    pc1, pc2 = st.columns(2)
+    ui.metric_usd_eur(
+        pc1, "Disponible en 5 minutes", ctx.total_precaution_usd, ctx.total_precaution_eur,
+    )
+    ui.metric_usd_eur(
+        pc2, f"Budget mensuel sur {mois} mois",
+        ctx.total_precaution_usd / mois, ctx.total_precaution_eur / mois, decimales=0,
     )

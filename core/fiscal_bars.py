@@ -266,3 +266,137 @@ def annees_disponibles() -> list[int]:
 
 def source_de(annee: int) -> str:
     return SOURCE_PAR_ANNEE.get(annee, "Inconnue")
+
+
+
+# ===========================================================================
+# Barème kilométrique officiel URSSAF / DGFiP (voitures, CGI ann. IV art. 6 B)
+# & Forfait repas par année
+# ===========================================================================
+# Pour une distance annuelle d (en km) et une puissance fiscale de 3 à 7+ CV :
+#   - jusqu'à 5 000 km      : d * a1
+#   - de 5 001 à 20 000 km  : d * a2 + b2
+#   - au-delà de 20 000 km  : d * a3
+# Les véhicules 100 % électriques bénéficient d'une majoration de 20 %.
+BAREME_KM_VOITURE: dict[int, tuple[float, float, float, float]] = {
+    3: (0.529, 0.316, 1065.0, 0.370),
+    4: (0.606, 0.340, 1330.0, 0.407),
+    5: (0.636, 0.357, 1395.0, 0.427),
+    6: (0.665, 0.374, 1457.0, 0.447),
+    7: (0.697, 0.394, 1515.0, 0.470),
+}
+
+FORFAIT_REPAS_PAR_ANNEE: dict[int, float] = {
+    2022: 5.00,
+    2023: 5.20,
+    2024: 5.35,
+    2025: 5.45,
+    2026: 5.50,
+}
+
+# Plafond et plancher de l'abattement forfaitaire de 10 % sur les salaires
+# (CGI art. 83, 3°).
+PLANCHER_ABATTEMENT_10_PAR_ANNEE: dict[int, float] = {
+    2022: 472.0,
+    2023: 495.0,
+    2024: 504.0,
+    2025: 509.0,
+    2026: 509.0,
+}
+
+PLAFOND_ABATTEMENT_10_PAR_ANNEE: dict[int, float] = {
+    2022: 13_522.0,
+    2023: 14_171.0,
+    2024: 14_426.0,
+    2025: 14_555.0,
+    2026: 14_555.0,
+}
+
+
+def forfait_repas_de(annee: int) -> float:
+    """Valeur forfaitaire d'un repas déductible aux frais réels pour `annee`."""
+    if annee in FORFAIT_REPAS_PAR_ANNEE:
+        return FORFAIT_REPAS_PAR_ANNEE[annee]
+    return FORFAIT_REPAS_PAR_ANNEE[max(FORFAIT_REPAS_PAR_ANNEE)]
+
+
+def abattement_10_salaire(salaire: float, annee: int) -> float:
+    """Abattement forfaitaire de 10 % sur un salaire net imposable."""
+    sal = max(0.0, float(salaire))
+    if sal <= 0:
+        return 0.0
+    plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE.get(
+        annee, PLANCHER_ABATTEMENT_10_PAR_ANNEE[max(PLANCHER_ABATTEMENT_10_PAR_ANNEE)]
+    )
+    plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE.get(
+        annee, PLAFOND_ABATTEMENT_10_PAR_ANNEE[max(PLAFOND_ABATTEMENT_10_PAR_ANNEE)]
+    )
+    brut = sal * 0.10
+    return min(max(brut, min(sal, plancher)), plafond)
+
+
+def frais_kilometriques(
+    km: float,
+    cv: int = 5,
+    electrique: bool = False,
+) -> tuple[float, str]:
+    """Calcule les frais kilométriques selon le barème officiel URSSAF / DGFiP.
+
+    Retourne `(montant_eur, formule_explicative)` prête à copier dans la note
+    jointe à la déclaration (case 1AK / 1BK).
+    """
+    d = max(0.0, float(km))
+    if d <= 0:
+        return 0.0, "0 km"
+    cv_cle = min(max(int(cv), 3), 7)
+    a1, a2, b2, a3 = BAREME_KM_VOITURE[cv_cle]
+    if d <= 5_000:
+        montant = d * a1
+        formule = f"{d:,.0f} km × {a1:.3f}".replace(",", " ").replace(".", ",")
+    elif d <= 20_000:
+        montant = d * a2 + b2
+        formule = (
+            f"({d:,.0f} km × {a2:.3f}) + {b2:,.0f} €"
+            .replace(",", " ").replace(".", ",")
+        )
+    else:
+        montant = d * a3
+        formule = f"{d:,.0f} km × {a3:.3f}".replace(",", " ").replace(".", ",")
+
+    if electrique:
+        montant *= 1.20
+        formule += " × 1,20 (électrique +20 %)"
+
+    s_m = f"{montant:,.2f}".replace(",", " ").replace(".", ",")
+    label_cv = "7 CV et +" if cv_cle >= 7 else f"{cv_cle} CV"
+    return round(montant, 2), f"Frais km ({label_cv}) : {formule} = {s_m} €"
+
+
+def frais_repas(
+    jours: int,
+    annee: int,
+    forfait_unitaire: float | None = None,
+) -> tuple[float, str]:
+    """Calcule les frais de repas déductibles aux frais réels."""
+    j = max(0, int(jours))
+    if j <= 0:
+        return 0.0, "0 repas"
+    taux = float(forfait_unitaire) if forfait_unitaire is not None else forfait_repas_de(annee)
+    montant = round(j * taux, 2)
+    s_t = f"{taux:.2f}".replace(".", ",")
+    s_m = f"{montant:,.2f}".replace(",", " ").replace(".", ",")
+    return montant, f"Frais de repas : {j} j × {s_t} € = {s_m} €"
+
+
+def parts_fiscales_auto(statut: str, enfants: int) -> float:
+    """Nombre de parts fiscales de droit commun selon le statut et les enfants."""
+    s = str(statut).lower()
+    base = 2.0 if ("mari" in s or "pacs" in s) else 1.0
+    n = max(0, int(enfants))
+    if n == 0:
+        return base
+    if n == 1:
+        return base + 0.5
+    if n == 2:
+        return base + 1.0
+    return base + 1.0 + float(n - 2)

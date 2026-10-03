@@ -121,4 +121,4 @@ else:
         * (1 if r["sens"] == "apport" else -1)
         for _, r in df.iterrows()
     )
-    st.metric("Apports nets cumulés", ui.usd_eur(apports_nets_usd, apports_nets_eur))
+    ui.metric_usd_eur(st, "Apports nets cumulés", apports_nets_usd, apports_nets_eur)

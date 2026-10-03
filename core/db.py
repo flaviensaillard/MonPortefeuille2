@@ -344,3 +344,59 @@ def ajouter_alerte(titre: str, message: str, niveau: str = "info") -> None:
         "message": message,
         "niveau": niveau,
     }])
+
+
+
+def lire_config_fiscale() -> dict[str, str]:
+    """Lit les paramètres fiscaux mémorisés dans la table `Config` (v1)."""
+    defauts = {
+        "f_statut": "Marié(e) / Pacsé(e)",
+        "f_enf": "2",
+        "f_parts": "3.0",
+        "f_s1": "32473.0",
+        "f_s2": "29772.0",
+        "f_u1": "true",
+        "f_k1": "9120",
+        "f_cv1": "5",
+        "f_r1": "240",
+        "f_elec1": "false",
+        "f_u2": "true",
+        "f_k2": "9120",
+        "f_cv2": "5",
+        "f_r2": "200",
+        "f_elec2": "false",
+        "f_int_net": "200.0",
+        "f_pays_etr": "Lituanie",
+    }
+    try:
+        df = lire("Config")
+        if df is not None and not df.empty and {"Clé", "Valeur"} <= set(df.columns):
+            for _, r in df.iterrows():
+                k = str(r.get("Clé") or "").strip()
+                v = r.get("Valeur")
+                if k and v is not None and pd.notna(v):
+                    defauts[k] = str(v)
+    except Exception:
+        pass
+    return defauts
+
+
+def sauver_config_fiscale(modifs: dict[str, object]) -> None:
+    """Met à jour les clés fiscales dans la table `Config` de Supabase."""
+    try:
+        c = client()
+        df = lire("Config")
+        existantes: dict[str, int] = {}
+        if df is not None and not df.empty and {"Clé", "id"} <= set(df.columns):
+            for _, r in df.iterrows():
+                k = str(r.get("Clé") or "").strip()
+                if k and pd.notna(r.get("id")):
+                    existantes[k] = int(r["id"])
+        for k, v in modifs.items():
+            val_str = "true" if v is True else ("false" if v is False else str(v))
+            if k in existantes:
+                c.table("Config").update({"Valeur": val_str}).eq("id", existantes[k]).execute()
+            else:
+                c.table("Config").insert({"Clé": k, "Valeur": val_str}).execute()
+    except Exception:
+        pass

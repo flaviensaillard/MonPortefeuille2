@@ -207,9 +207,150 @@ def metrique(label: str, valeur: str, aide: str = "", delta: str | None = None) 
     st.metric(label=label, value=valeur, delta=delta, help=aide or None)
 
 
+
+
+def html_usd_eur(
+    montant_usd: float | None,
+    montant_eur: float | None = None,
+    taux_eur_usd: float | None = None,
+    decimales: int = 2,
+    taille_usd: str = "1.0rem",
+    taille_eur: str = "0.88rem",
+) -> str:
+    """Retourne le bloc HTML à deux lignes : montant $ en blanc au-dessus,
+    montant € en bleu (#38bdf8) en dessous."""
+    v_usd = _nombre(montant_usd)
+    if v_usd is None:
+        return "<span style='color:#888;'>—</span>"
+    v_eur = _nombre(montant_eur)
+    if v_eur is None:
+        t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
+        v_eur = (v_usd / t) if (t and t > 0) else v_usd
+    s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+    s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+    return (
+        f"<div style='color:#ffffff;font-weight:600;font-size:{taille_usd};line-height:1.2;'>{s_usd}</div>"
+        f"<div style='color:#38bdf8;font-weight:500;font-size:{taille_eur};line-height:1.2;margin-top:2px;'>{s_eur}</div>"
+    )
+
+
+def metric_usd_eur(
+    conteneur,
+    label: str,
+    montant_usd: float | None,
+    montant_eur: float | None = None,
+    delta: str | None = None,
+    help: str | None = None,
+    decimales: int = 2,
+) -> None:
+    """Affiche un indicateur avec le montant en dollars ($) en blanc en haut
+    et le montant en euros (€) en bleu juste en dessous."""
+    cible = conteneur if conteneur is not None else st
+    v_usd = _nombre(montant_usd)
+    if v_usd is None:
+        bloc_val = "<div style='font-size:1.75rem;font-weight:600;color:#ffffff;'>—</div>"
+    else:
+        v_eur = _nombre(montant_eur)
+        if v_eur is None:
+            t = _TAUX_EUR_USD
+            v_eur = (v_usd / t) if (t and t > 0) else v_usd
+        s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+        s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+        bloc_val = (
+            f"<div style='font-size:1.7rem;font-weight:600;color:#ffffff;line-height:1.15;'>{s_usd}</div>"
+            f"<div style='font-size:1.05rem;font-weight:500;color:#38bdf8;line-height:1.25;margin-top:0.15rem;'>{s_eur}</div>"
+        )
+
+    delta_html = ""
+    if delta:
+        couleur_d = "#2ecc71" if not str(delta).lstrip().startswith("-") else "#e74c3c"
+        delta_html = (
+            f"<div style='font-size:0.85rem;font-weight:500;color:{couleur_d};margin-top:0.2rem;'>"
+            f"{delta}</div>"
+        )
+
+    aide_attr = ""
+    aide_icone = ""
+    if help:
+        echappe = str(help).replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        aide_attr = f' title="{echappe}"'
+        aide_icone = f" <span title='{echappe}' style='cursor:help;opacity:0.6;font-size:0.8em;'>ⓘ</span>"
+
+    cible.markdown(
+        f"<div style='margin-bottom:0.85rem;'{aide_attr}>"
+        f"<div style='font-size:0.875rem;color:rgba(250,250,250,0.75);margin-bottom:0.2rem;'>{label}{aide_icone}</div>"
+        f"{bloc_val}"
+        f"{delta_html}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _formater_cellule_html(val: object) -> str:
+    """Convertit une cellule contenant `X $ / Y €` en deux lignes :
+    dollars en blanc au-dessus, euros en bleu (#38bdf8) en dessous."""
+    import html as _html
+    if val is None or ( isinstance(val, float) and math.isnan(val) ):
+        return "—"
+    txt = str(val)
+    if " $ / " in txt and txt.endswith(" €"):
+        part_usd, part_eur = txt.split(" / ", 1)
+        return (
+            f"<div style='color:#ffffff;font-weight:600;line-height:1.25;white-space:nowrap;'>"
+            f"{_html.escape(part_usd)}</div>"
+            f"<div style='color:#38bdf8;font-size:0.88em;font-weight:500;line-height:1.25;margin-top:2px;white-space:nowrap;'>"
+            f"{_html.escape(part_eur)}</div>"
+        )
+    return _html.escape(txt)
+
+
 def tableau(df: pd.DataFrame, **kwargs) -> None:
-    """DataFrame sans l'index, en pleine largeur."""
-    st.dataframe(df, use_container_width=True, hide_index=True, **kwargs)
+    """Affiche un DataFrame sans l'index, en pleine largeur.
+
+    Dès qu'une cellule contient un montant double `X $ / Y €` (produit par
+    `ui.usd_eur`), le tableau est rendu en HTML sombre afin d'afficher le
+    montant en dollars en blanc au-dessus et le montant en euros en bleu
+    (#38bdf8) juste en dessous, comme demandé par l'utilisateur.
+    """
+    import html as _html
+    if df is None or df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True, **kwargs)
+        return
+
+    contient_double = any(
+        isinstance(v, str) and " $ / " in v and v.endswith(" €")
+        for col in df.columns
+        for v in df[col]
+    )
+    if not contient_double:
+        st.dataframe(df, use_container_width=True, hide_index=True, **kwargs)
+        return
+
+    entetes = "".join(
+        f"<th style='text-align:left;padding:10px 12px;border-bottom:1px solid rgba(250,250,250,0.16);"
+        f"color:rgba(250,250,250,0.75);font-weight:600;font-size:0.86rem;white-space:nowrap;'>"
+        f"{_html.escape(str(col)).replace(' ($ / €)', '')}</th>"
+        for col in df.columns
+    )
+    lignes_html = []
+    for _, row in df.iterrows():
+        cellules = "".join(
+            f"<td style='padding:8px 12px;border-bottom:1px solid rgba(250,250,250,0.08);"
+            f"vertical-align:middle;font-size:0.92rem;color:#ffffff;'>"
+            f"{_formater_cellule_html(row[col])}</td>"
+            for col in df.columns
+        )
+        lignes_html.append(f"<tr>{cellules}</tr>")
+
+    table_html = (
+        "<div style='overflow-x:auto;border:1px solid rgba(250,250,250,0.12);"
+        "border-radius:8px;margin-bottom:1rem;background:rgba(17,24,39,0.35);'>"
+        "<table style='width:100%;border-collapse:collapse;'>"
+        f"<thead><tr>{entetes}</tr></thead>"
+        f"<tbody>{''.join(lignes_html)}</tbody>"
+        "</table></div>"
+    )
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 def section(titre: str, aide: str = "") -> None:

@@ -245,3 +245,41 @@ class TestInvariants:
         for e in etapes:
             for c in e.cases:
                 assert c.comment.strip(), f"case {c.numero} sans explication"
+
+
+
+def test_frais_kilometriques_et_repas_et_simulation_foyer():
+    from core import fiscal_bars as fb, tax
+    km_val, km_txt = fb.frais_kilometriques(9120, 5)
+    assert km_val == pytest.approx(9120 * 0.357 + 1395.0)
+    assert "5 CV" in km_txt and "4 650,84 €" in km_txt
+
+    rep_val, rep_txt = fb.frais_repas(240, 2025)
+    assert rep_val == pytest.approx(240 * 5.45)
+
+    sim = tax.simuler_foyer_complet(
+        annee=2025,
+        statut="Marié(e) / Pacsé(e)",
+        enfants=2,
+        parts=3.0,
+        salaire_1=32473.0,
+        utiliser_frais_reels_1=True,
+        km_1=9120,
+        cv_1=5,
+        jours_repas_1=240,
+        salaire_2=29772.0,
+        utiliser_frais_reels_2=True,
+        km_2=9120,
+        cv_2=5,
+        jours_repas_2=200,
+        interets_etrangers_eur=200.0,
+        pays_interets_etrangers="Lituanie",
+        bilan_pv_actions_eur=651.48,
+        bilan_pv_crypto_imposable_eur=0.0,
+    )
+    assert sim["case_1aj"] == 32473
+    assert sim["case_1ak"] == 5959
+    assert sim["case_1bj"] == 29772
+    assert sim["case_1bk"] == 5741
+    assert sim["case_2tr"] == 200
+    assert sim["cocher_2op"] is True
