@@ -65,7 +65,7 @@ twr_ann = metrics.annualiser(twr_total, jours)
 # apport n'est enregistré, le calcul se réduit à « fin / début » et l'épargne
 # apparaît comme du rendement. On ne peut pas savoir qu'un versement a été
 # oublié, mais on peut repérer le cas où c'est le plus probable, et le dire.
-for alerte in metrics.controle_apports(valeurs, flux, jours):
+for alerte in metrics.controle_apports(valeurs, flux, jours, devise="$"):
     st.error("⚠️ " + alerte)
 
 # --- Les sauts non expliqués, jour par jour ---
@@ -92,7 +92,7 @@ if sauts:
     )
 
     for saut in sauts:
-        st.error(metrics.anomalie_saut(saut))
+        st.error(metrics.anomalie_saut(saut, devise="$"))
 
     flux_corrige = metrics.flux_corrige_des_sauts(flux, sauts)
     rendements_corriges = metrics.rendements_periode(valeurs, flux_corrige)
@@ -136,7 +136,7 @@ if fantomes:
     )
 
     for f in fantomes:
-        st.error(metrics.anomalie_flux_sans_effet(f))
+        st.error(metrics.anomalie_flux_sans_effet(f, devise="$"))
 
         # Nommer les versements de la période. Sans ça, le message donne un
         # montant et deux bornes, et il faut aller chercher soi-même : sur le cas
@@ -207,7 +207,8 @@ c1.metric("TWR cumulé ($)", ui.pct(twr_total, decimales=2, signe=True),
           help="Time-Weighted Return en dollars ($) : neutralise l'effet de vos apports.")
 c2.metric("TWR annualisé ($)", ui.pct(twr_ann, decimales=2, signe=True),
           help=f"Sur {jours} jours ({jours / 365.25:.1f} ans).")
-c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements), decimales=2, signe=True),
+periodicite_estimee = max(1, round(len(rendements) * 365.25 / max(jours, 1)))
+c3.metric("Volatilité annualisée", ui.pct(metrics.volatilite(rendements, periodicite=periodicite_estimee), decimales=2, signe=True),
           help="Écart-type des rendements de sous-période annualisé.")
 
 # ---------------------------------------------------------------------------

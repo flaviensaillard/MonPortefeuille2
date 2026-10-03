@@ -287,3 +287,42 @@ def test_twr_usd_projections_reproduit_swissquote():
     assert par_an[2024] > 0.14
     assert par_an[2025] > 0.13
     assert 0.035 < par_an[2026] < 0.045
+
+
+
+def test_capital_investi_zero_dans_projections_n_invente_pas_de_retrait():
+    """Cas réel du 02/10/2026 : `take_snapshot.py` (v1) écrit `Capital investi = 0`
+    dans `Projections` lorsque la dernière ligne brute de `Historique` a
+    `Total_Apports_nets = NULL`. `serie_performance` ne doit PAS interpréter ce 0
+    comme un retrait de -59 630 $ (+82,72 % en 2026), mais propager le dernier
+    capital connu augmenté des flux réels de la période."""
+    from unittest.mock import patch
+    import pandas as pd
+    from core import metrics, session as S
+
+    proj = pd.DataFrame([
+        {"Date": "31/12/2025", "Capital investi": 56707.0, "Actifs Stratégiques": 73229.0, "Total Global": 82563.0},
+        {"Date": "01/10/2026", "Capital investi": 59629.92, "Actifs Stratégiques": 79394.14, "Total Global": 92089.40},
+        {"Date": "02/10/2026", "Capital investi": 0.0, "Actifs Stratégiques": 79235.78, "Total Global": 91775.74},
+    ])
+
+    ctx = S.Contexte()
+    ctx.taux_eur_usd = 1.1257
+    ctx.total_investi_usd = 79235.78
+    ctx.total_investi_eur = 70385.15
+
+    def fake_lire(table):
+        if table == "Projections":
+            return proj
+        return pd.DataFrame()
+
+    with patch("core.db.lire", side_effect=fake_lire):
+        S._enrichir_historiques_usd(ctx)
+
+    snaps, valeurs, flux = S.serie_performance(ctx)
+    assert [round(f, 2) for f in flux] == [0.0, 2922.92, 0.0]
+    assert float(snaps["capital_investi_usd"].iloc[-1]) == 59629.92
+    sauts = metrics.sauts_non_expliques([d.date() for d in snaps["Date"]], valeurs, flux)
+    fantomes = metrics.fluxs_sans_effet([d.date() for d in snaps["Date"]], valeurs, flux)
+    assert sauts == []
+    assert fantomes == []

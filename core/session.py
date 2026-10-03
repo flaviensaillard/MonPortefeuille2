@@ -232,13 +232,29 @@ def serie_performance(
     flux_ap = metrics.flux_par_periode(dates_l, flux_par_date(ctx.apports, col_ap))
 
     if use_usd and "capital_investi_usd" in df.columns:
+        # `take_snapshot.py` (v1) écrit parfois `Capital investi = 0` lorsque la
+        # dernière ligne renvoyée par Supabase dans `Historique` a
+        # `Total_Apports_nets = NULL` (ex. le 02/10/2026). Un capital investi
+        # cumulé <= 0 sur un portefeuille actif est une valeur manquante : on
+        # propage alors le dernier capital connu augmenté des apports de la période.
         cap = pd.to_numeric(df["capital_investi_usd"], errors="coerce")
+        cap = cap.where(cap > 0)
         flux: list[float] = [0.0]
+        cap_reconstruit: list[float | None] = [
+            float(cap.iloc[0]) if pd.notna(cap.iloc[0]) else None
+        ]
         for i in range(1, len(df)):
-            if pd.notna(cap.iloc[i]) and pd.notna(cap.iloc[i - 1]):
-                flux.append(float(cap.iloc[i] - cap.iloc[i - 1]))
+            prev_c = cap_reconstruit[-1]
+            if pd.notna(cap.iloc[i]) and prev_c is not None:
+                flux.append(float(cap.iloc[i] - prev_c))
+                cap_reconstruit.append(float(cap.iloc[i]))
             else:
-                flux.append(float(flux_ap[i]))
+                f_i = float(flux_ap[i])
+                flux.append(f_i)
+                cap_reconstruit.append(
+                    round(prev_c + f_i, 2) if prev_c is not None else None
+                )
+        df["capital_investi_usd"] = cap_reconstruit
     else:
         flux = flux_ap
 
@@ -531,7 +547,8 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
             d_cle = r["_dt"].date()
             inv_u = float(r["Actifs Stratégiques"])
             tot_u = float(r["Total Global"]) if pd.notna(r.get("Total Global")) else inv_u
-            cap_u = float(r["Capital investi"]) if pd.notna(r.get("Capital investi")) else None
+            cap_raw = r.get("Capital investi")
+            cap_u = float(cap_raw) if pd.notna(cap_raw) and float(cap_raw) > 0 else None
             inv_e = eur_inv_par_date.get(d_cle, round(inv_u / taux, 2))
             tot_e = eur_tot_par_date.get(d_cle, round(tot_u / taux, 2))
             lignes_u.append({

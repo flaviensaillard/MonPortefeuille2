@@ -1,6 +1,41 @@
 # Méthode pas à pas
 
-> **Réponse à votre question : non, rien ne change. Vous pouvez commencer.**
+---
+
+## Où vous en êtes
+
+| | Étape | État |
+|---|---|---|
+| ✅ | 1 | sauvegarde CSV | faite |
+| ✅ | 2 | apport fantôme du 02/02/2026 supprimé | faite |
+| ✅ | 3 | code envoyé sur GitHub | faite |
+| ✅ | 4 | dry-run validé | faite |
+| ✅ | 5 | import réel | **fait — 179 lignes, 2023-04-01 → 2026-10-01** |
+| ✅ | 6 | regarder 📈 Performance | **fait — les 4 chiffres sont exacts** |
+| ⬜ | 7 | trancher la ligne du 29/04/2024 | **à faire, en attente de votre relevé** |
+| ⬜ | 8 | lancer « Robots quotidiens » | à faire — c'est **ce qui manque pour 2026** |
+| ⬜ | 9 | la devise du +4,10 % de Swissquote | à faire |
+
+**Vos quatre chiffres sont exacts.** Ce qui était annoncé, ce qui s'affiche :
+
+| Année | Prévu | **Affiché** |
+|---|---|---|
+| 2023 | +11,02 % | **+11,0 %** ✅ |
+| 2024 | −24,90 % | **−24,9 %** ✅ |
+| 2025 | +4,12 % | **+4,1 %** ✅ |
+| 2026 | +8,66 % | **+8,7 %** ✅ |
+
+Quatre sur quatre, à l'arrondi près. Et la colonne **Réelle** se tient :
++5,8 % / −26,4 % / +3,2 %, soit chaque performance corrigée de l'inflation de
+l'année. Tout est cohérent.
+
+Et l'**alerte rouge s'est déclenchée toute seule** — celle que je vous avais
+annoncée, sur la ligne du 29/04/2024. C'est la partie qui compte : vous n'avez
+pas eu à me croire, l'application l'a calculé devant vous.
+
+---
+
+> **Réponse à votre question précédente : non, rien ne changeait. Vous pouviez commencer.**
 > Vos trois règles sont exactes, je les ai vérifiées sur vos 319 lignes réelles,
 > et le code faisait déjà ce qu'il fallait. Mais elles m'ont fait trouver un
 > **contrôle** que j'aurais dû écrire depuis longtemps — voir l'encadré en fin de
@@ -259,7 +294,7 @@ sont de l'affichage, elles n'ont écrit aucune donnée. Le résultat est bon.
 
 ---
 
-## ⬜ Étape 6 — Regarder le résultat
+## ✅ Étape 6 — FAITE : les quatre chiffres sont exacts
 
 **Cinq minutes.**
 
@@ -306,6 +341,25 @@ sur parole : l'application le calcule devant vous.**
 
 **Cinq minutes.** C'est votre décision, pas la mienne : c'est votre relevé qui
 tranche.
+
+### Le message que vous avez lu, et ce qu'il dit exactement
+
+> « un apport de 11 050 € enregistré **entre le 30/03/2024 et le 30/04/2024**,
+> et la valeur ne suit pas. Le portefeuille ne varie que de +23 € alors qu'il
+> devrait varier d'au moins 11 050 € de ce seul fait. »
+
+**Notez la période et non une seule date.** Le versement litigieux est daté du
+**29/04/2024** dans votre journal, alors que le snapshot qui le révèle porte le
+30/04/2024. J'ai corrigé le message pour qu'il donne les deux bornes — il
+n'affichait qu'une date, et vous auriez cherché une ligne au 30/04 qui n'existe
+pas.
+
+Le zip que je viens de reconstruire fait mieux : il **liste nommément les
+versements de la période** sous le message, comme ceci —
+
+> Versements enregistrés sur cette période : **29/04/2024** — apport de 10 800,00 €
+
+Réuploadez-le quand vous voulez ; c'est de l'affichage, aucune donnée ne bouge.
 
 Regardez votre relevé Swissquote **au 29 avril 2024**. Vous cherchez un
 versement de **10 800 €**.

@@ -463,6 +463,7 @@ def controle_apports(
     valeurs: list[float],
     flux: list[float],
     jours: int,
+    devise: str = "€",
 ) -> list[str]:
     """Signale les périodes où le TWR ne peut pas être juste.
 
@@ -703,7 +704,7 @@ def fluxs_sans_effet(
     return trouves
 
 
-def anomalie_flux_sans_effet(flux_sans_effet: dict) -> str:
+def anomalie_flux_sans_effet(flux_sans_effet: dict, devise: str = "€") -> str:
     """Le message à afficher pour un flux que la valeur n'a pas suivi.
 
     Le message donne les DEUX bornes de la période — et non la seule date du
@@ -741,10 +742,10 @@ def anomalie_flux_sans_effet(flux_sans_effet: dict) -> str:
                else f"au {fin_d}")
 
     return (
-        f"**{sens} de {fmt(abs(f))} € enregistré {periode}, et la valeur ne "
-        f"suit pas.** Le portefeuille ne varie que de {fmt(bouge, signe=True)} € "
-        f"alors qu'il devrait varier d'au moins {fmt(abs(f))} € de ce seul fait. "
-        f"L'écart est de {fmt(abs(flux_sans_effet['residuel']))} €, soit "
+        f"**{sens} de {fmt(abs(f))} {devise} enregistré {periode}, et la valeur ne "
+        f"suit pas.** Le portefeuille ne varie que de {fmt(bouge, signe=True)} {devise} "
+        f"alors qu'il devrait varier d'au moins {fmt(abs(f))} {devise} de ce seul fait. "
+        f"L'écart est de {fmt(abs(flux_sans_effet['residuel']))} {devise}, soit "
         f"{abs(flux_sans_effet['residuel_pct']):.1%} du portefeuille : aucun "
         "marché ne produit ça. Le versement a été saisi deux fois, porte une "
         "mauvaise date, ou n'a jamais eu lieu — et dans ce dernier cas c'est la "
@@ -768,7 +769,7 @@ def flux_corrige_des_sauts(flux: list[float], sauts: list[dict]) -> list[float]:
     return corriges
 
 
-def anomalie_saut(saut: dict) -> str:
+def anomalie_saut(saut: dict, devise: str = "€") -> str:
     """Le message à afficher pour un saut non expliqué."""
     brut = saut["date"]
     # Format français comme partout ailleurs : une date ISO se survole, une date
@@ -785,9 +786,9 @@ def anomalie_saut(saut: dict) -> str:
             else f"{x:,.0f}".replace(",", " ").replace(".", ",")
 
     return (
-        f"**{n(residuel, signe=True)} € {sens} le {jour} sans flux enregistré.** "
-        f"La valeur investie passe de {n(saut['avant'])} € à "
-        f"{n(saut['apres'])} €, alors que {n(saut['flux'])} € de flux sont "
+        f"**{n(residuel, signe=True)} {devise} {sens} le {jour} sans flux enregistré.** "
+        f"La valeur investie passe de {n(saut['avant'])} {devise} à "
+        f"{n(saut['apres'])} {devise}, alors que {n(saut['flux'])} {devise} de flux sont "
         f"enregistrés ce jour-là — soit {saut['residuel_pct']:+.1%} que le TWR "
         "compte comme du rendement. Un portefeuille diversifié ne bouge pas "
         "ainsi en une séance : c'est un virement interne, une position ajoutée à "
