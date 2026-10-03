@@ -87,6 +87,7 @@ import statistics
 import sys
 import urllib.request
 import zipfile
+import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -197,8 +198,9 @@ def inflations(serie: dict[str, float]) -> dict[int, tuple[float, int, bool]]:
         if len(mois) == 12 and annee - 1 in par_an and len(par_an[annee - 1]) == 12:
             taux = (statistics.mean(mois) / statistics.mean(par_an[annee - 1]) - 1) * 100
             resultat[annee] = (taux, 12, False)
-        elif annee == annee_courante and annee - 1 in par_an and len(par_an[annee - 1]) == 12:
-            # Année en cours : variation depuis décembre précédent.
+        elif len(mois) < 12 and annee >= annee_courante - 1 and annee - 1 in par_an and len(par_an[annee - 1]) >= 1:
+            # Année en cours (ou année N-1 début janvier avant publication de décembre) :
+            # variation depuis décembre de l'année précédente.
             decembre = max(p for p in serie if p.startswith(f"{annee - 1}-"))
             dernier = max(p for p in serie if p.startswith(f"{annee}-"))
             taux = (serie[dernier] / serie[decembre] - 1) * 100
@@ -215,9 +217,12 @@ def main() -> int:
         log.error("Lecture de l'inflation échouée : %s", exc)
         return 1
 
-    deja = set()
-    if not existantes.empty and "annee" in existantes.columns:
-        deja = {int(a) for a in existantes["annee"].dropna()}
+    deja_definitives = set()
+    col_a = "Annee" if "Annee" in existantes.columns else ("annee" if "annee" in existantes.columns else None)
+    if not existantes.empty and col_a:
+        for _, r in existantes.iterrows():
+            if pd.notna(r.get(col_a)) and "provisoire" not in str(r.get("source") or "").lower():
+                deja_definitives.add(int(r[col_a]))
 
     try:
         serie = serie_mensuelle(_telecharger())
@@ -233,7 +238,7 @@ def main() -> int:
 
     a_ecrire = []
     for annee, (taux, mois, provisoire) in sorted(calculees.items()):
-        if annee in deja and not provisoire:
+        if annee in deja_definitives and not provisoire:
             continue        # une annee close et deja en base ne bouge pas
         if provisoire:
             source = (
@@ -249,7 +254,7 @@ def main() -> int:
         })
 
     if not a_ecrire:
-        log.info("Inflation déjà à jour (%d années en base).", len(deja))
+        log.info("Inflation déjà à jour (%d années en base).", len(deja_definitives))
     else:
         try:
             # UPSERT, pas INSERT. La clé primaire de `pf2_inflation` est `annee` :
@@ -267,7 +272,7 @@ def main() -> int:
             marque = "  (provisoire)" if "provisoire" in ligne["source"] else ""
             log.info("  %d : %+.2f %%%s", ligne["annee"], ligne["inflation"], marque)
 
-    connues = sorted(set(calculees) | deja)
+    connues = sorted(set(calculees) | deja_definitives)
     if connues:
         manquantes = [a for a in range(connues[0], annee_courante + 1) if a not in connues]
         if manquantes:

@@ -91,128 +91,148 @@ if annee in fb.PS_ANNEE_INCERTAINE:
     st.info("ℹ️ " + fb.PS_ANNEE_INCERTAINE[annee])
 
 # ---------------------------------------------------------------------------
-# 1. Situation familiale, Salaires, Frais réels (km + repas) & Comptes étrangers
+# 1. Paramètres du foyer : Situation familiale & Déclaration de base (repliables)
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("👤 1. Situation familiale, Salaires & Frais professionnels")
+st.subheader("⚙️ 1. Vos paramètres fiscaux (cliquez pour déplier et modifier)")
 st.caption(
     "Vos paramètres sont chargés depuis votre base Supabase (`Config`) et "
     "sauvegardés automatiquement dès que vous les modifiez."
 )
 
-c_sit1, c_sit2, c_sit3 = st.columns(3)
 statut_defaut = cfg.get("f_statut", "Marié(e) / Pacsé(e)")
 options_statut = ["Marié(e) / Pacsé(e)", "Célibataire / Divorcé(e) / Veuf(ve)"]
 idx_statut = 0 if ("Mari" in statut_defaut or "Pacs" in statut_defaut) else 1
+enf_defaut = _int_cfg("f_enf", 2)
+parts_defaut = fb.parts_fiscales_auto(options_statut[idx_statut], enf_defaut)
 
-statut = c_sit1.radio("Situation matrimoniale ✍️", options_statut, index=idx_statut)
-enfants = int(c_sit2.number_input(
-    "Enfants à charge ✍️", min_value=0, max_value=10,
-    value=_int_cfg("f_enf", 2), step=1,
-))
-parts_calculees = fb.parts_fiscales_auto(statut, enfants)
-parts = float(c_sit3.number_input(
-    "Nombre de parts (Quotient familial) ✍️",
-    min_value=0.5, max_value=10.0, step=0.5,
-    value=float(parts_calculees),
-    help="Calculé automatiquement selon votre situation et vos enfants (2 parts pour un couple + 0,5 pour chacun des 2 premiers enfants + 1 dès le 3e).",
-))
+with st.expander(
+    f"👨‍👩‍👧‍👦 Situation familiale ({options_statut[idx_statut]} · {enf_defaut} enfant(s) · {parts_defaut:g} part(s))",
+    expanded=False,
+):
+    c_sit1, c_sit2, c_sit3 = st.columns(3)
+    statut = c_sit1.radio("Situation matrimoniale ✍️", options_statut, index=idx_statut)
+    enfants = int(c_sit2.number_input(
+        "Enfants à charge ✍️", min_value=0, max_value=10,
+        value=enf_defaut, step=1,
+    ))
+    parts_calculees = fb.parts_fiscales_auto(statut, enfants)
+    parts = float(c_sit3.number_input(
+        "Nombre de parts (Quotient familial) ✍️",
+        min_value=0.5, max_value=10.0, step=0.5,
+        value=float(parts_calculees),
+        help="Calculé automatiquement selon votre situation et vos enfants (2 parts pour un couple + 0,5 pour chacun des 2 premiers enfants + 1 dès le 3e).",
+    ))
 
 couple = "Mari" in statut or "Pacs" in statut
 
-st.markdown("#### 💼 Salaires nets imposables & Frais professionnels (Frais réels vs Abattement 10 %)")
-col_d1, col_d2 = st.columns(2)
+s1_def = _float_cfg("f_s1", 32473.0)
+s2_def = _float_cfg("f_s2", 29772.0)
+int_def = _float_cfg("f_int_net", 200.0)
+resume_base = f"1AJ : {s1_def:,.0f} €".replace(",", " ")
+if couple and s2_def > 0:
+    resume_base += f" · 1BJ : {s2_def:,.0f} €".replace(",", " ")
+if int_def > 0:
+    resume_base += f" · Intérêts étrangers : {int_def:,.0f} €".replace(",", " ")
 
-with col_d1:
-    st.markdown("**Déclarant 1 (Vous)**")
-    salaire_1 = float(st.number_input(
-        "Salaire net imposable — Déclarant 1 (€) → Case 1AJ ✍️",
-        min_value=0.0, value=_float_cfg("f_s1", 32473.0), step=500.0,
-    ))
-    use_frais_1 = st.checkbox(
-        "Calculer mes frais réels (kilomètres + repas) — Vous",
-        value=_bool_cfg("f_u1", True),
-    )
-    if use_frais_1:
-        k1_c1, k1_c2, k1_c3 = st.columns(3)
-        km_1 = float(k1_c1.number_input(
-            "Km annuels parcourus ✍️", min_value=0, max_value=100000,
-            value=_int_cfg("f_k1", 9120), step=500, key="km1",
-        ))
-        cv_1_init = min(max(_int_cfg("f_cv1", 5), 3), 7)
-        cv_1 = int(k1_c2.selectbox(
-            "Puissance fiscale (CV) ✍️", [3, 4, 5, 6, 7],
-            index=[3, 4, 5, 6, 7].index(cv_1_init), key="cv1",
-        ))
-        repas_1 = int(k1_c3.number_input(
-            "Jours repas hors domicile ✍️", min_value=0, max_value=365,
-            value=_int_cfg("f_r1", 240), step=10, key="rep1",
-        ))
-        elec_1 = st.checkbox(
-            "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec1", False), key="el1",
-        )
-    else:
-        km_1, cv_1, repas_1, elec_1 = float(_int_cfg("f_k1", 0)), _int_cfg("f_cv1", 5), _int_cfg("f_r1", 0), False
+with st.expander(
+    f"📝 Déclaration de base ({resume_base} · Frais réels & Comptes hors de France)",
+    expanded=False,
+):
+    st.markdown("#### 💼 Salaires nets imposables & Frais professionnels (Frais réels vs Abattement 10 %)")
+    col_d1, col_d2 = st.columns(2)
 
-with col_d2:
-    if couple:
-        st.markdown("**Déclarant 2 (Conjoint)**")
-        salaire_2 = float(st.number_input(
-            "Salaire net imposable — Déclarant 2 (€) → Case 1BJ ✍️",
-            min_value=0.0, value=_float_cfg("f_s2", 29772.0), step=500.0,
+    with col_d1:
+        st.markdown("**Déclarant 1 (Vous)**")
+        salaire_1 = float(st.number_input(
+            "Salaire net imposable — Déclarant 1 (€) → Case 1AJ ✍️",
+            min_value=0.0, value=s1_def, step=500.0,
         ))
-        use_frais_2 = st.checkbox(
-            "Calculer les frais réels (kilomètres + repas) — Conjoint",
-            value=_bool_cfg("f_u2", True),
+        use_frais_1 = st.checkbox(
+            "Calculer mes frais réels (kilomètres + repas) — Vous",
+            value=_bool_cfg("f_u1", True),
         )
-        if use_frais_2:
-            k2_c1, k2_c2, k2_c3 = st.columns(3)
-            km_2 = float(k2_c1.number_input(
+        if use_frais_1:
+            k1_c1, k1_c2, k1_c3 = st.columns(3)
+            km_1 = float(k1_c1.number_input(
                 "Km annuels parcourus ✍️", min_value=0, max_value=100000,
-                value=_int_cfg("f_k2", 9120), step=500, key="km2",
+                value=_int_cfg("f_k1", 9120), step=500, key="km1",
             ))
-            cv_2_init = min(max(_int_cfg("f_cv2", 5), 3), 7)
-            cv_2 = int(k2_c2.selectbox(
+            cv_1_init = min(max(_int_cfg("f_cv1", 5), 3), 7)
+            cv_1 = int(k1_c2.selectbox(
                 "Puissance fiscale (CV) ✍️", [3, 4, 5, 6, 7],
-                index=[3, 4, 5, 6, 7].index(cv_2_init), key="cv2",
+                index=[3, 4, 5, 6, 7].index(cv_1_init), key="cv1",
             ))
-            repas_2 = int(k2_c3.number_input(
+            repas_1 = int(k1_c3.number_input(
                 "Jours repas hors domicile ✍️", min_value=0, max_value=365,
-                value=_int_cfg("f_r2", 200), step=10, key="rep2",
+                value=_int_cfg("f_r1", 240), step=10, key="rep1",
             ))
-            elec_2 = st.checkbox(
-                "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec2", False), key="el2",
+            elec_1 = st.checkbox(
+                "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec1", False), key="el1",
             )
         else:
-            km_2, cv_2, repas_2, elec_2 = float(_int_cfg("f_k2", 0)), _int_cfg("f_cv2", 5), _int_cfg("f_r2", 0), False
-    else:
-        salaire_2, use_frais_2, km_2, cv_2, repas_2, elec_2 = 0.0, False, 0.0, 5, 0, False
+            km_1, cv_1, repas_1, elec_1 = float(_int_cfg("f_k1", 0)), _int_cfg("f_cv1", 5), _int_cfg("f_r1", 0), False
 
-st.markdown("#### 🌍 Revenus d'intérêts étrangers & Comptes détenus hors de France")
-ce1, ce2 = st.columns(2)
-with ce1:
-    pays_etranger = st.text_input(
-        "Pays d'origine des intérêts étrangers (ex. Lituanie pour Revolut) ✍️",
-        value=str(cfg.get("f_pays_etr", "Lituanie")),
-    )
-    interets_etrangers = float(st.number_input(
-        "Intérêts nets encaissés à l'étranger (€) → 2047 Ligne 250 & 2042 Case 2TR ✍️",
-        min_value=0.0, value=_float_cfg("f_int_net", 200.0), step=10.0,
-    ))
-with ce2:
-    st.markdown("**Comptes à l'étranger à déclarer (Formulaire 3916 / 3916-bis & Case 8UU)**")
-    defauts_comptes = guide.comptes_par_defaut()
-    choisis: list[str] = []
-    for libelle in defauts_comptes:
-        if st.checkbox(libelle, value=True, key=f"ctr_{libelle[:20]}"):
-            choisis.append(libelle)
-    autre_compte = st.text_input(
-        "Autre compte à l'étranger (ex. Revolut Ltd, Lituanie)",
-        value="Compte courant Revolut — Revolut Bank UAB, Lituanie" if interets_etrangers > 0 else "",
-        help="Séparez plusieurs comptes par des points-virgules.",
-    )
-    if autre_compte.strip():
-        choisis.extend(x.strip() for x in autre_compte.split(";") if x.strip())
+    with col_d2:
+        if couple:
+            st.markdown("**Déclarant 2 (Conjoint)**")
+            salaire_2 = float(st.number_input(
+                "Salaire net imposable — Déclarant 2 (€) → Case 1BJ ✍️",
+                min_value=0.0, value=s2_def, step=500.0,
+            ))
+            use_frais_2 = st.checkbox(
+                "Calculer les frais réels (kilomètres + repas) — Conjoint",
+                value=_bool_cfg("f_u2", True),
+            )
+            if use_frais_2:
+                k2_c1, k2_c2, k2_c3 = st.columns(3)
+                km_2 = float(k2_c1.number_input(
+                    "Km annuels parcourus ✍️", min_value=0, max_value=100000,
+                    value=_int_cfg("f_k2", 9120), step=500, key="km2",
+                ))
+                cv_2_init = min(max(_int_cfg("f_cv2", 5), 3), 7)
+                cv_2 = int(k2_c2.selectbox(
+                    "Puissance fiscale (CV) ✍️", [3, 4, 5, 6, 7],
+                    index=[3, 4, 5, 6, 7].index(cv_2_init), key="cv2",
+                ))
+                repas_2 = int(k2_c3.number_input(
+                    "Jours repas hors domicile ✍️", min_value=0, max_value=365,
+                    value=_int_cfg("f_r2", 200), step=10, key="rep2",
+                ))
+                elec_2 = st.checkbox(
+                    "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec2", False), key="el2",
+                )
+            else:
+                km_2, cv_2, repas_2, elec_2 = float(_int_cfg("f_k2", 0)), _int_cfg("f_cv2", 5), _int_cfg("f_r2", 0), False
+        else:
+            salaire_2, use_frais_2, km_2, cv_2, repas_2, elec_2 = 0.0, False, 0.0, 5, 0, False
+
+    st.divider()
+    st.markdown("#### 🌍 Revenus d'intérêts étrangers & Comptes détenus hors de France")
+    ce1, ce2 = st.columns(2)
+    with ce1:
+        pays_etranger = st.text_input(
+            "Pays d'origine des intérêts étrangers (ex. Lituanie pour Revolut) ✍️",
+            value=str(cfg.get("f_pays_etr", "Lituanie")),
+        )
+        interets_etrangers = float(st.number_input(
+            "Intérêts nets encaissés à l'étranger (€) → 2047 Ligne 250 & 2042 Case 2TR ✍️",
+            min_value=0.0, value=int_def, step=10.0,
+        ))
+    with ce2:
+        st.markdown("**Comptes à l'étranger à déclarer (Formulaire 3916 / 3916-bis & Case 8UU)**")
+        defauts_comptes = guide.comptes_par_defaut()
+        choisis: list[str] = []
+        for libelle in defauts_comptes:
+            if st.checkbox(libelle, value=True, key=f"ctr_{libelle[:20]}"):
+                choisis.append(libelle)
+        autre_compte = st.text_input(
+            "Autre compte à l'étranger (ex. Revolut Ltd, Lituanie)",
+            value="Compte courant Revolut — Revolut Bank UAB, Lituanie" if interets_etrangers > 0 else "",
+            help="Séparez plusieurs comptes par des points-virgules.",
+        )
+        if autre_compte.strip():
+            choisis.extend(x.strip() for x in autre_compte.split(";") if x.strip())
 
 # Sauvegarde automatique dans `Config` si l'utilisateur a modifié un paramètre
 nouveaux_params = {

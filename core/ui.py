@@ -216,6 +216,7 @@ def html_usd_eur(
     decimales: int = 2,
     taille_usd: str = "1.0rem",
     taille_eur: str = "0.88rem",
+    signe: bool = False,
 ) -> str:
     """Retourne le bloc HTML à deux lignes : montant $ en blanc au-dessus,
     montant € en bleu (#38bdf8) en dessous."""
@@ -226,8 +227,9 @@ def html_usd_eur(
     if v_eur is None:
         t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
         v_eur = (v_usd / t) if (t and t > 0) else v_usd
-    s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
-    s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+    fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
+    s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
+    s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
     return (
         f"<div style='color:#ffffff;font-weight:600;font-size:{taille_usd};line-height:1.2;'>{s_usd}</div>"
         f"<div style='color:#38bdf8;font-weight:500;font-size:{taille_eur};line-height:1.2;margin-top:2px;'>{s_eur}</div>"
@@ -242,6 +244,7 @@ def metric_usd_eur(
     delta: str | None = None,
     help: str | None = None,
     decimales: int = 2,
+    signe: bool = False,
 ) -> None:
     """Affiche un indicateur avec le montant en dollars ($) en blanc en haut
     et le montant en euros (€) en bleu juste en dessous."""
@@ -254,8 +257,9 @@ def metric_usd_eur(
         if v_eur is None:
             t = _TAUX_EUR_USD
             v_eur = (v_usd / t) if (t and t > 0) else v_usd
-        s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
-        s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
+        fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
+        s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
+        s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
         bloc_val = (
             f"<div style='font-size:1.7rem;font-weight:600;color:#ffffff;line-height:1.15;'>{s_usd}</div>"
             f"<div style='font-size:1.05rem;font-weight:500;color:#38bdf8;line-height:1.25;margin-top:0.15rem;'>{s_eur}</div>"

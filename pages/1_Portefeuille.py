@@ -260,10 +260,28 @@ with tab_reeq:
             devise_connue = devise_cotation_de(ticker) if ticker else None
             devise_defaut = devise_connue or "USD"
             cd1, cd2, cd3 = st.columns(3)
+            DEVISES_LISTE = ["USD", "EUR", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
+            LIBELLES_DEV = {
+                "USD": "USD ($ — Dollar américain)",
+                "EUR": "EUR (€ — Euro)",
+                "CHF": "CHF (Franc suisse)",
+                "JPY": "JPY (¥ — Yen japonais)",
+                "GBP": "GBP (£ — Livre sterling)",
+                "CNY": "CNY (¥ — Yuan chinois)",
+                "CAD": "CAD (CA$ — Dollar canadien)",
+                "AUD": "AUD (A$ — Dollar australien)",
+                "HKD": "HKD (HK$ — Dollar de Hong Kong)",
+                "SGD": "SGD (S$ — Dollar de Singapour)",
+                "NOK": "NOK (kr — Couronne norvégienne)",
+                "SEK": "SEK (kr — Couronne suédoise)",
+                "DKK": "DKK (kr — Couronne danoise)",
+            }
             devise = cd1.selectbox(
-                "Devise de cotation", ["USD", "EUR", "CHF", "JPY", "GBP", "CNY"],
-                index=max(0, ["USD", "EUR", "CHF", "JPY", "GBP", "CNY"].index(devise_defaut))
-                if devise_defaut in ["USD", "EUR", "CHF", "JPY", "GBP", "CNY"] else 0,
+                "Devise de cotation",
+                DEVISES_LISTE,
+                format_func=lambda code: LIBELLES_DEV.get(code, code),
+                index=max(0, DEVISES_LISTE.index(devise_defaut))
+                if devise_defaut in DEVISES_LISTE else 0,
             )
             source = cd2.selectbox("Source", ["swissquote", "revolut", "manuel"])
             compte_cash = cd3.selectbox(
@@ -389,13 +407,42 @@ with tab_fonds:
             "💵 Compte courant EUR (€ — Cash disponible)": ("EUR", "💵 Cash", "courant_eur"),
             "🏦 Réserve CHF (Épargne de précaution CHF)": ("CHF", "🏦 Cash réserve", "reserve_chf"),
             "🏦 Réserve CNY (Épargne de précaution CNY)": ("CNY", "🏦 Cash réserve", "reserve_cny"),
+            "💵 Compte courant GBP (£ — Livre sterling)": ("GBP", "💵 Cash", "courant_gbp"),
+            "💵 Compte courant JPY (¥ — Yen japonais)": ("JPY", "💵 Cash", "courant_jpy"),
+            "💵 Compte courant CAD (CA$ — Dollar canadien)": ("CAD", "💵 Cash", "courant_cad"),
+            "💵 Compte courant AUD (A$ — Dollar australien)": ("AUD", "💵 Cash", "courant_aud"),
+            "💵 Compte courant HKD (HK$ — Dollar de Hong Kong)": ("HKD", "💵 Cash", "courant_hkd"),
+            "💵 Compte courant SGD (S$ — Dollar de Singapour)": ("SGD", "💵 Cash", "courant_sgd"),
+            "🏦 Réserve GBP (£ — Épargne de précaution)": ("GBP", "🏦 Cash réserve", "reserve_gbp"),
+            "🏦 Réserve JPY (¥ — Épargne de précaution)": ("JPY", "🏦 Cash réserve", "reserve_jpy"),
+        }
+        DEVISES_FONDS = ["EUR", "USD", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
+        LIBELLES_DEV_FONDS = {
+            "EUR": "EUR (€ — Euro)",
+            "USD": "USD ($ — Dollar américain)",
+            "CHF": "CHF (Franc suisse)",
+            "JPY": "JPY (¥ — Yen japonais)",
+            "GBP": "GBP (£ — Livre sterling)",
+            "CNY": "CNY (¥ — Yuan chinois)",
+            "CAD": "CAD (CA$ — Dollar canadien)",
+            "AUD": "AUD (A$ — Dollar australien)",
+            "HKD": "HKD (HK$ — Dollar de Hong Kong)",
+            "SGD": "SGD (S$ — Dollar de Singapour)",
+            "NOK": "NOK (kr — Couronne norvégienne)",
+            "SEK": "SEK (kr — Couronne suédoise)",
+            "DKK": "DKK (kr — Couronne danoise)",
         }
 
         with st.form("nouveau_mouvement_fonds", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
             date_mvt = c1.date_input("Date du mouvement", value=dt.date.today())
             montant = c2.number_input("Montant saisi", min_value=0.0, format="%.2f", step=100.0)
-            devise_saisie = c3.selectbox("Devise du montant saisi", ["EUR", "USD", "CHF", "CNY"], index=0)
+            devise_saisie = c3.selectbox(
+                "Devise du montant saisi",
+                DEVISES_FONDS,
+                format_func=lambda code: LIBELLES_DEV_FONDS.get(code, code),
+                index=0,
+            )
 
             if type_op.startswith("↔"):
                 ca, cb = st.columns(2)

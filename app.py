@@ -28,10 +28,12 @@ from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode"):
+import inspect
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or "signe" not in inspect.signature(ui.metric_usd_eur).parameters:
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
+    importlib.reload(ui)
     importlib.reload(S)
 
 st.set_page_config(page_title="Mon Portefeuille", page_icon="📊", layout="wide")
@@ -120,76 +122,6 @@ ui.metric_usd_eur(
 ui.metric_usd_eur(
     c4, "Cash disponible (Compte courant)", ctx.total_courant_usd, ctx.total_courant_eur,
     help="Liquidités courantes ($) incluses dans l'assiette de rééquilibrage.",
-)
-
-# ---------------------------------------------------------------------------
-# Rente mensuelle actuelle (si départ à la retraite aujourd'hui)
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader(
-    "🏖️ Rente mensuelle actuelle (si retraite aujourd'hui)",
-    help="Calculée exactement sur le même principe que la page Retraite : on ne retire que le rendement réel au-dessus de l'inflation afin de préserver 100 % du pouvoir d'achat de votre capital, et l'impôt (PFU) ne frappe que la part de plus-value.",
-)
-
-# Capital investi + cash disponible et apports nets cumulés à ce jour
-cap_retraite_auj_usd = ctx.total_investi_usd + ctx.total_courant_usd
-apports_cum_auj_usd = cap_retraite_auj_usd
-if not ctx.snapshots.empty and "capital_investi_usd" in ctx.snapshots.columns:
-    s_cap = ctx.snapshots["capital_investi_usd"].dropna()
-    s_cap_pos = s_cap[s_cap > 0]
-    if not s_cap_pos.empty:
-        apports_cum_auj_usd = float(s_cap_pos.iloc[-1])
-
-cagr_hist = S.twr_annualise_portefeuille(ctx)
-rend_hist = cagr_hist if (cagr_hist is not None and cagr_hist > 0) else 0.08
-infl_ref = 0.02
-taux_pfu_ref = 0.314  # PFU 31,4 % (12,8 % IR + 18,6 % PS)
-
-rente_auj_hist = metrics.calculer_rente_mensuelle_reelle(
-    capital_usd=cap_retraite_auj_usd,
-    apports_cumules_usd=apports_cum_auj_usd,
-    rendement_annuel=rend_hist,
-    inflation_annuelle=infl_ref,
-    taux_imposition_pv=taux_pfu_ref,
-    taux_eur_usd=ctx.taux_eur_usd,
-)
-rente_auj_8pct = metrics.calculer_rente_mensuelle_reelle(
-    capital_usd=cap_retraite_auj_usd,
-    apports_cumules_usd=apports_cum_auj_usd,
-    rendement_annuel=0.08,
-    inflation_annuelle=infl_ref,
-    taux_imposition_pv=taux_pfu_ref,
-    taux_eur_usd=ctx.taux_eur_usd,
-)
-
-r1, r2, r3, r4 = st.columns(4)
-ui.metric_usd_eur(
-    r1,
-    f"Rente nette / mois (Scénario A : {rend_hist*100:.1f} %/an)",
-    rente_auj_hist["rente_nette_usd"],
-    rente_auj_hist["rente_nette_eur"],
-    help=f"Avec le rendement annualisé historique de votre portefeuille ({rend_hist*100:.2f} %/an), inflation {infl_ref*100:.1f} %/an (rendement réel {rente_auj_hist['rendement_reel']*100:.2f} %/an) et PFU {taux_pfu_ref*100:.1f} % sur la part de plus-value ({rente_auj_hist['part_pv']*100:.1f} %).",
-)
-ui.metric_usd_eur(
-    r2,
-    f"Rente brute / mois (Scénario A : {rend_hist*100:.1f} %/an)",
-    rente_auj_hist["rente_brute_usd"],
-    rente_auj_hist["rente_brute_eur"],
-    help=f"Avant impôt sur la part de plus-value (impôt mensuel estimé : {ui.usd_eur(rente_auj_hist['impot_usd'], rente_auj_hist['impot_eur'])}).",
-)
-ui.metric_usd_eur(
-    r3,
-    "Rente nette / mois (Scénario B : 8,0 %/an)",
-    rente_auj_8pct["rente_nette_usd"],
-    rente_auj_8pct["rente_nette_eur"],
-    help="Avec le scénario de référence à 8,0 %/an nominal et 2,0 %/an d'inflation (rendement réel 5,88 %/an), net de PFU sur la part de plus-value.",
-)
-ui.metric_usd_eur(
-    r4,
-    "Plus-value latente dans le capital",
-    rente_auj_hist["plus_value_usd"],
-    rente_auj_hist["plus_value_eur"],
-    help=f"Part de plus-value dans chaque retrait : {ui.pct(rente_auj_hist['part_pv'])} (Capital : {ui.usd(cap_retraite_auj_usd)} − Apports : {ui.usd(apports_cum_auj_usd)}).",
 )
 
 # ---------------------------------------------------------------------------
@@ -341,10 +273,14 @@ else:
     g3.metric("Performance", "—", help="Aucun snapshot enregistré.")
 
 if perf_or is not None and perf_or < 0:
-    st.warning(
-        f"**Votre portefeuille perd de l'or.** En {ui.pct(perf_or, signe=True)}, "
-        "vous achetez moins d'onces qu'au début. Même si la performance en dollars "
-        "est positive, vous vous appauvrissez dans l'étalon qui compte."
+    st.info(
+        f"💡 **Lecture de la performance en or ({ui.pct(perf_or, decimales=2, signe=True)}) :** "
+        f"Depuis avril 2023, votre portefeuille a progressé de **{ui.pct(perf_usd, decimales=2, signe=True)} en dollars ($)**, "
+        f"mais sur la même période l'once d'or a plus que doublé (**+103,9 %**, passant de ~1 986 $/oz à ~{ctx.cours_or:,.0f} $/oz). "
+        f"Comme votre portefeuille est diversifié en 4 poches (et non investi à 100 % en or), sa valeur exprimée en onces d'or pures affiche "
+        f"`(1 {perf_usd:+.4f}) / (1 + 1,039) − 1 = {ui.pct(perf_or, decimales=2, signe=True)}`."
+        if (perf_usd is not None and ctx.cours_or) else
+        f"**Performance relative face au 100 % Or : {ui.pct(perf_or, decimales=2, signe=True)}.**"
     )
 
 # ---------------------------------------------------------------------------
@@ -401,6 +337,77 @@ if ctx.total_precaution_usd > 0 or ctx.total_precaution_eur > 0:
         pc2, f"Budget mensuel sur {mois} mois",
         ctx.total_precaution_usd / mois, ctx.total_precaution_eur / mois, decimales=0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Rente mensuelle actuelle (si départ à la retraite aujourd'hui)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader(
+    "🏖️ Rente mensuelle actuelle (si retraite aujourd'hui)",
+    help="Calculée exactement sur le même principe que la page Retraite : on ne retire que le rendement réel au-dessus de l'inflation afin de préserver 100 % du pouvoir d'achat de votre capital, et l'impôt (PFU) ne frappe que la part de plus-value.",
+)
+
+# Capital investi + cash disponible et apports nets cumulés à ce jour
+cap_retraite_auj_usd = ctx.total_investi_usd + ctx.total_courant_usd
+apports_cum_auj_usd = cap_retraite_auj_usd
+if not ctx.snapshots.empty and "capital_investi_usd" in ctx.snapshots.columns:
+    s_cap = ctx.snapshots["capital_investi_usd"].dropna()
+    s_cap_pos = s_cap[s_cap > 0]
+    if not s_cap_pos.empty:
+        apports_cum_auj_usd = float(s_cap_pos.iloc[-1])
+
+cagr_hist = S.twr_annualise_portefeuille(ctx)
+rend_hist = cagr_hist if (cagr_hist is not None and cagr_hist > 0) else 0.08
+infl_ref = 0.02
+taux_pfu_ref = 0.314  # PFU 31,4 % (12,8 % IR + 18,6 % PS)
+
+rente_auj_hist = metrics.calculer_rente_mensuelle_reelle(
+    capital_usd=cap_retraite_auj_usd,
+    apports_cumules_usd=apports_cum_auj_usd,
+    rendement_annuel=rend_hist,
+    inflation_annuelle=infl_ref,
+    taux_imposition_pv=taux_pfu_ref,
+    taux_eur_usd=ctx.taux_eur_usd,
+)
+rente_auj_8pct = metrics.calculer_rente_mensuelle_reelle(
+    capital_usd=cap_retraite_auj_usd,
+    apports_cumules_usd=apports_cum_auj_usd,
+    rendement_annuel=0.08,
+    inflation_annuelle=infl_ref,
+    taux_imposition_pv=taux_pfu_ref,
+    taux_eur_usd=ctx.taux_eur_usd,
+)
+
+r1, r2, r3, r4 = st.columns(4)
+ui.metric_usd_eur(
+    r1,
+    f"Rente nette / mois (Scénario A : {rend_hist*100:.1f} %/an)",
+    rente_auj_hist["rente_nette_usd"],
+    rente_auj_hist["rente_nette_eur"],
+    help=f"Avec le rendement annualisé historique de votre portefeuille ({rend_hist*100:.2f} %/an), inflation {infl_ref*100:.1f} %/an (rendement réel {rente_auj_hist['rendement_reel']*100:.2f} %/an) et PFU {taux_pfu_ref*100:.1f} % sur la part de plus-value ({rente_auj_hist['part_pv']*100:.1f} %).",
+)
+ui.metric_usd_eur(
+    r2,
+    f"Rente brute / mois (Scénario A : {rend_hist*100:.1f} %/an)",
+    rente_auj_hist["rente_brute_usd"],
+    rente_auj_hist["rente_brute_eur"],
+    help=f"Avant impôt sur la part de plus-value (impôt mensuel estimé : {ui.usd_eur(rente_auj_hist['impot_usd'], rente_auj_hist['impot_eur'])}).",
+)
+ui.metric_usd_eur(
+    r3,
+    "Rente nette / mois (Scénario B : 8,0 %/an)",
+    rente_auj_8pct["rente_nette_usd"],
+    rente_auj_8pct["rente_nette_eur"],
+    help="Avec le scénario de référence à 8,0 %/an nominal et 2,0 %/an d'inflation (rendement réel 5,88 %/an), net de PFU sur la part de plus-value.",
+)
+ui.metric_usd_eur(
+    r4,
+    "Plus-value latente dans le capital",
+    rente_auj_hist["plus_value_usd"],
+    rente_auj_hist["plus_value_eur"],
+    help=f"Part de plus-value dans chaque retrait : {ui.pct(rente_auj_hist['part_pv'])} (Capital : {ui.usd(cap_retraite_auj_usd)} − Apports : {ui.usd(apports_cum_auj_usd)}).",
+)
 
 
 # ---------------------------------------------------------------------------
