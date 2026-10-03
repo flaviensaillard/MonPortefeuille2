@@ -521,3 +521,36 @@ def ajouter_historique_v1(
         }).execute()
     except Exception:
         pass
+
+
+def modifier_transaction(id_ligne: int, champs: dict) -> None:
+    """Met à jour une ligne existante dans `pf2_transactions` par son `id`."""
+    try:
+        client().table(T_TRANSACTIONS).update(champs).eq("id", int(id_ligne)).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_TRANSACTIONS, exc) from exc
+
+
+def supprimer_transaction(id_ligne: int) -> None:
+    """Supprime une ligne dans `pf2_transactions` par son `id`."""
+    try:
+        client().table(T_TRANSACTIONS).delete().eq("id", int(id_ligne)).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_TRANSACTIONS, exc) from exc
+
+
+def modifier_apport(id_ligne: int, champs: dict) -> None:
+    """Met à jour un apport ou retrait existant dans `pf2_apports` par son `id`."""
+    try:
+        client().table(T_APPORTS).update(champs).eq("id", int(id_ligne)).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_APPORTS, exc) from exc
+
+
+def supprimer_apport(id_ligne: int) -> None:
+    """Supprime un apport ou retrait dans `pf2_apports` par son `id`."""
+    try:
+        client().table(T_APPORTS).delete().eq("id", int(id_ligne)).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_APPORTS, exc) from exc
+

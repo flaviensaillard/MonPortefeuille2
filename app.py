@@ -28,14 +28,15 @@ from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "styliser_navigation"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
     importlib.reload(ui)
     importlib.reload(S)
 
-st.set_page_config(page_title="Mon Portefeuille", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Tableau de bord", page_icon="📊", layout="wide")
+ui.styliser_navigation()
 
 st.title("📊 Tableau de bord")
 
@@ -155,7 +156,7 @@ if not ctx.snapshots.empty:
                 "Depuis le début",
                 "Période choisie",
             ],
-            index=0,
+            index=5,
             horizontal=True,
         )
     with col_assiette:

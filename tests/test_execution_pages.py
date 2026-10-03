@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from core import session as S
-from core.models import Actif, Classe, POCHES_INVESTIES
+from core.models import Actif, POCHES_INVESTIES
 from core.portfolio import EtatPoche, Position, Transaction, classe_de
 
 
@@ -85,6 +85,8 @@ def _contexte_realiste() -> S.Contexte:
             frais=5.0,
             devise="USD",
             montant_net=250.0 * 46.0 + 5.0,
+            id=1,
+            source="swissquote",
         ),
         Transaction(
             ticker="IGLN.L",
@@ -95,6 +97,8 @@ def _contexte_realiste() -> S.Contexte:
             frais=5.0,
             devise="USD",
             montant_net=50.0 * 62.0 - 5.0,
+            id=2,
+            source="swissquote",
         ),
     ]
     ctx.snapshots = pd.DataFrame([
@@ -153,6 +157,7 @@ def _contexte_realiste() -> S.Contexte:
     ])
     ctx.apports = pd.DataFrame([
         {
+            "id": 10,
             "date": "2025-03-15",
             "sens": "apport",
             "montant_eur": 1000.0,
@@ -160,6 +165,7 @@ def _contexte_realiste() -> S.Contexte:
             "montant_or": 0.35,
             "cours_or": 3142.0,
             "compte": "swissquote_usd",
+            "reference": "usd:1100.00",
         }
     ])
     ctx.inflation = pd.DataFrame([

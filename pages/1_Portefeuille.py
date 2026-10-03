@@ -19,15 +19,17 @@ from core import ui
 from core.models import POCHES_PAR_CLE
 from core.portfolio import devise_cotation_de
 
-if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(metrics, "calculer_rente_mensuelle_reelle"):
+if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "styliser_navigation"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
+    importlib.reload(ui)
     importlib.reload(S)
 
 from core.rebalance import generer_ordres
 
 st.set_page_config(page_title="Portefeuille & Opérations", page_icon="💼", layout="wide")
+ui.styliser_navigation()
 st.title("💼 Portefeuille & Opérations")
 
 ctx = S.charger()
@@ -351,6 +353,128 @@ with tab_reeq:
                         except Exception as exc:
                             st.error(f"Écriture échouée : {exc}")
 
+    # --- Édition et suppression des transactions (achats / ventes) ---
+    if ctx.transactions:
+        tx_triees = sorted(
+            ctx.transactions,
+            key=lambda t: (t.date, getattr(t, "id", 0) or 0),
+            reverse=True,
+        )
+        tx_editables = [t for t in tx_triees if getattr(t, "id", None) is not None]
+
+        with st.expander("✏️ Modifier ou supprimer un achat / une vente (erreur de saisie)", expanded=False):
+            if not tx_editables:
+                st.info("Aucune transaction modifiable avec identifiant trouvée en base.")
+            else:
+                options_tx = {}
+                for t in tx_editables:
+                    sens_lbl = "🟢 Achat" if t.est_achat else "🔴 Vente"
+                    lbl = (
+                        f"#{t.id} — {t.date.strftime('%d/%m/%Y')} · {sens_lbl} · "
+                        f"{ui.quantite(t.quantite)} {t.ticker} @ {t.cours:,.4f} {t.devise} "
+                        f"(frais : {t.frais:,.2f} {t.devise})".replace(",", " ")
+                    )
+                    options_tx[lbl] = t
+
+                choix_tx_lbl = st.selectbox(
+                    "Sélectionnez la transaction à modifier ou supprimer",
+                    list(options_tx.keys()),
+                )
+                tx_sel = options_tx[choix_tx_lbl]
+
+                with st.form(f"editer_transaction_{tx_sel.id}"):
+                    ec1, ec2, ec3 = st.columns(3)
+                    date_edit = ec1.date_input("Date", value=tx_sel.date)
+                    ticker_edit = ec2.text_input("Actif (Ticker)", value=tx_sel.ticker)
+                    sens_edit = ec3.radio(
+                        "Sens",
+                        ["Achat", "Vente"],
+                        index=0 if tx_sel.est_achat else 1,
+                        horizontal=True,
+                    )
+
+                    ec4, ec5, ec6 = st.columns(3)
+                    qte_edit = ec4.number_input(
+                        "Quantité", min_value=0.0, value=float(tx_sel.quantite), format="%.6f"
+                    )
+                    cours_edit = ec5.number_input(
+                        "Cours unitaire", min_value=0.0, value=float(tx_sel.cours), format="%.6f"
+                    )
+                    frais_edit = ec6.number_input(
+                        "Frais", min_value=0.0, value=float(tx_sel.frais), format="%.2f"
+                    )
+
+                    ecd1, ecd2 = st.columns(2)
+                    dev_actuelle = str(tx_sel.devise or "USD").upper()
+                    liste_dev_edit = DEVISES_LISTE if dev_actuelle in DEVISES_LISTE else [dev_actuelle] + DEVISES_LISTE
+                    dev_edit = ecd1.selectbox(
+                        "Devise de cotation",
+                        liste_dev_edit,
+                        format_func=lambda code: LIBELLES_DEV.get(code, code),
+                        index=liste_dev_edit.index(dev_actuelle),
+                    )
+                    sources_dispo = ["swissquote", "revolut", "manuel", "import_v1"]
+                    src_actuelle = str(getattr(tx_sel, "source", None) or "manuel")
+                    if src_actuelle not in sources_dispo:
+                        sources_dispo.append(src_actuelle)
+                    src_edit = ecd2.selectbox(
+                        "Source",
+                        sources_dispo,
+                        index=sources_dispo.index(src_actuelle),
+                    )
+
+                    b_save, b_del = st.columns(2)
+                    btn_sauver_tx = b_save.form_submit_button("💾 Enregistrer les modifications")
+                    btn_suppr_tx = b_del.form_submit_button("🗑️ Supprimer cette transaction")
+
+                    if btn_sauver_tx:
+                        if not ticker_edit.strip():
+                            st.error("Le ticker ne peut pas être vide.")
+                        elif qte_edit <= 0 or cours_edit <= 0:
+                            st.error("La quantité et le cours unitaire doivent être strictement positifs.")
+                        else:
+                            try:
+                                db.modifier_transaction(
+                                    int(tx_sel.id),
+                                    {
+                                        "ticker": ticker_edit.upper().strip(),
+                                        "sens": sens_edit.lower(),
+                                        "date": date_edit.isoformat(),
+                                        "quantite": float(qte_edit),
+                                        "cours": float(cours_edit),
+                                        "frais": float(frais_edit),
+                                        "devise": dev_edit,
+                                        "source": src_edit,
+                                    },
+                                )
+                                st.success(f"✅ Transaction #{tx_sel.id} mise à jour.")
+                                S.vider_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Échec de la modification : {exc}")
+
+                    if btn_suppr_tx:
+                        try:
+                            db.supprimer_transaction(int(tx_sel.id))
+                            st.success(f"🗑️ Transaction #{tx_sel.id} supprimée.")
+                            S.vider_cache()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Échec de la suppression : {exc}")
+
+        with st.expander(f"📜 Historique des achats et ventes de titres ({len(tx_triees)} opérations)", expanded=False):
+            ui.tableau(pd.DataFrame([{
+                "Date": t.date.strftime("%d/%m/%Y"),
+                "Actif": t.ticker,
+                "Sens": "🟢 Achat" if t.est_achat else "🔴 Vente",
+                "Quantité": ui.quantite(t.quantite),
+                "Cours": f"{t.cours:,.4f}".replace(",", " "),
+                "Frais": f"{t.frais:,.2f}".replace(",", " "),
+                "Devise": t.devise,
+                "Montant net": f"{t.montant_net:,.2f} {t.devise}".replace(",", " "),
+                "Source": getattr(t, "source", None) or "—",
+            } for t in tx_triees]))
+
     st.divider()
     st.info(
         "**Règle de Gave à vérifier avant chaque transaction :** "
@@ -522,6 +646,7 @@ with tab_fonds:
                                     "montant_or": round(onces, 6),
                                     "cours_or": round(cours_or, 2),
                                     "compte": slug_cpt,
+                                    "reference": f"usd:{montant_usd:.2f}",
                                 }])
                                 db.ajouter_historique_v1(
                                     date_mvt.strftime("%d/%m/%Y"),
@@ -554,6 +679,14 @@ with tab_fonds:
         "reserve_chf": "🏦 Réserve CHF",
         "livret_chf": "🏦 Réserve CHF",
         "reserve_cny": "🏦 Réserve CNY",
+        "courant_gbp": "💵 Compte courant GBP (£)",
+        "courant_jpy": "💵 Compte courant JPY (¥)",
+        "courant_cad": "💵 Compte courant CAD (CA$)",
+        "courant_aud": "💵 Compte courant AUD (A$)",
+        "courant_hkd": "💵 Compte courant HKD (HK$)",
+        "courant_sgd": "💵 Compte courant SGD (S$)",
+        "reserve_gbp": "🏦 Réserve GBP (£)",
+        "reserve_jpy": "🏦 Réserve JPY (¥)",
         "import_v1": "📦 Historique v1",
     }
 
@@ -563,6 +696,118 @@ with tab_fonds:
         df = ctx.apports.copy()
         df["Date_DT"] = pd.to_datetime(df["date"], errors="coerce")
         df = df.sort_values("Date_DT", ascending=False)
+
+        with st.expander("✏️ Modifier ou supprimer un apport / retrait (erreur de saisie)", expanded=False):
+            lignes_ap_edit = [r for _, r in df.iterrows() if pd.notna(r.get("id"))]
+            if not lignes_ap_edit:
+                st.info("Aucun apport modifiable avec identifiant trouvé en base.")
+            else:
+                options_ap = {}
+                for r in lignes_ap_edit:
+                    ap_id = int(r["id"])
+                    d_fr = pd.to_datetime(r["date"]).strftime("%d/%m/%Y") if pd.notna(r.get("date")) else "—"
+                    sens_lbl = "↗ Apport" if str(r.get("sens")).lower() == "apport" else "↘ Retrait"
+                    m_e = float(r.get("montant_eur") or 0.0)
+                    m_u = float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else m_e * ctx.taux_eur_usd
+                    cpt_lbl = LIBELLES_COMPTES.get(str(r.get("compte") or ""), str(r.get("compte") or "—"))
+                    lbl_ap = f"#{ap_id} — {d_fr} · {sens_lbl} · {ui.usd_eur(m_u, m_e)} ({cpt_lbl})"
+                    options_ap[lbl_ap] = r
+
+                choix_ap_lbl = st.selectbox(
+                    "Sélectionnez l'apport ou le retrait à modifier ou supprimer",
+                    list(options_ap.keys()),
+                )
+                r_sel = options_ap[choix_ap_lbl]
+                ap_id_sel = int(r_sel["id"])
+                d_actuelle = pd.to_datetime(r_sel["date"]).date() if pd.notna(r_sel.get("date")) else dt.date.today()
+                est_apport_actuel = str(r_sel.get("sens")).lower() == "apport"
+                m_eur_actuel = float(r_sel.get("montant_eur") or 0.0)
+                m_usd_actuel = (
+                    float(r_sel["montant_usd"])
+                    if pd.notna(r_sel.get("montant_usd"))
+                    else round(m_eur_actuel * ctx.taux_eur_usd, 2)
+                )
+
+                with st.form(f"editer_apport_{ap_id_sel}"):
+                    ac1, ac2, ac3, ac4 = st.columns(4)
+                    date_ap_edit = ac1.date_input("Date du mouvement", value=d_actuelle)
+                    sens_ap_edit = ac2.radio(
+                        "Sens",
+                        ["↗ Apport", "↘ Retrait"],
+                        index=0 if est_apport_actuel else 1,
+                        horizontal=True,
+                    )
+                    montant_ap_edit = ac3.number_input(
+                        "Montant corrigé",
+                        min_value=0.0,
+                        value=round(m_usd_actuel, 2),
+                        format="%.2f",
+                        step=50.0,
+                    )
+                    dev_ap_edit = ac4.selectbox(
+                        "Devise du montant corrigé",
+                        DEVISES_FONDS,
+                        format_func=lambda code: LIBELLES_DEV_FONDS.get(code, code),
+                        index=DEVISES_FONDS.index("USD"),
+                    )
+
+                    slug_actuel = str(r_sel.get("compte") or "swissquote_usd")
+                    slugs_options = {v[2]: k for k, v in OPTIONS_COMPTES.items()}
+                    lbl_cpt_defaut = slugs_options.get(slug_actuel, list(OPTIONS_COMPTES.keys())[0])
+                    compte_ap_edit_lbl = st.selectbox(
+                        "Compte associé",
+                        list(OPTIONS_COMPTES.keys()),
+                        index=list(OPTIONS_COMPTES.keys()).index(lbl_cpt_defaut),
+                    )
+
+                    ba1, ba2 = st.columns(2)
+                    btn_sauver_ap = ba1.form_submit_button("💾 Enregistrer les modifications de l'apport")
+                    btn_suppr_ap = ba2.form_submit_button("🗑️ Supprimer cet apport / retrait")
+
+                    if btn_sauver_ap:
+                        if montant_ap_edit <= 0:
+                            st.error("Le montant corrigé doit être strictement positif.")
+                        else:
+                            d_iso_edit = date_ap_edit.isoformat()
+                            try:
+                                t_eur_edit = 1.0 if dev_ap_edit == "EUR" else fx.taux(dev_ap_edit, d_iso_edit, "EUR")
+                                t_usd_edit = 1.0 if dev_ap_edit == "USD" else fx.taux(dev_ap_edit, d_iso_edit, "USD")
+                                m_eur_nv = montant_ap_edit * t_eur_edit
+                                m_usd_nv = montant_ap_edit * t_usd_edit
+                                cours_or_nv = prices.cours_or(d_iso_edit)
+                                onces_nv = m_usd_nv / cours_or_nv
+                            except (fx.FXIndisponible, prices.CoursIndisponible) as exc:
+                                st.error(f"Modification impossible : {exc}.")
+                            else:
+                                _, _, slug_nv = OPTIONS_COMPTES[compte_ap_edit_lbl]
+                                try:
+                                    db.modifier_apport(
+                                        ap_id_sel,
+                                        {
+                                            "date": d_iso_edit,
+                                            "sens": "apport" if sens_ap_edit.startswith("↗") else "retrait",
+                                            "montant_eur": round(m_eur_nv, 2),
+                                            "montant_or": round(onces_nv, 6),
+                                            "cours_or": round(cours_or_nv, 2),
+                                            "compte": slug_nv,
+                                            "reference": f"usd:{m_usd_nv:.2f}",
+                                        },
+                                    )
+                                    st.success(f"✅ Mouvement #{ap_id_sel} mis à jour ({ui.usd_eur(m_usd_nv, m_eur_nv)}).")
+                                    S.vider_cache()
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Échec de la modification : {exc}")
+
+                    if btn_suppr_ap:
+                        try:
+                            db.supprimer_apport(ap_id_sel)
+                            st.success(f"🗑️ Mouvement #{ap_id_sel} supprimé.")
+                            S.vider_cache()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Échec de la suppression : {exc}")
+
         ui.tableau(pd.DataFrame([{
             "Date": pd.to_datetime(r["date"]).strftime("%d/%m/%Y"),
             "Sens": "↗ Apport" if r["sens"] == "apport" else "↘ Retrait",

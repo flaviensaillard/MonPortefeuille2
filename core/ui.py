@@ -15,6 +15,26 @@ import pandas as pd
 import streamlit as st
 
 
+def styliser_navigation() -> None:
+    """Renomme l'onglet principal « app » en « Tableau de bord » dans le menu latéral Streamlit."""
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebarNavItems"] li:first-child a span:last-child,
+        [data-testid="stSidebarNav"] ul li:first-child a span:last-child {
+            font-size: 0 !important;
+        }
+        [data-testid="stSidebarNavItems"] li:first-child a span:last-child::after,
+        [data-testid="stSidebarNav"] ul li:first-child a span:last-child::after {
+            content: "Tableau de bord";
+            font-size: 0.875rem !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def bandeau_erreurs(echecs: list[str], contexte: str = "") -> None:
     """Affiche les données qui n'ont pas pu être récupérées.
 
@@ -22,6 +42,7 @@ def bandeau_erreurs(echecs: list[str], contexte: str = "") -> None:
     zéro, sans le signaler. Résultat : des performances flatteuses construites sur
     des chiffres inventés. Une erreur visible vaut mieux qu'un chiffre faux.
     """
+    styliser_navigation()
     if not echecs:
         return
     detail = f" ({contexte})" if contexte else ""
@@ -461,6 +482,7 @@ def encadre(texte: str, niveau: str = "info") -> None:
 
 def appareil(etat: dict) -> None:
     """Affiche l'état de connectivité aux sources."""
+    styliser_navigation()
     manquantes = [k for k, v in etat.items() if not v]
     if not manquantes:
         return

@@ -144,6 +144,9 @@ class Transaction:
     frais: float
     devise: str                # devise de cotation du titre
     montant_net: float         # dans la devise de cotation, frais inclus
+    id: int | None = None
+    source: str | None = None
+    reference: str | None = None
 
     @property
     def est_achat(self) -> bool:
@@ -208,9 +211,19 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
             net = quantite * cours
             net = net + frais if "achat" in typ else net - frais
 
+            tx_id = None
+            if "id" in row and pd.notna(row["id"]):
+                try:
+                    tx_id = int(row["id"])
+                except (ValueError, TypeError):
+                    tx_id = None
+            src_val = str(row.get("Source") or "manuel").strip() if pd.notna(row.get("Source")) else "manuel"
+            ref_val = str(row.get("Référence") or "").strip() if pd.notna(row.get("Référence")) else None
+
             sortie.append(Transaction(
                 ticker=ticker, type=typ, date=d.date(), quantite=quantite,
                 cours=cours, frais=frais, devise=devise, montant_net=round(net, 6),
+                id=tx_id, source=src_val, reference=ref_val,
             ))
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError(f"Transaction ligne {i} illisible : {exc}") from exc

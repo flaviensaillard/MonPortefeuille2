@@ -500,6 +500,12 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         montants_usd: list[float] = []
         for _, r in ap.iterrows():
             ref = str(r.get("reference") or "")
+            if ref.startswith("usd:"):
+                try:
+                    montants_usd.append(round(abs(float(ref.split(":", 1)[1])), 2))
+                    continue
+                except Exception:
+                    pass
             if ref in usd_par_ref:
                 montants_usd.append(round(usd_par_ref[ref], 2))
             elif pd.notna(r.get("montant_or")) and pd.notna(r.get("cours_or")) and float(r.get("montant_or") or 0) > 0 and float(r.get("cours_or") or 0) > 0:
