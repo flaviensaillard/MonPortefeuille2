@@ -490,3 +490,22 @@ def verifier_maj_baremes_fiscaux(
         ),
     }
 
+
+def generer_prompt_maj_baremes(annee_cible: int | None = None) -> str:
+    """Génère le prompt complet prêt à copier-coller dans l'assistant IA pour
+    produire le nouveau fichier `core/fiscal_bars.py` à déposer dans GitHub."""
+    derniere_annee = max(BAREMES.keys())
+    prochaine_annee = annee_cible if (annee_cible and annee_cible > derniere_annee) else (derniere_annee + 1)
+    return f"""Je souhaite mettre à jour les barèmes fiscaux de mon application MonPortefeuille2 sur GitHub (`https://github.com/flaviensaillard/MonPortefeuille2`).
+
+1. Récupère et lis la version actuelle du fichier `core/fiscal_bars.py` sur mon dépôt GitHub (`https://github.com/flaviensaillard/MonPortefeuille2/blob/main/core/fiscal_bars.py`).
+2. Recherche sur les sources officielles françaises (Loi de Finances, BOFiP, Légifrance, service-public.fr, URSSAF) les barèmes officiels applicables aux **revenus {derniere_annee}** (consolidation BOFiP) et aux **revenus {prochaine_annee}** (et toute année ultérieure déjà votée) :
+   - **Barème progressif de l'impôt sur le revenu (`BAREMES`)** : seuils des 4 premières tranches (`tranches`), taux des tranches (`taux`), et paramètres de la décote (`decote_base_celibataire`, `decote_plafond_celibataire`, `decote_base_couple`, `decote_plafond_couple`, `decote_taux`).
+   - **Statut de vérification (`SOURCE_PAR_ANNEE`)** : indique la référence exacte (Loi de Finances / BOFiP) et retire la mention « à recouper BOFiP » pour les années désormais définitives.
+   - **Prélèvements sociaux et PFU (`PS_CAPITAL_PAR_ANNEE`, `IR_FORFAITAIRE`, `CSG_DEDUCTIBLE_BAREME`)** : taux des prélèvements sociaux sur les plus-values mobilières et revenus du capital pour {derniere_annee} et {prochaine_annee}.
+   - **Abattement forfaitaire de 10 % sur les salaires (`PLANCHER_ABATTEMENT_10_PAR_ANNEE` et `PLAFOND_ABATTEMENT_10_PAR_ANNEE`)** : plancher et plafond officiels (CGI art. 83, 3°).
+   - **Frais professionnels aux frais réels (`FORFAIT_REPAS_PAR_ANNEE` et `BAREME_KM_VOITURE`)** : valeur forfaitaire du repas URSSAF/DGFiP pour {derniere_annee} et {prochaine_annee}, et barème kilométrique officiel voitures (3 CV à 7+ CV, CGI ann. IV art. 6 B).
+3. Conserve intégralement toutes les années historiques existantes (`2022` à `{derniere_annee}`) ainsi que **toutes les fonctions et constantes existantes sans modifier leurs signatures** (`Bareme`, `bareme_de`, `annees_disponibles`, `source_de`, `taux_ps`, `taux_pfu`, `forfait_repas_de`, `abattement_10_salaire`, `frais_kilometriques`, `frais_repas`, `parts_fiscales_auto`, `URL_ASSISTANT_MAJ_BAREMES`, `verifier_maj_baremes_fiscaux`, `generer_prompt_maj_baremes`).
+4. Vérifie avec `pytest` qu'aucun test ne régresse, puis fournis-moi le fichier complet **`core/fiscal_bars.py`** prêt à remplacer dans le dossier `core/` de mon dépôt GitHub."""
+
+

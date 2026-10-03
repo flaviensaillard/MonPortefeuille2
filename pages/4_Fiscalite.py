@@ -14,7 +14,7 @@ from core import guide_fiscal as guide
 from core import session as S, tax
 from core import ui
 
-if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_prompt_maj_baremes") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(fb)
     importlib.reload(ui)
     importlib.reload(S)
@@ -98,7 +98,7 @@ etat_maj_baremes = fb.verifier_maj_baremes_fiscaux(annee)
 if etat_maj_baremes["disponible"]:
     st.markdown(
         f"""<a href="{etat_maj_baremes['url']}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
-        <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
+        <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:10px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
         <strong>🔔 Nouvelle version des barèmes fiscaux disponible !</strong><br>
         <span style="font-size:0.88rem;color:#ffffff;">{etat_maj_baremes['message']}</span><br>
         <span style="text-decoration:underline;font-weight:600;color:#38bdf8;">👉 Cliquez ici pour ouvrir votre assistant Arena et mettre à jour les barèmes fiscaux ↗</span>
@@ -107,11 +107,18 @@ if etat_maj_baremes["disponible"]:
     )
 else:
     st.markdown(
-        f"""<div style="background-color:rgba(56,189,248,0.10);color:#e2e8f0;border-radius:10px;padding:10px 16px;margin-bottom:14px;border-left:5px solid #38bdf8;font-size:0.88rem;">
+        f"""<div style="background-color:rgba(56,189,248,0.10);color:#e2e8f0;border-radius:10px;padding:10px 16px;margin-bottom:10px;border-left:5px solid #38bdf8;font-size:0.88rem;">
         ✅ <strong>État des barèmes fiscaux :</strong> {etat_maj_baremes['message']}
         </div>""",
         unsafe_allow_html=True,
     )
+
+with st.expander("🤖 Prompt à copier-coller dans l'IA pour générer le nouveau fichier des barèmes (`core/fiscal_bars.py`)", expanded=False):
+    st.caption(
+        "Cliquez sur l'icône de copie en haut à droite du cadre ci-dessous, puis "
+        f"[ouvrez votre assistant Arena ↗]({fb.URL_ASSISTANT_MAJ_BAREMES}) et collez ce prompt :"
+    )
+    st.code(fb.generer_prompt_maj_baremes(annee), language="markdown")
 
 if annee in fb.PS_ANNEE_INCERTAINE:
     st.info("ℹ️ " + fb.PS_ANNEE_INCERTAINE[annee])
