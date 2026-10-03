@@ -650,6 +650,139 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         ctx.snapshots = snaps
 
 
+
+
+def progression_periode(
+    ctx: "Contexte",
+    mode_periode: str = "Progression journalière",
+    perimetre: str = "Portefeuille investi",
+    date_deb: dt.date | None = None,
+    date_fin: dt.date | None = None,
+) -> dict:
+    """Calcule la série graphique et les indicateurs de progression sur la période choisie.
+
+    Utilise `serie_performance(ctx)` pour garantir la cohérence absolue des flux
+    d'apports (`capital_investi_usd`) et du TWR avec la page Performance.
+    """
+    df_base, _, flux_base = serie_performance(ctx)
+    if df_base.empty:
+        return {"vide": True}
+
+    df_p = df_base.copy()
+    df_p["date_dt"] = pd.to_datetime(df_p["Date"], errors="coerce")
+    df_p["_flux_usd"] = flux_base
+    df_p = df_p.dropna(subset=["date_dt"]).sort_values("date_dt").reset_index(drop=True)
+
+    col_val_usd = (
+        "patrimoine_investi_usd"
+        if perimetre == "Portefeuille investi" or "patrimoine_total_usd" not in df_p.columns
+        else "patrimoine_total_usd"
+    )
+    if col_val_usd not in df_p.columns:
+        col_val_usd = "patrimoine_investi_eur"
+
+    # S'assurer que le point du jour reflète la valorisation en direct
+    aujourd_hui = pd.Timestamp(dt.date.today())
+    val_live_usd = (
+        ctx.total_investi_usd if perimetre == "Portefeuille investi" else ctx.patrimoine_total_usd
+    )
+    if val_live_usd > 0 and not df_p.empty:
+        if df_p["date_dt"].iloc[-1].date() == aujourd_hui.date():
+            df_p.loc[df_p.index[-1], col_val_usd] = round(val_live_usd, 2)
+        else:
+             nouvelle_ligne = df_p.iloc[-1].to_dict()
+             nouvelle_ligne["Date"] = aujourd_hui
+             nouvelle_ligne["date_dt"] = aujourd_hui
+             nouvelle_ligne["date"] = aujourd_hui.strftime("%Y-%m-%d")
+             nouvelle_ligne["patrimoine_investi_usd"] = round(ctx.total_investi_usd, 2)
+             nouvelle_ligne["patrimoine_total_usd"] = round(ctx.patrimoine_total_usd, 2)
+             nouvelle_ligne["_flux_usd"] = 0.0
+             df_p = pd.concat([df_p, pd.DataFrame([nouvelle_ligne])], ignore_index=True)
+
+    d_min = df_p["date_dt"].min().date()
+    d_max = df_p["date_dt"].max().date()
+    label_periode = mode_periode
+
+    if mode_periode == "Progression journalière":
+        df_graphe = df_p.tail(min(len(df_p), 90)).copy()
+        df_calc = df_p.tail(min(len(df_p), 2)).copy()
+    elif mode_periode == "Progression mensuelle":
+        df_p["_ym"] = df_p["date_dt"].dt.to_period("M")
+        # Pour une vue mensuelle, le flux d'un mois est la somme des flux quotidiens du mois
+        flux_mensuel = df_p.groupby("_ym")["_flux_usd"].sum()
+        df_graphe = df_p.groupby("_ym", as_index=False).last().sort_values("date_dt").reset_index(drop=True)
+        df_graphe["_flux_usd"] = [float(flux_mensuel.get(ym, 0.0)) for ym in df_graphe["_ym"]]
+        df_calc = df_graphe.tail(min(len(df_graphe), 2)).copy()
+    elif mode_periode == "Depuis le début du mois":
+        debut_mois = pd.Timestamp(d_max.year, d_max.month, 1)
+        avant = df_p[df_p["date_dt"] < debut_mois]
+        dans = df_p[df_p["date_dt"] >= debut_mois]
+        df_graphe = pd.concat([avant.tail(1), dans], ignore_index=True) if not avant.empty else dans.copy()
+        df_calc = df_graphe.copy()
+    elif mode_periode == "Depuis le début de l'année":
+        debut_an = pd.Timestamp(d_max.year, 1, 1)
+        avant = df_p[df_p["date_dt"] < debut_an]
+        dans = df_p[df_p["date_dt"] >= debut_an]
+        df_graphe = pd.concat([avant.tail(1), dans], ignore_index=True) if not avant.empty else dans.copy()
+        df_calc = df_graphe.copy()
+    elif mode_periode == "Période choisie":
+        d_deb = date_deb or max(d_min, d_max - dt.timedelta(days=30))
+        d_fin = date_fin or d_max
+        ts_deb = pd.Timestamp(d_deb)
+        ts_fin = pd.Timestamp(d_fin)
+        avant = df_p[df_p["date_dt"] <= ts_deb]
+        dans = df_p[(df_p["date_dt"] > ts_deb) & (df_p["date_dt"] <= ts_fin)]
+        df_graphe = pd.concat([avant.tail(1), dans], ignore_index=True) if not avant.empty else df_p[df_p["date_dt"] <= ts_fin].copy()
+        df_calc = df_graphe.copy()
+    else:  # Depuis le début
+        df_graphe = df_p.copy()
+        df_calc = df_p.copy()
+
+    if len(df_calc) >= 2:
+        d0_str = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
+        d1_str = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
+        label_periode = f"{mode_periode} ({d0_str} → {d1_str})"
+
+        valeurs_c = [float(v) for v in df_calc[col_val_usd].tolist()]
+        flux_c = [0.0] + [float(f) for f in df_calc["_flux_usd"].iloc[1:].tolist()]
+
+        v_debut_usd = valeurs_c[0]
+        v_fin_usd = valeurs_c[-1]
+        delta_val_usd = v_fin_usd - v_debut_usd
+        apports_periode_usd = sum(flux_c[1:])
+        gain_marche_usd = delta_val_usd - apports_periode_usd
+        twr_per = metrics.twr_depuis(valeurs_c, flux_c)
+        pct_brut = (delta_val_usd / v_debut_usd) if v_debut_usd > 0 else 0.0
+    else:
+        v_debut_usd = float(df_p[col_val_usd].iloc[-1])
+        v_fin_usd = v_debut_usd
+        delta_val_usd = 0.0
+        apports_periode_usd = 0.0
+        gain_marche_usd = 0.0
+        twr_per = 0.0
+        pct_brut = 0.0
+
+    taux = ctx.taux_eur_usd if ctx.taux_eur_usd else 1.0
+    return {
+        "vide": False,
+        "df_graphe": df_graphe,
+        "col_val_usd": col_val_usd,
+        "d_min": d_min,
+        "d_max": d_max,
+        "label_periode": label_periode,
+        "v_debut_usd": v_debut_usd,
+        "v_fin_usd": v_fin_usd,
+        "delta_val_usd": delta_val_usd,
+        "delta_val_eur": delta_val_usd / taux,
+        "apports_periode_usd": apports_periode_usd,
+        "apports_periode_eur": apports_periode_usd / taux,
+        "gain_marche_usd": gain_marche_usd,
+        "gain_marche_eur": gain_marche_usd / taux,
+        "twr_per": twr_per,
+        "pct_brut": pct_brut,
+    }
+
+
 def inflation_dict(ctx: Contexte) -> dict[int, float]:
     return _inflation_par_annee(ctx.inflation)
 

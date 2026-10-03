@@ -28,7 +28,7 @@ from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -198,37 +198,7 @@ ui.metric_usd_eur(
 st.divider()
 st.subheader("📈 Progression & Évolution du portefeuille")
 
-if not ctx.snapshots.empty and "date" in ctx.snapshots.columns:
-    snaps_all = S._snapshots_propres(ctx) if hasattr(S, "_snapshots_propres") else ctx.snapshots.copy()
-    snaps_all["date_dt"] = pd.to_datetime(snaps_all["date"], errors="coerce")
-    snaps_all = snaps_all.dropna(subset=["date_dt"]).sort_values("date_dt").reset_index(drop=True)
-
-    # Injecter ou mettre à jour le point du jour en direct avec la valorisation courante
-    aujourd_hui = pd.Timestamp(dt.date.today())
-    dernier_cap_usd = (
-        float(snaps_all["capital_investi_usd"].dropna().iloc[-1])
-        if "capital_investi_usd" in snaps_all.columns and not snaps_all["capital_investi_usd"].dropna().empty
-        else ctx.total_investi_usd
-    )
-    dernier_cap_eur = dernier_cap_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
-
-    point_live = {
-        "date": aujourd_hui.strftime("%Y-%m-%d"),
-        "date_dt": aujourd_hui,
-        "valeur_investie_usd": ctx.total_investi_usd,
-        "valeur_investie_eur": ctx.total_investi_eur,
-        "patrimoine_total_usd": ctx.patrimoine_total_usd,
-        "patrimoine_total_eur": ctx.patrimoine_total_eur,
-        "capital_investi_usd": dernier_cap_usd,
-        "capital_investi_eur": dernier_cap_eur,
-        "equivalent_or_oz": ctx.equivalent_or_oz,
-    }
-    if not snaps_all.empty and snaps_all["date_dt"].iloc[-1].date() == aujourd_hui.date():
-        for k, v in point_live.items():
-            snaps_all.loc[snaps_all.index[-1], k] = v
-    else:
-        snaps_all = pd.concat([snaps_all, pd.DataFrame([point_live])], ignore_index=True)
-
+if not ctx.snapshots.empty:
     col_per, col_assiette = st.columns([3.5, 1.5])
     with col_per:
         mode_periode = st.radio(
@@ -252,155 +222,88 @@ if not ctx.snapshots.empty and "date" in ctx.snapshots.columns:
             horizontal=True,
         )
 
-    col_val_usd = "valeur_investie_usd" if perimetre_graphe == "Portefeuille investi" else "patrimoine_total_usd"
-    col_val_eur = "valeur_investie_eur" if perimetre_graphe == "Portefeuille investi" else "patrimoine_total_eur"
+    date_deb_sel = None
+    date_fin_sel = None
+    if mode_periode == "Période choisie":
+        info_bornes = S.progression_periode(ctx, "Depuis le début", perimetre_graphe)
+        if not info_bornes.get("vide"):
+            d_min = info_bornes["d_min"]
+            d_max = info_bornes["d_max"]
+            d_def_debut = max(d_min, d_max - dt.timedelta(days=30))
+            cd1, cd2 = st.columns(2)
+            date_deb_sel = cd1.date_input("Du", value=d_def_debut, min_value=d_min, max_value=d_max)
+            date_fin_sel = cd2.date_input("Au", value=d_max, min_value=d_min, max_value=d_max)
 
-    # Construction de la sous-série selon le mode choisi
-    df_p = snaps_all.copy()
-    label_periode = mode_periode
+    prog = S.progression_periode(
+        ctx,
+        mode_periode=mode_periode,
+        perimetre=perimetre_graphe,
+        date_deb=date_deb_sel,
+        date_fin=date_fin_sel,
+    )
 
-    if mode_periode == "Progression journalière":
-        # Série quotidienne : on filtre sur les snapshots quotidiens récents (ou les 60 derniers points)
-        # et les compteurs affichent la progression du dernier jour (aujourd'hui vs veille)
-        df_graphe = df_p.tail(min(len(df_p), 90)).copy()
-        df_calc = df_p.tail(min(len(df_p), 2)).copy()
-        if len(df_calc) >= 2:
-            d0 = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
-            d1 = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
-            label_periode = f"Journalière ({d0} → {d1})"
-    elif mode_periode == "Progression mensuelle":
-        df_p["ym"] = df_p["date_dt"].dt.to_period("M")
-        df_graphe = df_p.groupby("ym", as_index=False).last().sort_values("date_dt").reset_index(drop=True)
-        df_calc = df_graphe.tail(min(len(df_graphe), 2)).copy()
-        if len(df_calc) >= 2:
-            d0 = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
-            d1 = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
-            label_periode = f"Mensuelle ({d0} → {d1})"
-    elif mode_periode == "Depuis le début du mois":
-        debut_mois = pd.Timestamp(aujourd_hui.year, aujourd_hui.month, 1)
-        avant_mois = df_p[df_p["date_dt"] < debut_mois]
-        dans_mois = df_p[df_p["date_dt"] >= debut_mois]
-        if not avant_mois.empty:
-            df_graphe = pd.concat([avant_mois.tail(1), dans_mois], ignore_index=True)
-        else:
-            df_graphe = dans_mois.copy()
-        df_calc = df_graphe.copy()
-        if len(df_calc) >= 2:
-            label_periode = f"Depuis le début du mois ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
-    elif mode_periode == "Depuis le début de l'année":
-        debut_annee = pd.Timestamp(aujourd_hui.year, 1, 1)
-        avant_annee = df_p[df_p["date_dt"] < debut_annee]
-        dans_annee = df_p[df_p["date_dt"] >= debut_annee]
-        if not avant_annee.empty:
-            df_graphe = pd.concat([avant_annee.tail(1), dans_annee], ignore_index=True)
-        else:
-            df_graphe = dans_annee.copy()
-        df_calc = df_graphe.copy()
-        if len(df_calc) >= 2:
-            label_periode = f"Depuis le début de l'année {aujourd_hui.year} ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
-    elif mode_periode == "Période choisie":
-        d_min = df_p["date_dt"].min().date()
-        d_max = df_p["date_dt"].max().date()
-        d_def_debut = max(d_min, d_max - dt.timedelta(days=30))
-        cd1, cd2 = st.columns(2)
-        date_deb = cd1.date_input("Du", value=d_def_debut, min_value=d_min, max_value=d_max)
-        date_fin = cd2.date_input("Au", value=d_max, min_value=d_min, max_value=d_max)
-        ts_deb = pd.Timestamp(date_deb)
-        ts_fin = pd.Timestamp(date_fin)
-        avant_deb = df_p[df_p["date_dt"] <= ts_deb]
-        fenetre = df_p[(df_p["date_dt"] > ts_deb) & (df_p["date_dt"] <= ts_fin)]
-        if not avant_deb.empty:
-            df_graphe = pd.concat([avant_deb.tail(1), fenetre], ignore_index=True)
-        else:
-            df_graphe = df_p[df_p["date_dt"] <= ts_fin].copy()
-        df_calc = df_graphe.copy()
-        if len(df_calc) >= 2:
-            label_periode = f"Du {df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} au {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')}"
-    else:  # Depuis le début
-        df_graphe = df_p.copy()
-        df_calc = df_p.copy()
-        if len(df_calc) >= 2:
-            label_periode = f"Depuis l'origine ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
-
-    # Calcul des indicateurs de progression sur df_calc
-    if len(df_calc) >= 2:
-        v_debut_usd = float(df_calc[col_val_usd].iloc[0])
-        v_fin_usd = float(df_calc[col_val_usd].iloc[-1])
-        delta_val_usd = v_fin_usd - v_debut_usd
-        delta_val_eur = delta_val_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
-
-        # Flux d'apports sur la fenêtre de calcul
-        dates_calc = [pd.Timestamp(d).date() for d in df_calc["date_dt"]]
-        valeurs_calc = [float(v) for v in df_calc[col_val_usd]]
-        flux_calc = S._flux_usd_par_periode(ctx, dates_calc, df_calc)
-        apports_periode_usd = sum(flux_calc.values())
-        apports_periode_eur = apports_periode_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
-
-        gain_marche_usd = delta_val_usd - apports_periode_usd
-        gain_marche_eur = gain_marche_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
-        twr_per = metrics.twr(list(zip(dates_calc, valeurs_calc)), flux_calc)
-        pct_brut = (delta_val_usd / v_debut_usd) if v_debut_usd > 0 else 0.0
-
-        st.caption(f"📌 **Période analysée :** {label_periode}")
+    if not prog.get("vide"):
+        st.caption(f"📌 **Période analysée :** {prog['label_periode']}")
         p1, p2, p3, p4 = st.columns(4)
         ui.metric_usd_eur(
-            p1, f"Gain de marché ({mode_periode})", gain_marche_usd, gain_marche_eur,
+            p1, f"Gain de marché ({mode_periode})", prog["gain_marche_usd"], prog["gain_marche_eur"],
             signe=True,
             help="Gain ou perte purement généré par le marché sur la période (hors apports/retraits).",
         )
         p2.metric(
             "Performance (TWR) sur la période",
-            ui.pct(twr_per, decimales=2, signe=True) if twr_per is not None else ui.pct(pct_brut, decimales=2, signe=True),
-            delta=f"Variation brute : {ui.pct(pct_brut, decimales=2, signe=True)}",
+            ui.pct(prog["twr_per"], decimales=2, signe=True),
+            delta=f"Variation brute : {ui.pct(prog['pct_brut'], decimales=2, signe=True)}",
             help="Rendement pondéré par le temps (neutralise l'effet des apports).",
         )
         ui.metric_usd_eur(
-            p3, "Variation totale de valeur", delta_val_usd, delta_val_eur,
+            p3, "Variation totale de valeur", prog["delta_val_usd"], prog["delta_val_eur"],
             signe=True,
-            help=f"Passage de {ui.usd(v_debut_usd)} à {ui.usd(v_fin_usd)} sur la période.",
+            help=f"Passage de {ui.usd(prog['v_debut_usd'])} à {ui.usd(prog['v_fin_usd'])} sur la période.",
         )
         ui.metric_usd_eur(
-            p4, "Apports nets sur la période", apports_periode_usd, apports_periode_eur,
+            p4, "Apports nets sur la période", prog["apports_periode_usd"], prog["apports_periode_eur"],
             signe=True,
             help="Total des apports moins les retraits enregistrés durant cette période.",
         )
 
-    # Graphique interactif Plotly
-    fig_prog = go.Figure()
-    fig_prog.add_trace(go.Scatter(
-        x=df_graphe["date_dt"],
-        y=df_graphe[col_val_usd],
-        name=f"{perimetre_graphe} ($)",
-        mode="lines+markers" if len(df_graphe) <= 45 else "lines",
-        line=dict(color="#58a6ff", width=2.8),
-        fill="tozeroy",
-        fillcolor="rgba(88, 166, 255, 0.10)",
-        hovertemplate="%{x|%d/%m/%Y}<br><b>$ %{y:,.2f}</b><extra></extra>",
-    ))
-    if "capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi":
+        df_graphe = prog["df_graphe"]
+        col_val_usd = prog["col_val_usd"]
+        fig_prog = go.Figure()
         fig_prog.add_trace(go.Scatter(
             x=df_graphe["date_dt"],
-            y=df_graphe["capital_investi_usd"],
-            name="Capital investi cumulé ($)",
-            mode="lines",
-            line=dict(color="#8b949e", width=1.8, dash="dot"),
-            hovertemplate="%{x|%d/%m/%Y}<br>Capital investi : $ %{y:,.2f}<extra></extra>",
+            y=df_graphe[col_val_usd],
+            name=f"{perimetre_graphe} ($)",
+            mode="lines+markers" if len(df_graphe) <= 45 else "lines",
+            line=dict(color="#58a6ff", width=2.8),
+            fill="tozeroy",
+            fillcolor="rgba(88, 166, 255, 0.10)",
+            hovertemplate="%{x|%d/%m/%Y}<br><b>$ %{y:,.2f}</b><extra></extra>",
         ))
-    vals_y = pd.concat([
-        df_graphe[col_val_usd].dropna(),
-        df_graphe["capital_investi_usd"].dropna() if ("capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi") else pd.Series(dtype=float),
-    ])
-    y_min = float(vals_y.min()) * 0.96 if not vals_y.empty else 0.0
-    y_max = float(vals_y.max()) * 1.03 if not vals_y.empty else 100.0
-    fig_prog.update_layout(
-        height=370,
-        margin=dict(l=20, r=20, t=20, b=20),
-        yaxis_title=" Dollars ($)",
-        yaxis=dict(range=[y_min, y_max], tickprefix="$ "),
-        legend=dict(orientation="h", y=1.10),
-        hovermode="x unified",
-    )
-    st.plotly_chart(fig_prog, width="stretch")
+        if "capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi":
+            fig_prog.add_trace(go.Scatter(
+                x=df_graphe["date_dt"],
+                y=df_graphe["capital_investi_usd"],
+                name="Capital investi cumulé ($)",
+                mode="lines",
+                line=dict(color="#8b949e", width=1.8, dash="dot"),
+                hovertemplate="%{x|%d/%m/%Y}<br>Capital investi : $ %{y:,.2f}<extra></extra>",
+            ))
+        vals_y = pd.concat([
+            df_graphe[col_val_usd].dropna(),
+            df_graphe["capital_investi_usd"].dropna() if ("capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi") else pd.Series(dtype=float),
+        ])
+        y_min = float(vals_y.min()) * 0.96 if not vals_y.empty else 0.0
+        y_max = float(vals_y.max()) * 1.03 if not vals_y.empty else 100.0
+        fig_prog.update_layout(
+            height=370,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Dollars ($)",
+            yaxis=dict(range=[y_min, y_max], tickprefix="$ "),
+            legend=dict(orientation="h", y=1.10),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig_prog, width="stretch")
 else:
     st.info("Aucun historique de snapshots disponible.")
 

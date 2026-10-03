@@ -357,6 +357,8 @@ with tab_fonds:
 
     cols_c = st.columns(4)
     for idx, (code_dev, libelle, type_c, desc_c) in enumerate(COMPTES_META):
+        if isinstance(soldes_natifs, list):
+            soldes_natifs = {str(x.get("ticker", "")).upper(): x for x in soldes_natifs if isinstance(x, dict)}
         q_natif = float(soldes_natifs.get(code_dev, {}).get("quantite", 0.0))
         try:
             t_usd = 1.0 if code_dev == "USD" else fx.taux(code_dev, jour_iso, "USD")

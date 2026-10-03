@@ -403,7 +403,7 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
 
 
 
-def soldes_comptes_liquidites() -> list[dict]:
+def soldes_comptes_liquidites() -> dict[str, dict]:
     """Retourne l'état actuel des comptes de liquidités depuis la table `Donnees`."""
     comptes_defaut = [
         {"ticker": "USD", "nom": "💵 Compte courant USD (Cash disponible)", "type": "💵 Cash", "perimetre": "courant", "quantite": 0.0},
@@ -435,7 +435,7 @@ def soldes_comptes_liquidites() -> list[dict]:
                         par_ticker[t]["quantite"] = q
     except Exception:
         pass
-    return list(par_ticker.values())
+    return par_ticker
 
 
 def ajuster_solde_compte(
