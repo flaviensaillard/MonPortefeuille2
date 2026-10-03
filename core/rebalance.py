@@ -108,10 +108,19 @@ def diagnostiquer(
         valeur_cible = total_investi_eur * etat.poche.cible
         val_usd = getattr(etat, "valeur_usd", 0.0) or etat.valeur_eur
         valeur_cible_usd = tot_usd * etat.poche.cible
+        poids_reel = (
+            (val_usd / tot_usd)
+            if (val_usd > 0 and tot_usd > 0)
+            else (
+                (etat.valeur_eur / total_investi_eur)
+                if (etat.valeur_eur > 0 and total_investi_eur > 0)
+                else etat.poids_reel
+            )
+        )
         ecarts.append(EcartPoche(
             poche_cle=cle,
             poche_nom=etat.poche.nom,
-            poids_reel=etat.poids_reel,
+            poids_reel=poids_reel,
             poids_cible=etat.poids_cible,
             bande=etat.poche.bande,
             valeur_eur=etat.valeur_eur,

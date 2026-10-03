@@ -283,3 +283,66 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
     assert sim["case_1bk"] == 5741
     assert sim["case_2tr"] == 200
     assert sim["cocher_2op"] is True
+
+
+def test_formulaires_fiscaux_fermes_par_defaut():
+    """Tous les volets de formulaires dans pages/4_Fiscalite.py doivent être fermés à l'ouverture (expanded=False)."""
+    import pathlib
+    src = pathlib.Path("pages/4_Fiscalite.py").read_text(encoding="utf-8")
+    assert "Formulaire 2042 & 2042-C" in src
+    assert "Formulaire 2047" in src
+    assert "Formulaire 2074 / 2074-CMV" in src
+    assert "Formulaire 2086" in src
+    assert "Formulaire 3916 / 3916-bis" in src
+    assert "expanded=True" not in src
+
+
+def test_reequilibrage_integre_cash_disponible():
+    """Le diagnostic de rééquilibrage recalcule le poids réel sur (investi + cash disponible)."""
+    from core.models import POCHES_INVESTIES
+    from core.portfolio import EtatPoche
+    from core.rebalance import diagnostiquer
+
+    poche = POCHES_INVESTIES[0]  # cible 20 % (0.20)
+    val = 8000.0 * poche.cible   # 1600 $
+    etat = EtatPoche(
+        poche=poche,
+        valeur_eur=val,
+        valeur_usd=val,
+        poids_reel=1.0,  # 100 % des seuls actifs investis
+        poids_cible=poche.cible,
+        actifs=[],
+    )
+    # Si on a 1600 $ d'actifs et 6400 $ de cash disponible (assiette = 8000 $),
+    # le poids réel sur l'assiette est 1600 / 8000 = 20 % (pile à la cible, écart = 0).
+    ecarts = diagnostiquer({poche.cle: etat}, total_investi_eur=8000.0, total_investi_usd=8000.0)
+    assert len(ecarts) == 1
+    assert abs(ecarts[0].poids_reel - poche.cible) < 1e-9
+    assert abs(ecarts[0].ecart_usd) < 1e-6
+    assert not ecarts[0].hors_bande
+
+
+
+def test_calculer_rente_mensuelle_reelle():
+    """Vérifie le calcul de la rente mensuelle actuelle sur le principe de la retraite réelle."""
+    from core import metrics
+
+    # Capital 80 000 $, apports 60 000 $ (PV = 20 000 $, part_pv = 25 %)
+    # Rendement 8 %/an, inflation 2 %/an -> r_reel = 1.08 / 1.02 - 1 = 5.8823529 %
+    res = metrics.calculer_rente_mensuelle_reelle(
+        capital_usd=80000.0,
+        apports_cumules_usd=60000.0,
+        rendement_annuel=0.08,
+        inflation_annuelle=0.02,
+        taux_imposition_pv=0.30,
+        taux_eur_usd=1.15,
+    )
+    assert abs(res["part_pv"] - 0.25) < 1e-9
+    r_reel_attendu = 1.08 / 1.02 - 1.0
+    brute_attendue = 80000.0 * r_reel_attendu / 12.0
+    impot_attendu = brute_attendue * 0.25 * 0.30
+    nette_attendue = brute_attendue - impot_attendu
+    assert abs(res["rente_brute_usd"] - brute_attendue) < 1e-6
+    assert abs(res["impot_usd"] - impot_attendu) < 1e-6
+    assert abs(res["rente_nette_usd"] - nette_attendue) < 1e-6
+    assert abs(res["rente_nette_eur"] - nette_attendue / 1.15) < 1e-6

@@ -400,3 +400,124 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
                 c.table("Config").insert({"Clé": k, "Valeur": val_str}).execute()
     except Exception:
         pass
+
+
+
+def soldes_comptes_liquidites() -> list[dict]:
+    """Retourne l'état actuel des comptes de liquidités depuis la table `Donnees`."""
+    comptes_defaut = [
+        {"ticker": "USD", "nom": "💵 Compte courant USD (Cash disponible)", "type": "💵 Cash", "perimetre": "courant", "quantite": 0.0},
+        {"ticker": "EUR", "nom": "💵 Compte courant EUR (Cash disponible)", "type": "💵 Cash", "perimetre": "courant", "quantite": 0.0},
+        {"ticker": "CHF", "nom": "🏦 Épargne de précaution — Réserve CHF", "type": "🏦 Cash réserve", "perimetre": "precaution", "quantite": 0.0},
+        {"ticker": "CNY", "nom": "🏦 Épargne de précaution — Réserve CNY", "type": "🏦 Cash réserve", "perimetre": "precaution", "quantite": 0.0},
+    ]
+    par_ticker = {c["ticker"]: dict(c) for c in comptes_defaut}
+    try:
+        df = lire("Donnees")
+        if df is not None and not df.empty and "Ticker" in df.columns:
+            for _, r in df.iterrows():
+                t = str(r.get("Ticker") or "").strip().upper()
+                typ = str(r.get("Type") or "")
+                if t in par_ticker or "Cash" in typ:
+                    try:
+                        q = float(str(r.get("Quantité") or 0.0).replace(",", ".").replace(" ", ""))
+                    except Exception:
+                        q = 0.0
+                    if t not in par_ticker:
+                        par_ticker[t] = {
+                            "ticker": t,
+                            "nom": f"{typ or '💵 Cash'} ({t})",
+                            "type": typ or "💵 Cash",
+                            "perimetre": "precaution" if "réserve" in typ.lower() else "courant",
+                            "quantite": q,
+                        }
+                    else:
+                        par_ticker[t]["quantite"] = q
+    except Exception:
+        pass
+    return list(par_ticker.values())
+
+
+def ajuster_solde_compte(
+    ticker: str,
+    delta_quantite: float,
+    type_defaut: str = "💵 Cash",
+    taux_usd: float = 1.0,
+) -> float | None:
+    """Ajoute `delta_quantite` (positif ou négatif) à la ligne `ticker` dans `Donnees`.
+
+    Retourne le nouveau solde dans la devise du compte, ou `None` en cas d'échec.
+    """
+    t_up = str(ticker).strip().upper()
+    try:
+        c = client()
+        df = lire("Donnees")
+        if df is not None and not df.empty and "Ticker" in df.columns:
+            m = df[df["Ticker"].astype(str).str.strip().str.upper() == t_up]
+            if not m.empty:
+                row = m.iloc[0]
+                try:
+                    q_actuel = float(str(row.get("Quantité") or 0.0).replace(",", ".").replace(" ", ""))
+                except Exception:
+                    q_actuel = 0.0
+                q_nouveau = round(max(0.0, q_actuel + float(delta_quantite)), 6)
+                val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+                maj = {
+                    "Quantité": q_nouveau,
+                    "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
+                }
+                if pd.notna(row.get("id")):
+                    c.table("Donnees").update(maj).eq("id", int(row["id"])).execute()
+                else:
+                    c.table("Donnees").update(maj).eq("Ticker", t_up).execute()
+                return q_nouveau
+        # Si la ligne n'existe pas encore dans Donnees
+        q_nouveau = round(max(0.0, float(delta_quantite)), 6)
+        val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+        c.table("Donnees").insert({
+            "Ticker": t_up,
+            "Type": type_defaut,
+            "Devise Cotation": "Auto",
+            "Court": f"$ {float(taux_usd or 1.0):.2f}",
+            "Quantité": q_nouveau,
+            "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
+            "Pourcentage (%)": 0,
+        }).execute()
+        return q_nouveau
+    except Exception:
+        return None
+
+
+def ajouter_historique_v1(
+    date_fr: str,
+    sens: str,
+    montant_usd: float,
+    montant_eur: float,
+    montant_or: float,
+) -> None:
+    """Ajoute une ligne dans `Historique` (v1) avec `Total_Apports_nets` à jour
+    afin que les robots v1 et v2 restent parfaitement synchronisés."""
+    try:
+        c = client()
+        df_h = lire("Historique")
+        cumul = 0.0
+        if df_h is not None and not df_h.empty and "Montant $" in df_h.columns:
+            for _, r in df_h.iterrows():
+                try:
+                    m_u = float(str(r.get("Montant $") or 0.0).replace(",", ".").replace(" ", "").replace("$", ""))
+                except Exception:
+                    m_u = 0.0
+                t_m = str(r.get("Type") or "").lower()
+                cumul += m_u if ("ajout" in t_m or "apport" in t_m) else -m_u
+        est_apport = sens.lower().startswith("apport") or "ajout" in sens.lower()
+        nouveau_cumul = round(cumul + (montant_usd if est_apport else -montant_usd), 2)
+        c.table("Historique").insert({
+            "Date": date_fr,
+            "Type": "Ajout de fond propre" if est_apport else "Retrait",
+            "Montant $": round(montant_usd, 2),
+            "Montant €": round(montant_eur, 2),
+            "Montant Or": round(montant_or, 6),
+            "Total_Apports_nets": nouveau_cumul,
+        }).execute()
+    except Exception:
+        pass

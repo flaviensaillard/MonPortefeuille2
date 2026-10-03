@@ -795,3 +795,54 @@ def anomalie_saut(saut: dict, devise: str = "€") -> str:
         "la main, ou un versement non saisi. Dans les trois cas, ce n'est pas de "
         "la performance, et les chiffres ci-dessus sont trop flatteurs."
     )
+
+
+
+def calculer_rente_mensuelle_reelle(
+    capital_usd: float,
+    apports_cumules_usd: float,
+    rendement_annuel: float,
+    inflation_annuelle: float = 0.02,
+    taux_imposition_pv: float = 0.314,
+    taux_eur_usd: float = 1.15,
+) -> dict[str, float]:
+    """Calcule la rente mensuelle perpétuelle en pouvoir d'achat réel (méthode de la page Retraite).
+
+    Principe :
+    - On ne consomme que le **rendement réel** au-dessus de l'inflation :
+      `r_reel = (1 + rendement_annuel) / (1 + inflation_annuelle) - 1`
+      de sorte que le capital conserve intégralement son pouvoir d'achat année après année.
+    - La fiscalité (`taux_imposition_pv`, ex. PFU) ne s'applique qu'à la **part de plus-value**
+      contenue dans le capital (`part_pv = max(0, capital - apports) / capital`).
+    """
+    cap_u = max(0.0, float(capital_usd or 0.0))
+    app_u = max(0.0, float(apports_cumules_usd or 0.0))
+    fx_u = float(taux_eur_usd) if (taux_eur_usd and taux_eur_usd > 0) else 1.0
+
+    r_reel = (1.0 + float(rendement_annuel)) / (1.0 + float(inflation_annuelle)) - 1.0
+    pv_latente_usd = max(0.0, cap_u - app_u)
+    part_pv = (pv_latente_usd / cap_u) if cap_u > 0 else 0.0
+
+    rente_brute_usd = cap_u * max(0.0, r_reel) / 12.0
+    impot_usd = rente_brute_usd * part_pv * max(0.0, float(taux_imposition_pv))
+    rente_nette_usd = rente_brute_usd - impot_usd
+
+    return {
+        "capital_usd": cap_u,
+        "capital_eur": cap_u / fx_u,
+        "apports_cumules_usd": app_u,
+        "apports_cumules_eur": app_u / fx_u,
+        "plus_value_usd": pv_latente_usd,
+        "plus_value_eur": pv_latente_usd / fx_u,
+        "part_pv": part_pv,
+        "rendement_nominal": float(rendement_annuel),
+        "inflation": float(inflation_annuelle),
+        "rendement_reel": r_reel,
+        "taux_imposition_pv": float(taux_imposition_pv),
+        "rente_brute_usd": rente_brute_usd,
+        "rente_brute_eur": rente_brute_usd / fx_u,
+        "impot_usd": impot_usd,
+        "impot_eur": impot_usd / fx_u,
+        "rente_nette_usd": rente_nette_usd,
+        "rente_nette_eur": rente_nette_usd / fx_u,
+    }

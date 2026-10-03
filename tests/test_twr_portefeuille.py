@@ -8,7 +8,7 @@ les quatre comptaient les versements comme du rendement :
 | Appelant | Ce qu'il affichait |
 |---|---|
 | `Contexte.perf_globale_pct` → `app.py` | la perf de la page d'accueil |
-| tableau annuel de `5_Performance.py` | +66 % là où la stratégie faisait 10 % |
+| tableau annuel de `2_Performance.py` | +66 % là où la stratégie faisait 10 % |
 | CAGR historique de `6_Retraite.py` | **76 %/an**, valeur par défaut de la projection |
 | `oz_final / oz_initial` → `app.py` | +120 % là où la stratégie faisait 16,9 % |
 
@@ -231,7 +231,7 @@ class TestAucunePageNeRecalcule:
         """Contrôle : le gardien ne doit pas être plus bête qu'il ne faut."""
         import pathlib
         racine = pathlib.Path(__file__).resolve().parent.parent
-        source = (racine / "pages" / "5_Performance.py").read_text(encoding="utf-8")
+        source = (racine / "pages" / "2_Performance.py").read_text(encoding="utf-8")
         assert 'snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]' in source
 
 

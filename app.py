@@ -2,16 +2,17 @@
 
 Ce que cette page corrige par rapport à la v1 :
 
-- La **performance est donnée en onces d'or**, pas seulement en euros. C'est
-  l'étalon de Gave : « l'or montera tant que les monnaies ne redeviendront pas des
-  réserves de valeur ». La v1 collectait une colonne `Montant Or` à chaque apport
-  et ne s'en servait jamais.
+- La **performance est donnée en onces d'or**, pas seulement en devises fiduciaires.
+  C'est l'étalon de Gave : « l'or montera tant que les monnaies ne redeviendront pas des
+  réserves de valeur ».
 
-- L'**épargne de précaution est affichée séparément** du portefeuille investi. La
-  v1 la mélangeait dans l'assiette de rééquilibrage, ce qui faussait toutes les
-  dérives.
+- L'**épargne de précaution est affichée séparément** du portefeuille investi, tandis
+  que le **cash disponible (compte courant en $)** est intégré à l'assiette de
+  rééquilibrage pour être réinvesti vers les poches sous-pondérées.
 
-- Aucune valeur de repli. Si un cours ou un taux manque, un bandeau le dit.
+- Un **graphique de progression interactif** permet de suivre l'évolution en temps réel
+  (par défaut en **progression journalière**, ou mensuelle, depuis le début du mois,
+  depuis le début de l'année, depuis l'origine, ou sur une période choisie).
 """
 
 from __future__ import annotations
@@ -19,36 +20,29 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
-from core import prices
+from core import metrics, prices
 from core import session as S
 from core import ui
-from core.models import Perimetre
 
 st.set_page_config(page_title="Mon Portefeuille", page_icon="📊", layout="wide")
 
 st.title("📊 Tableau de bord")
 
-# `charger()` est mémoïsé 5 minutes (`st.cache_data(ttl=300)`). Après un import,
-# l'application continuait donc à servir les anciennes transactions — d'où un
-# message d'erreur qui survivait à sa propre correction. Le bouton vide le cache
-# et relance le calcul.
 col_titre, col_rafraichir = st.columns([5, 1])
 with col_rafraichir:
     if st.button("🔄 Rafraîchir", width="stretch",
-                 help="Relecture depuis Supabase. À utiliser après un import."):
+                 help="Relecture depuis Supabase. À utiliser après un import ou un mouvement."):
         S.vider_cache()
         st.rerun()
 
 ctx = S.charger()
 
-# Fraicheur des donnees. Un bandeau d'anomalie qui survit a sa correction vient
-# presque toujours d'un serveur qui tourne sur une vieille version du code : la
-# date ci-dessous le montre immediatement.
 if ctx.importe_le:
     st.caption(f"Données importées le {ctx.importe_le[:16].replace('T', ' ')} — "
-               f"si cette date est anterieure a votre dernier import, "
+               f"si cette date est antérieure à votre dernier import, "
                f"cliquez sur 🔄 Rafraîchir.")
 
 for err in ctx.erreurs:
@@ -58,11 +52,7 @@ ui.appareil({"tables": not ctx.tables_absentes})
 ui.bandeau_erreurs(ctx.echecs_cours, "cours")
 ui.bandeau_erreurs(ctx.echecs_fx, "taux de change")
 
-# Transactions incohérentes : on prévient sans bloquer. Une ligne douteuse ne
-# doit pas vous priver de la vue d'ensemble de votre patrimoine.
 if ctx.anomalies_transactions:
-    # Tickers concernés, déduits des messages. Une vente sans position ne dit pas
-    # ce qui manque : montrer les lignes du titre permet de le voir tout de suite.
     tickers_concernes = sorted({
         mot for a in ctx.anomalies_transactions for mot in a.split()
         if any(mot == t.ticker for t in ctx.transactions)
@@ -98,10 +88,6 @@ if ctx.anomalies_transactions:
                 key=lambda t: (t.date, 0 if t.est_achat else 1),
             )])
             st.dataframe(detail, hide_index=True, width="stretch")
-            st.caption(
-                "Trié par date, achats avant ventes. Si un achat apparaît après "
-                "une vente, c'est la date qu'il faut corriger dans la v1."
-            )
 
 if ctx.erreurs:
     st.stop()
@@ -125,9 +111,291 @@ ui.metric_usd_eur(
     help="Réserve CHF / CNY disponible en 5 minutes. Jamais rééquilibrée.",
 )
 ui.metric_usd_eur(
-    c4, "Compte courant", ctx.total_courant_usd, ctx.total_courant_eur,
-    help="Liquidités courantes hors portefeuille d'investissement.",
+    c4, "Cash disponible (Compte courant)", ctx.total_courant_usd, ctx.total_courant_eur,
+    help="Liquidités courantes ($) incluses dans l'assiette de rééquilibrage.",
 )
+
+# ---------------------------------------------------------------------------
+# Rente mensuelle actuelle (si départ à la retraite aujourd'hui)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader(
+    "🏖️ Rente mensuelle actuelle (si retraite aujourd'hui)",
+    help="Calculée exactement sur le même principe que la page Retraite : on ne retire que le rendement réel au-dessus de l'inflation afin de préserver 100 % du pouvoir d'achat de votre capital, et l'impôt (PFU) ne frappe que la part de plus-value.",
+)
+
+# Capital investi + cash disponible et apports nets cumulés à ce jour
+cap_retraite_auj_usd = ctx.total_investi_usd + ctx.total_courant_usd
+apports_cum_auj_usd = cap_retraite_auj_usd
+if not ctx.snapshots.empty and "capital_investi_usd" in ctx.snapshots.columns:
+    s_cap = ctx.snapshots["capital_investi_usd"].dropna()
+    s_cap_pos = s_cap[s_cap > 0]
+    if not s_cap_pos.empty:
+        apports_cum_auj_usd = float(s_cap_pos.iloc[-1])
+
+cagr_hist = S.twr_annualise_portefeuille(ctx)
+rend_hist = cagr_hist if (cagr_hist is not None and cagr_hist > 0) else 0.08
+infl_ref = 0.02
+taux_pfu_ref = 0.314  # PFU 31,4 % (12,8 % IR + 18,6 % PS)
+
+rente_auj_hist = metrics.calculer_rente_mensuelle_reelle(
+    capital_usd=cap_retraite_auj_usd,
+    apports_cumules_usd=apports_cum_auj_usd,
+    rendement_annuel=rend_hist,
+    inflation_annuelle=infl_ref,
+    taux_imposition_pv=taux_pfu_ref,
+    taux_eur_usd=ctx.taux_eur_usd,
+)
+rente_auj_8pct = metrics.calculer_rente_mensuelle_reelle(
+    capital_usd=cap_retraite_auj_usd,
+    apports_cumules_usd=apports_cum_auj_usd,
+    rendement_annuel=0.08,
+    inflation_annuelle=infl_ref,
+    taux_imposition_pv=taux_pfu_ref,
+    taux_eur_usd=ctx.taux_eur_usd,
+)
+
+r1, r2, r3, r4 = st.columns(4)
+ui.metric_usd_eur(
+    r1,
+    f"Rente nette / mois (Scénario A : {rend_hist*100:.1f} %/an)",
+    rente_auj_hist["rente_nette_usd"],
+    rente_auj_hist["rente_nette_eur"],
+    help=f"Avec le rendement annualisé historique de votre portefeuille ({rend_hist*100:.2f} %/an), inflation {infl_ref*100:.1f} %/an (rendement réel {rente_auj_hist['rendement_reel']*100:.2f} %/an) et PFU {taux_pfu_ref*100:.1f} % sur la part de plus-value ({rente_auj_hist['part_pv']*100:.1f} %).",
+)
+ui.metric_usd_eur(
+    r2,
+    f"Rente brute / mois (Scénario A : {rend_hist*100:.1f} %/an)",
+    rente_auj_hist["rente_brute_usd"],
+    rente_auj_hist["rente_brute_eur"],
+    help=f"Avant impôt sur la part de plus-value (impôt mensuel estimé : {ui.usd_eur(rente_auj_hist['impot_usd'], rente_auj_hist['impot_eur'])}).",
+)
+ui.metric_usd_eur(
+    r3,
+    "Rente nette / mois (Scénario B : 8,0 %/an)",
+    rente_auj_8pct["rente_nette_usd"],
+    rente_auj_8pct["rente_nette_eur"],
+    help="Avec le scénario de référence à 8,0 %/an nominal et 2,0 %/an d'inflation (rendement réel 5,88 %/an), net de PFU sur la part de plus-value.",
+)
+ui.metric_usd_eur(
+    r4,
+    "Plus-value latente dans le capital",
+    rente_auj_hist["plus_value_usd"],
+    rente_auj_hist["plus_value_eur"],
+    help=f"Part de plus-value dans chaque retrait : {ui.pct(rente_auj_hist['part_pv'])} (Capital : {ui.usd(cap_retraite_auj_usd)} − Apports : {ui.usd(apports_cum_auj_usd)}).",
+)
+
+# ---------------------------------------------------------------------------
+# Progression & Évolution dynamique du portefeuille
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("📈 Progression & Évolution du portefeuille")
+
+if not ctx.snapshots.empty and "date" in ctx.snapshots.columns:
+    snaps_all = S._snapshots_propres(ctx) if hasattr(S, "_snapshots_propres") else ctx.snapshots.copy()
+    snaps_all["date_dt"] = pd.to_datetime(snaps_all["date"], errors="coerce")
+    snaps_all = snaps_all.dropna(subset=["date_dt"]).sort_values("date_dt").reset_index(drop=True)
+
+    # Injecter ou mettre à jour le point du jour en direct avec la valorisation courante
+    aujourd_hui = pd.Timestamp(dt.date.today())
+    dernier_cap_usd = (
+        float(snaps_all["capital_investi_usd"].dropna().iloc[-1])
+        if "capital_investi_usd" in snaps_all.columns and not snaps_all["capital_investi_usd"].dropna().empty
+        else ctx.total_investi_usd
+    )
+    dernier_cap_eur = dernier_cap_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
+
+    point_live = {
+        "date": aujourd_hui.strftime("%Y-%m-%d"),
+        "date_dt": aujourd_hui,
+        "valeur_investie_usd": ctx.total_investi_usd,
+        "valeur_investie_eur": ctx.total_investi_eur,
+        "patrimoine_total_usd": ctx.patrimoine_total_usd,
+        "patrimoine_total_eur": ctx.patrimoine_total_eur,
+        "capital_investi_usd": dernier_cap_usd,
+        "capital_investi_eur": dernier_cap_eur,
+        "equivalent_or_oz": ctx.equivalent_or_oz,
+    }
+    if not snaps_all.empty and snaps_all["date_dt"].iloc[-1].date() == aujourd_hui.date():
+        for k, v in point_live.items():
+            snaps_all.loc[snaps_all.index[-1], k] = v
+    else:
+        snaps_all = pd.concat([snaps_all, pd.DataFrame([point_live])], ignore_index=True)
+
+    col_per, col_assiette = st.columns([3.5, 1.5])
+    with col_per:
+        mode_periode = st.radio(
+            "Période d'analyse",
+            options=[
+                "Progression journalière",
+                "Progression mensuelle",
+                "Depuis le début du mois",
+                "Depuis le début de l'année",
+                "Depuis le début",
+                "Période choisie",
+            ],
+            index=0,
+            horizontal=True,
+        )
+    with col_assiette:
+        perimetre_graphe = st.radio(
+            "Périmètre",
+            options=["Portefeuille investi", "Patrimoine total"],
+            index=0,
+            horizontal=True,
+        )
+
+    col_val_usd = "valeur_investie_usd" if perimetre_graphe == "Portefeuille investi" else "patrimoine_total_usd"
+    col_val_eur = "valeur_investie_eur" if perimetre_graphe == "Portefeuille investi" else "patrimoine_total_eur"
+
+    # Construction de la sous-série selon le mode choisi
+    df_p = snaps_all.copy()
+    label_periode = mode_periode
+
+    if mode_periode == "Progression journalière":
+        # Série quotidienne : on filtre sur les snapshots quotidiens récents (ou les 60 derniers points)
+        # et les compteurs affichent la progression du dernier jour (aujourd'hui vs veille)
+        df_graphe = df_p.tail(min(len(df_p), 90)).copy()
+        df_calc = df_p.tail(min(len(df_p), 2)).copy()
+        if len(df_calc) >= 2:
+            d0 = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
+            d1 = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
+            label_periode = f"Journalière ({d0} → {d1})"
+    elif mode_periode == "Progression mensuelle":
+        df_p["ym"] = df_p["date_dt"].dt.to_period("M")
+        df_graphe = df_p.groupby("ym", as_index=False).last().sort_values("date_dt").reset_index(drop=True)
+        df_calc = df_graphe.tail(min(len(df_graphe), 2)).copy()
+        if len(df_calc) >= 2:
+            d0 = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
+            d1 = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
+            label_periode = f"Mensuelle ({d0} → {d1})"
+    elif mode_periode == "Depuis le début du mois":
+        debut_mois = pd.Timestamp(aujourd_hui.year, aujourd_hui.month, 1)
+        avant_mois = df_p[df_p["date_dt"] < debut_mois]
+        dans_mois = df_p[df_p["date_dt"] >= debut_mois]
+        if not avant_mois.empty:
+            df_graphe = pd.concat([avant_mois.tail(1), dans_mois], ignore_index=True)
+        else:
+            df_graphe = dans_mois.copy()
+        df_calc = df_graphe.copy()
+        if len(df_calc) >= 2:
+            label_periode = f"Depuis le début du mois ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
+    elif mode_periode == "Depuis le début de l'année":
+        debut_annee = pd.Timestamp(aujourd_hui.year, 1, 1)
+        avant_annee = df_p[df_p["date_dt"] < debut_annee]
+        dans_annee = df_p[df_p["date_dt"] >= debut_annee]
+        if not avant_annee.empty:
+            df_graphe = pd.concat([avant_annee.tail(1), dans_annee], ignore_index=True)
+        else:
+            df_graphe = dans_annee.copy()
+        df_calc = df_graphe.copy()
+        if len(df_calc) >= 2:
+            label_periode = f"Depuis le début de l'année {aujourd_hui.year} ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
+    elif mode_periode == "Période choisie":
+        d_min = df_p["date_dt"].min().date()
+        d_max = df_p["date_dt"].max().date()
+        d_def_debut = max(d_min, d_max - dt.timedelta(days=30))
+        cd1, cd2 = st.columns(2)
+        date_deb = cd1.date_input("Du", value=d_def_debut, min_value=d_min, max_value=d_max)
+        date_fin = cd2.date_input("Au", value=d_max, min_value=d_min, max_value=d_max)
+        ts_deb = pd.Timestamp(date_deb)
+        ts_fin = pd.Timestamp(date_fin)
+        avant_deb = df_p[df_p["date_dt"] <= ts_deb]
+        fenetre = df_p[(df_p["date_dt"] > ts_deb) & (df_p["date_dt"] <= ts_fin)]
+        if not avant_deb.empty:
+            df_graphe = pd.concat([avant_deb.tail(1), fenetre], ignore_index=True)
+        else:
+            df_graphe = df_p[df_p["date_dt"] <= ts_fin].copy()
+        df_calc = df_graphe.copy()
+        if len(df_calc) >= 2:
+            label_periode = f"Du {df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} au {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')}"
+    else:  # Depuis le début
+        df_graphe = df_p.copy()
+        df_calc = df_p.copy()
+        if len(df_calc) >= 2:
+            label_periode = f"Depuis l'origine ({df_calc['date_dt'].iloc[0].strftime('%d/%m/%Y')} → {df_calc['date_dt'].iloc[-1].strftime('%d/%m/%Y')})"
+
+    # Calcul des indicateurs de progression sur df_calc
+    if len(df_calc) >= 2:
+        v_debut_usd = float(df_calc[col_val_usd].iloc[0])
+        v_fin_usd = float(df_calc[col_val_usd].iloc[-1])
+        delta_val_usd = v_fin_usd - v_debut_usd
+        delta_val_eur = delta_val_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
+
+        # Flux d'apports sur la fenêtre de calcul
+        dates_calc = [pd.Timestamp(d).date() for d in df_calc["date_dt"]]
+        valeurs_calc = [float(v) for v in df_calc[col_val_usd]]
+        flux_calc = S._flux_usd_par_periode(ctx, dates_calc, df_calc)
+        apports_periode_usd = sum(flux_calc.values())
+        apports_periode_eur = apports_periode_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
+
+        gain_marche_usd = delta_val_usd - apports_periode_usd
+        gain_marche_eur = gain_marche_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
+        twr_per = metrics.twr(list(zip(dates_calc, valeurs_calc)), flux_calc)
+        pct_brut = (delta_val_usd / v_debut_usd) if v_debut_usd > 0 else 0.0
+
+        st.caption(f"📌 **Période analysée :** {label_periode}")
+        p1, p2, p3, p4 = st.columns(4)
+        ui.metric_usd_eur(
+            p1, f"Gain de marché ({mode_periode})", gain_marche_usd, gain_marche_eur,
+            signe=True,
+            help="Gain ou perte purement généré par le marché sur la période (hors apports/retraits).",
+        )
+        p2.metric(
+            "Performance (TWR) sur la période",
+            ui.pct(twr_per, decimales=2, signe=True) if twr_per is not None else ui.pct(pct_brut, decimales=2, signe=True),
+            delta=f"Variation brute : {ui.pct(pct_brut, decimales=2, signe=True)}",
+            help="Rendement pondéré par le temps (neutralise l'effet des apports).",
+        )
+        ui.metric_usd_eur(
+            p3, "Variation totale de valeur", delta_val_usd, delta_val_eur,
+            signe=True,
+            help=f"Passage de {ui.usd(v_debut_usd)} à {ui.usd(v_fin_usd)} sur la période.",
+        )
+        ui.metric_usd_eur(
+            p4, "Apports nets sur la période", apports_periode_usd, apports_periode_eur,
+            signe=True,
+            help="Total des apports moins les retraits enregistrés durant cette période.",
+        )
+
+    # Graphique interactif Plotly
+    fig_prog = go.Figure()
+    fig_prog.add_trace(go.Scatter(
+        x=df_graphe["date_dt"],
+        y=df_graphe[col_val_usd],
+        name=f"{perimetre_graphe} ($)",
+        mode="lines+markers" if len(df_graphe) <= 45 else "lines",
+        line=dict(color="#58a6ff", width=2.8),
+        fill="tozeroy",
+        fillcolor="rgba(88, 166, 255, 0.10)",
+        hovertemplate="%{x|%d/%m/%Y}<br><b>$ %{y:,.2f}</b><extra></extra>",
+    ))
+    if "capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi":
+        fig_prog.add_trace(go.Scatter(
+            x=df_graphe["date_dt"],
+            y=df_graphe["capital_investi_usd"],
+            name="Capital investi cumulé ($)",
+            mode="lines",
+            line=dict(color="#8b949e", width=1.8, dash="dot"),
+            hovertemplate="%{x|%d/%m/%Y}<br>Capital investi : $ %{y:,.2f}<extra></extra>",
+        ))
+    vals_y = pd.concat([
+        df_graphe[col_val_usd].dropna(),
+        df_graphe["capital_investi_usd"].dropna() if ("capital_investi_usd" in df_graphe.columns and perimetre_graphe == "Portefeuille investi") else pd.Series(dtype=float),
+    ])
+    y_min = float(vals_y.min()) * 0.96 if not vals_y.empty else 0.0
+    y_max = float(vals_y.max()) * 1.03 if not vals_y.empty else 100.0
+    fig_prog.update_layout(
+        height=370,
+        margin=dict(l=20, r=20, t=20, b=20),
+        yaxis_title=" Dollars ($)",
+        yaxis=dict(range=[y_min, y_max], tickprefix="$ "),
+        legend=dict(orientation="h", y=1.10),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_prog, width="stretch")
+else:
+    st.info("Aucun historique de snapshots disponible.")
 
 # ---------------------------------------------------------------------------
 # L'étalon de Gave
@@ -152,9 +420,6 @@ perf_or = None
 if not ctx.snapshots.empty and "equivalent_or_oz" in ctx.snapshots.columns:
     perf_or = S.twr_en_or_portefeuille(ctx)
 
-# `perf_eur` : le TWR, PAS `derniere / premiere - 1`. Ce dernier comptait vos
-# versements comme du rendement — +628 % cumule sur le portefeuille reel, la
-# ou la strategie en avait produit une fraction. Voyez `twr_portefeuille`.
 perf_usd = S.twr_portefeuille(ctx)
 if perf_or is not None:
     g3.metric("Performance en or", ui.pct(perf_or, signe=True),
@@ -173,10 +438,17 @@ if perf_or is not None and perf_or < 0:
     )
 
 # ---------------------------------------------------------------------------
-# Allocation par poche
+# Allocation par poche (incluant le cash disponible du compte courant)
 # ---------------------------------------------------------------------------
 st.divider()
 st.subheader("⚖️ Allocation par poche")
+assiette_reeq_usd = ctx.total_investi_usd + ctx.total_courant_usd
+assiette_reeq_eur = ctx.total_investi_eur + ctx.total_courant_eur
+st.caption(
+    f"Assiette de rééquilibrage (Portefeuille investi + Cash disponible en compte courant) : "
+    f"**{ui.usd_eur(assiette_reeq_usd, assiette_reeq_eur)}** "
+    f"(dont **{ui.usd_eur(ctx.total_courant_usd, ctx.total_courant_eur)}** de cash disponible prêt à être investi)."
+)
 
 lignes = []
 for e in ctx.ecarts:
@@ -219,3 +491,65 @@ if ctx.total_precaution_usd > 0 or ctx.total_precaution_eur > 0:
         pc2, f"Budget mensuel sur {mois} mois",
         ctx.total_precaution_usd / mois, ctx.total_precaution_eur / mois, decimales=0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Suivi détaillé : Allocation dans le temps & Historique des snapshots
+# ---------------------------------------------------------------------------
+st.divider()
+with st.expander("📋 Historique des snapshots & Évolution des poches dans le temps", expanded=False):
+    if ctx.snapshots.empty:
+        st.info("Aucun snapshot enregistré.")
+    else:
+        df_s = ctx.snapshots.copy()
+        df_s["Date_DT"] = pd.to_datetime(df_s["date"], errors="coerce")
+        df_s = df_s.dropna(subset=["Date_DT"]).sort_values("Date_DT")
+
+        POCHES_HIST = {
+            "poche_rv_eur": "Réserve de valeur",
+            "poche_energie_eur": "Énergie",
+            "poche_asie_eur": "Asie / Chine",
+            "poche_jgb_eur": "Obligations japonaises",
+        }
+        presentes = [c for c in POCHES_HIST if c in df_s.columns and df_s[c].notna().any()]
+        if len(presentes) >= 2:
+            st.markdown("#### Évolution de la répartition par poche")
+            import plotly.express as px
+            part = df_s[presentes].div(df_s[presentes].sum(axis=1), axis=0).fillna(0.0) * 100.0
+            part["Date"] = df_s["Date_DT"].values
+            fig_poches = px.area(
+                part,
+                x="Date",
+                y=presentes,
+                labels={"value": "Part du portefeuille (%)", "variable": ""},
+                color_discrete_map={
+                    "poche_rv_eur": "#f1c40f",
+                    "poche_energie_eur": "#e74c3c",
+                    "poche_asie_eur": "#e67e22",
+                    "poche_jgb_eur": "#3498db",
+                },
+            )
+            fig_poches.for_each_trace(lambda t: t.update(name=POCHES_HIST.get(t.name, t.name)))
+            fig_poches.update_layout(yaxis_ticksuffix=" %", height=320)
+            st.plotly_chart(fig_poches, width="stretch")
+
+        st.markdown(f"#### Journal complet des snapshots ({len(df_s)} relevés)")
+        df_desc = df_s.sort_values("Date_DT", ascending=False)
+        ui.tableau(pd.DataFrame([{
+            "Date": r["Date_DT"].strftime("%d/%m/%Y"),
+            "Capital investi ($ / €)": ui.usd_eur(r.get("capital_investi_usd"), r.get("capital_investi_eur"))
+            if pd.notna(r.get("capital_investi_usd")) else "—",
+            "Portefeuille investi ($ / €)": ui.usd_eur(
+                r.get("valeur_investie_usd", r.get("patrimoine_investi_eur")),
+                r.get("valeur_investie_eur", r.get("patrimoine_investi_eur")),
+            ),
+            "Patrimoine total ($ / €)": ui.usd_eur(
+                r.get("patrimoine_total_usd", r.get("patrimoine_total_eur")),
+                r.get("patrimoine_total_eur"),
+            ),
+            "Précaution ($ / €)": ui.usd_eur(
+                r.get("precaution_usd", r.get("precaution_eur")),
+                r.get("precaution_eur"),
+            ),
+            "Or (oz)": f"{float(r['equivalent_or_oz']):.2f}" if pd.notna(r.get("equivalent_or_oz")) else "—",
+        } for _, r in df_desc.iterrows()]))

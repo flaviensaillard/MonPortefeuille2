@@ -72,7 +72,11 @@ class Contexte:
 
     @property
     def ecarts(self):
-        return diagnostiquer(self.etats, self.total_investi_eur, self.total_investi_usd)
+        return diagnostiquer(
+            self.etats,
+            self.total_investi_eur + self.total_courant_eur,
+            self.total_investi_usd + self.total_courant_usd,
+        )
 
     @property
     def besoins_reequilibrage(self):
