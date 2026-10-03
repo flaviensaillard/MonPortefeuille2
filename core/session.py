@@ -560,7 +560,10 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
             cap_raw = r.get("Capital investi")
             cap_u = float(cap_raw) if pd.notna(cap_raw) and float(cap_raw) > 0 else None
             inv_e = eur_inv_par_date.get(d_cle, round(inv_u / taux, 2))
-            tot_e = eur_tot_par_date.get(d_cle, round(tot_u / taux, 2))
+            ratio_jour = (inv_u / inv_e) if inv_e > 0 else taux
+            tot_e = eur_tot_par_date.get(d_cle, round(tot_u / ratio_jour, 2))
+            if tot_u > inv_u and tot_e <= inv_e:
+                tot_e = round(inv_e + (tot_u - inv_u) / ratio_jour, 2)
             lignes_u.append({
                 "Date": pd.Timestamp(d_cle),
                 "date": d_cle.isoformat(),
@@ -594,6 +597,9 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
                 else:
                     inv_u = inv_e * taux
                     tot_u = tot_e * taux
+                if tot_e <= inv_e and ctx.total_precaution_eur > 0:
+                    tot_e = round(inv_e + ctx.total_precaution_eur + ctx.total_courant_eur, 2)
+                    tot_u = round(inv_u + ctx.total_precaution_usd + ctx.total_courant_usd, 2)
                 lignes_u.append({
                     "Date": pd.Timestamp(d_cle),
                     "date": d_cle.isoformat(),
@@ -654,6 +660,58 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         snaps["patrimoine_total_usd"] = tot_u_list
         snaps["precaution_usd"] = prec_u_list
         ctx.snapshots = snaps
+
+    # --- 3. Propagation complète de `capital_investi_usd` et `capital_investi_eur` ---
+    # Garantit qu'aucune date (ni le 02/10/2026 où la v1 a écrit 0, ni les
+    # snapshots écrits par le robot v2 dans `pf2_snapshots`) n'affiche « — ».
+    if ctx.snapshots is not None and not ctx.snapshots.empty and "Date" in ctx.snapshots.columns:
+        df_s = ctx.snapshots.copy()
+        dates_s = [pd.Timestamp(d).date() for d in _parser_dates(df_s["Date"])]
+        col_ap_u = "montant_usd" if (ctx.apports is not None and "montant_usd" in getattr(ctx.apports, "columns", [])) else "montant_eur"
+        flux_u_map = flux_par_date(ctx.apports, col_ap_u)
+        flux_ap_u = metrics.flux_par_periode(dates_s, flux_u_map) if len(dates_s) >= 2 else [0.0] * len(dates_s)
+
+        cap_existant = (
+            pd.to_numeric(df_s["capital_investi_usd"], errors="coerce").where(lambda s: s > 0)
+            if "capital_investi_usd" in df_s.columns
+            else pd.Series([None] * len(df_s), index=df_s.index)
+        )
+
+        cap_u_final: list[float | None] = []
+        if cap_existant.notna().any():
+            prev_c: float | None = None
+            for i in range(len(df_s)):
+                val_c = cap_existant.iloc[i]
+                if pd.notna(val_c) and float(val_c) > 0:
+                    prev_c = round(float(val_c), 2)
+                    cap_u_final.append(prev_c)
+                elif prev_c is not None:
+                    f_i = float(flux_ap_u[i]) if i < len(flux_ap_u) else 0.0
+                    prev_c = round(prev_c + f_i, 2)
+                    cap_u_final.append(prev_c)
+                else:
+                    cap_u_final.append(None)
+        elif flux_u_map:
+            for d_i in dates_s:
+                cum_u = sum(m for d_ap, m in flux_u_map.items() if d_ap <= d_i)
+                cap_u_final.append(round(cum_u, 2) if cum_u > 0 else None)
+        else:
+            cap_u_final = [None] * len(df_s)
+
+        cap_e_final: list[float | None] = []
+        for i, (_, r_s) in enumerate(df_s.iterrows()):
+            cu = cap_u_final[i]
+            if cu is None or cu <= 0:
+                cap_e_final.append(None)
+            else:
+                inv_u_i = float(r_s.get("patrimoine_investi_usd") or 0.0)
+                inv_e_i = float(r_s.get("patrimoine_investi_eur") or 0.0)
+                ratio_i = (inv_u_i / inv_e_i) if (inv_u_i > 0 and inv_e_i > 0) else taux
+                cap_e_final.append(round(cu / ratio_i, 2))
+
+        df_s["capital_investi_usd"] = cap_u_final
+        df_s["capital_investi_eur"] = cap_e_final
+        ctx.snapshots = df_s
 
 
 

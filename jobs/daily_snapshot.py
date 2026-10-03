@@ -84,12 +84,36 @@ def main() -> int:
     totaux = {p.value: 0.0 for p in Perimetre}
     totaux_usd = {p.value: 0.0 for p in Perimetre}
     poches = {cle: 0.0 for cle in POCHES_PAR_CLE}
+    tickers_deja = {a.ticker.upper() for a in actifs}
     for a in actifs:
         p = POCHES_PAR_CLE.get(a.poche)
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
         totaux[cle] += a.valeur_eur
         totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
+
+    # --- Complément des liquidités (épargne de précaution CHF/CNY et compte courant USD/EUR) depuis Donnees ---
+    try:
+        comptes_liq = db.soldes_comptes_liquidites()
+        if isinstance(comptes_liq, dict):
+            for dev_code, info in comptes_liq.items():
+                code = str(dev_code).upper()
+                if code in tickers_deja:
+                    continue
+                qte = float(info.get("quantite") or 0.0)
+                if qte <= 0:
+                    continue
+                perim = str(info.get("perimetre") or Perimetre.COURANT.value)
+                try:
+                    t_eur = 1.0 if code == "EUR" else float(fx.taux(code, aujourdhui.isoformat(), "EUR"))
+                    t_usd = 1.0 if code == "USD" else float(fx.taux(code, aujourdhui.isoformat(), "USD"))
+                except Exception:
+                    continue
+                cle_p = Perimetre.PRECAUTION.value if perim == "precaution" else Perimetre.COURANT.value
+                totaux[cle_p] = totaux.get(cle_p, 0.0) + qte * t_eur
+                totaux_usd[cle_p] = totaux_usd.get(cle_p, 0.0) + qte * t_usd
+    except Exception as exc:
+        log.warning("Lecture des liquidités Donnees ignorée : %s", exc)
 
     # --- Or ---
     try:

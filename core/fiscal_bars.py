@@ -400,3 +400,93 @@ def parts_fiscales_auto(statut: str, enfants: int) -> float:
     if n == 2:
         return base + 1.0
     return base + 1.0 + float(n - 2)
+
+
+URL_ASSISTANT_MAJ_BAREMES = "https://arena.ai/agent/01a0f24c-13af-734b-9dd4-91b1ceafa74f"
+
+
+def verifier_maj_baremes_fiscaux(
+    annee_selectionnee: int | None = None,
+    date_reference: object = None,
+) -> dict:
+    """Vérifie si une nouvelle version des barèmes fiscaux est disponible.
+
+    Retourne un dictionnaire :
+    - `disponible` (bool) : True si une nouvelle version des barèmes fiscaux est
+      disponible / requise, False si les barèmes intégrés sont à jour.
+    - `derniere_annee` (int) : dernier millésime présent dans `BAREMES`.
+    - `url` (str) : lien vers l'assistant Arena de mise à jour.
+    - `message` (str) : explication détaillée de l'état.
+    """
+    import datetime as dt
+    import re
+    import urllib.request
+    import json
+
+    auj = date_reference if isinstance(date_reference, dt.date) else dt.date.today()
+    derniere_annee = max(BAREMES.keys())
+    cible = annee_selectionnee or auj.year
+
+    # 1. Nouvelle année fiscale non encore présente dans BAREMES (ex. dès 2027)
+    if auj.year > derniere_annee or cible > derniere_annee:
+        an_manquant = max(auj.year, cible)
+        return {
+            "disponible": True,
+            "derniere_annee": derniere_annee,
+            "url": URL_ASSISTANT_MAJ_BAREMES,
+            "message": (
+                f"Les barèmes fiscaux pour les revenus {an_manquant} (Loi de Finances) "
+                f"sont publiés, alors que l'application s'arrête au millésime {derniere_annee}."
+            ),
+        }
+
+    # 2. Ouverture de la campagne déclarative de printemps (avril N+1) sur un barème non définitif
+    source_cible = SOURCE_PAR_ANNEE.get(cible, "")
+    if "recouper" in source_cible.lower() and auj >= dt.date(cible + 1, 4, 1):
+        return {
+            "disponible": True,
+            "derniere_annee": derniere_annee,
+            "url": URL_ASSISTANT_MAJ_BAREMES,
+            "message": (
+                f"La campagne de déclaration des revenus {cible} est ouverte au BOFiP : "
+                f"une vérification / consolidation officielle des seuils {cible} est disponible."
+            ),
+        }
+
+    # 3. Sonde rapide sur data.gouv.fr pour détecter la publication d'un millésime > derniere_annee
+    try:
+        req = urllib.request.Request(
+            "https://www.data.gouv.fr/api/1/datasets/?q=bareme+impot+sur+le+revenu&page_size=3",
+            headers={"User-Agent": "MonPortefeuille2/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            for item in payload.get("data", []):
+                titre = str(item.get("title") or "")
+                for m in re.findall(r"\b(20[2-9]\d)\b", titre):
+                    an_trouve = int(m)
+                    # Le barème de l'année N porte sur les revenus N-1 ou N
+                    if an_trouve > derniere_annee + 1:
+                        return {
+                            "disponible": True,
+                            "derniere_annee": derniere_annee,
+                            "url": URL_ASSISTANT_MAJ_BAREMES,
+                            "message": (
+                                f"Un nouveau jeu de données officiel (« {titre} ») a été "
+                                f"détecté sur data.gouv.fr au-delà du millésime {derniere_annee}."
+                            ),
+                        }
+    except Exception:
+        pass
+
+    return {
+        "disponible": False,
+        "derniere_annee": derniere_annee,
+        "url": URL_ASSISTANT_MAJ_BAREMES,
+        "message": (
+            f"Aucune nouvelle version en attente — les barèmes fiscaux sont à jour "
+            f"jusqu'aux revenus {derniere_annee} (IR, décote, PFU {taux_pfu(derniere_annee)*100:.1f} %, "
+            f"barème kilométrique et forfait repas)."
+        ),
+    }
+

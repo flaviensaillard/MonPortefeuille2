@@ -476,8 +476,8 @@ with st.expander("📋 Historique des snapshots & Évolution des poches dans le 
             "Capital investi ($ / €)": ui.usd_eur(r.get("capital_investi_usd"), r.get("capital_investi_eur"))
             if pd.notna(r.get("capital_investi_usd")) else "—",
             "Portefeuille investi ($ / €)": ui.usd_eur(
-                r.get("valeur_investie_usd", r.get("patrimoine_investi_eur")),
-                r.get("valeur_investie_eur", r.get("patrimoine_investi_eur")),
+                r.get("patrimoine_investi_usd", r.get("patrimoine_investi_eur")),
+                r.get("patrimoine_investi_eur"),
             ),
             "Patrimoine total ($ / €)": ui.usd_eur(
                 r.get("patrimoine_total_usd", r.get("patrimoine_total_eur")),

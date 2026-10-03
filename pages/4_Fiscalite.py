@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 
 import pandas as pd
 import streamlit as st
@@ -13,7 +14,13 @@ from core import guide_fiscal as guide
 from core import session as S, tax
 from core import ui
 
+if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(ui, "_NAV_V2"):
+    importlib.reload(fb)
+    importlib.reload(ui)
+    importlib.reload(S)
+
 st.set_page_config(page_title="Fiscalité", page_icon="🏛️", layout="wide")
+ui.styliser_navigation()
 st.title("🏛️ Simulateur Fiscal & Déclaration Pré-remplie")
 st.caption(
     "Tous les barèmes officiels (impôt sur le revenu, décote, barème "
@@ -86,6 +93,25 @@ st.markdown(
     f"""<div style="background-color:rgba(30,41,59,0.75);color:#ffffff;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #2ecc71;font-size:0.93rem;">\n    <strong>🟢 Barèmes fiscaux automatiques — Revenus {annee} (déclaration {annee + 1})</strong><br>\n    <span style="font-size:0.86rem;opacity:0.9;">\n    • <b>Tranches IR {annee}</b> : 0 % jusqu'à {bareme_ir.tranches[0]:,.0f} € · 11 % jusqu'à {bareme_ir.tranches[1]:,.0f} € · 30 % jusqu'à {bareme_ir.tranches[2]:,.0f} € · 41 % jusqu'à {bareme_ir.tranches[3]:,.0f} € · 45 % au-delà<br>\n    • <b>Décote {annee}</b> : Célibataire (base {bareme_ir.decote_base_celibataire:,.0f} €, plafond {bareme_ir.decote_plafond_celibataire:,.0f} €) · Couple (base {bareme_ir.decote_base_couple:,.0f} €, plafond {bareme_ir.decote_plafond_couple:,.0f} €)<br>\n    • <b>PFU (Flat Tax) {annee}</b> : {fb.IR_FORFAITAIRE * 100:.1f} % IR + {ps_taux * 100:.1f} % PS = <b>{pfu_taux * 100:.1f} %</b> (CSG déductible au barème : 6,8 %)<br>\n    • <b>Frais professionnels {annee}</b> : Barème kilométrique officiel URSSAF/DGFiP (3 à 7+ CV) · Forfait repas : <b>{repas_unit:.2f} €/repas</b>\n    </span>\n    </div>""".replace(",", " "),
     unsafe_allow_html=True,
 )
+
+etat_maj_baremes = fb.verifier_maj_baremes_fiscaux(annee)
+if etat_maj_baremes["disponible"]:
+    st.markdown(
+        f"""<a href="{etat_maj_baremes['url']}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
+        <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
+        <strong>🔔 Nouvelle version des barèmes fiscaux disponible !</strong><br>
+        <span style="font-size:0.88rem;color:#ffffff;">{etat_maj_baremes['message']}</span><br>
+        <span style="text-decoration:underline;font-weight:600;color:#38bdf8;">👉 Cliquez ici pour ouvrir votre assistant Arena et mettre à jour les barèmes fiscaux ↗</span>
+        </div></a>""",
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        f"""<div style="background-color:rgba(56,189,248,0.10);color:#e2e8f0;border-radius:10px;padding:10px 16px;margin-bottom:14px;border-left:5px solid #38bdf8;font-size:0.88rem;">
+        ✅ <strong>État des barèmes fiscaux :</strong> {etat_maj_baremes['message']}
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 if annee in fb.PS_ANNEE_INCERTAINE:
     st.info("ℹ️ " + fb.PS_ANNEE_INCERTAINE[annee])
