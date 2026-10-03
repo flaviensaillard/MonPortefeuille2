@@ -78,13 +78,12 @@ def definir_taux_eur_usd(taux: float | None) -> None:
         _TAUX_EUR_USD = val
 
 
-def usd(montant: float | None, decimales: int = 2, signe: bool = False) -> str:
+def usd(montant: float | None, decimales: int = 2) -> str:
     """Formate un montant en dollars, à la française (ex. « 79 007,00 $ »)."""
     valeur = _nombre(montant)
     if valeur is None:
         return "—"
-    fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
-    return f"{valeur:{fmt}}".replace(",", " ").replace(".", ",") + " $"
+    return f"{valeur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
 
 
 def usd_eur(
@@ -92,7 +91,6 @@ def usd_eur(
     montant_eur: float | None = None,
     taux_eur_usd: float | None = None,
     decimales: int = 2,
-    signe: bool = False,
 ) -> str:
     """Formate un montant en dollars avec son indication en euros (« X $ / Y € »).
 
@@ -107,19 +105,32 @@ def usd_eur(
     if v_eur is None:
         t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
         v_eur = (v_usd / t) if (t and t > 0) else v_usd
-    fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
-    s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
-    s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+    s_usd = f"{v_usd:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
+    s_eur = f"{v_eur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
     return f"{s_usd} / {s_eur}"
 
 
-def eur(montant: float | None, decimales: int = 2, signe: bool = False) -> str:
-    """Formate un montant en euros, à la française."""
+def eur(montant: float | None, decimales: int = 2) -> str:
+    """Formate un montant en euros, à la française.
+
+    CORRECTION : le spécificateur était `f"{montant:,.{decimales} f}"`, avec une
+    ESPACE entre la précision et le `f`. Python veut les drapeaux (signe,
+    espace) AVANT la largeur et la précision :
+
+        f"{1234.5:,.2 f}"   → ValueError: Invalid format specifier ',.2 f'
+
+    Le défaut était là depuis le début, mais il ne s'était jamais vu : toutes les
+    erreurs précédentes (taux de change, tri des transactions...) arrêtaient
+    l'application avant qu'elle n'affiche le premier montant. Une fois ces
+    erreurs corrigées, le plantage est remonté ici.
+
+    On retire simplement l'espace : `,` pour les milliers, `.` pour la
+    précision, puis on convertit au format français.
+    """
     valeur = _nombre(montant)
     if valeur is None:
         return "—"
-    fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
-    return f"{valeur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+    return f"{valeur:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
 
 
 def quantite(valeur: float | None, chiffres: int = 6) -> str:
