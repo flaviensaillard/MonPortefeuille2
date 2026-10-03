@@ -28,7 +28,7 @@ from core import db, metrics, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "styliser_navigation"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)

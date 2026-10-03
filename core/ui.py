@@ -15,19 +15,43 @@ import pandas as pd
 import streamlit as st
 
 
+_NAV_V2 = True
+
+
 def styliser_navigation() -> None:
     """Renomme l'onglet principal « app » en « Tableau de bord » dans le menu latéral Streamlit."""
+    try:
+        import importlib
+        from pathlib import Path
+        st_page = importlib.import_module("streamlit.navigation.page")
+        orig = getattr(st_page, "_create_page", None)
+        if orig is not None and not getattr(orig, "_mp2_patched", False):
+            def _patched_create_page(page, *, default=False):
+                p = orig(page, default=default)
+                if default or Path(str(page)).name == "app.py":
+                    p._title = "Tableau de bord"
+                return p
+            _patched_create_page._mp2_patched = True  # type: ignore[attr-defined]
+            st_page._create_page = _patched_create_page
+    except Exception:
+        pass
+
     st.markdown(
         """
         <style>
-        [data-testid="stSidebarNavItems"] li:first-child a span:last-child,
-        [data-testid="stSidebarNav"] ul li:first-child a span:last-child {
-            font-size: 0 !important;
+        [data-testid="stSidebarNavItems"] li:first-child a[data-testid="stSidebarNavLink"] span,
+        [data-testid="stSidebarNav"] ul li:first-child a span {
+            display: none !important;
         }
-        [data-testid="stSidebarNavItems"] li:first-child a span:last-child::after,
-        [data-testid="stSidebarNav"] ul li:first-child a span:last-child::after {
-            content: "Tableau de bord";
+        [data-testid="stSidebarNavItems"] li:first-child a[data-testid="stSidebarNavLink"]::after,
+        [data-testid="stSidebarNav"] ul li:first-child a::after {
+            content: "Tableau de bord" !important;
             font-size: 0.875rem !important;
+            visibility: visible !important;
+            display: inline-block !important;
+            height: auto !important;
+            width: auto !important;
+            color: inherit !important;
         }
         </style>
         """,

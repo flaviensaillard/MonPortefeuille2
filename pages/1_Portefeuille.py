@@ -19,7 +19,7 @@ from core import ui
 from core.models import POCHES_PAR_CLE
 from core.portfolio import devise_cotation_de
 
-if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "styliser_navigation"):
+if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
