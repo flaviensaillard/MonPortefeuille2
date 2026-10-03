@@ -207,47 +207,7 @@ with st.expander(
         else:
             salaire_2, use_frais_2, km_2, cv_2, repas_2, elec_2 = 0.0, False, 0.0, 5, 0, False
 
-    # Calcul et affichage immédiat Frais réels vs Abattement 10 % à l'intérieur de « Déclaration de base »
-    _ab1 = fb.abattement_10_salaire(annee, salaire_1)
-    _km1_val, _km1_form = fb.frais_kilometriques(annee, int(cv_1), float(km_1), electrique=bool(elec_1)) if use_frais_1 else (0.0, "")
-    _rep1_val, _rep1_form = fb.frais_repas(annee, int(repas_1)) if use_frais_1 else (0.0, "")
-    _fr1 = round(_km1_val + _rep1_val) if use_frais_1 else 0
-    _ret1 = use_frais_1 and (_fr1 > _ab1)
-
-    _ab2 = fb.abattement_10_salaire(annee, salaire_2) if couple else 0
-    _km2_val, _km2_form = fb.frais_kilometriques(annee, int(cv_2), float(km_2), electrique=bool(elec_2)) if (couple and use_frais_2) else (0.0, "")
-    _rep2_val, _rep2_form = fb.frais_repas(annee, int(repas_2)) if (couple and use_frais_2) else (0.0, "")
-    _fr2 = round(_km2_val + _rep2_val) if (couple and use_frais_2) else 0
-    _ret2 = couple and use_frais_2 and (_fr2 > _ab2)
-
-    res_f1, res_f2 = st.columns(2)
-    with res_f1:
-        if _ret1:
-            st.success(
-                f"✅ **Vous — Frais réels retenus : {ui.eur(_fr1, 0)}** "
-                f"(plus avantageux que l'abattement 10 % de {ui.eur(_ab1, 0)}, "
-                f"soit **+{ui.eur(_fr1 - _ab1, 0)}** de déduction supplémentaire).\n\n"
-                f"👉 **Inscrivez `{_fr1} €` en case `1AK`** ({_km1_form} · {_rep1_form})."
-            )
-        else:
-            st.info(
-                f"ℹ️ **Vous — Abattement automatique de 10 % retenu : {ui.eur(_ab1, 0)}** "
-                f"(frais réels : {ui.eur(_fr1, 0)}). **Laissez la case `1AK` vide.**"
-            )
-    with res_f2:
-        if couple and salaire_2 > 0:
-            if _ret2:
-                st.success(
-                    f"✅ **Conjoint — Frais réels retenus : {ui.eur(_fr2, 0)}** "
-                    f"(plus avantageux que l'abattement 10 % de {ui.eur(_ab2, 0)}, "
-                    f"soit **+{ui.eur(_fr2 - _ab2, 0)}** de déduction supplémentaire).\n\n"
-                    f"👉 **Inscrivez `{_fr2} €` en case `1BK`** ({_km2_form} · {_rep2_form})."
-                )
-            else:
-                st.info(
-                    f"ℹ️ **Conjoint — Abattement automatique de 10 % retenu : {ui.eur(_ab2, 0)}** "
-                    f"(frais réels : {ui.eur(_fr2, 0)}). **Laissez la case `1BK` vide.**"
-                )
+    cont_frais_reels = st.container()
 
     st.divider()
     st.markdown("#### 🌍 Revenus d'intérêts étrangers & Comptes détenus hors de France")
@@ -328,6 +288,36 @@ sim = tax.simuler_foyer_complet(
     bilan_pv_actions_eur=d2074["bilan_net"],
     bilan_pv_crypto_imposable_eur=d2086["case_3an"],
 )
+
+with cont_frais_reels:
+    res_f1, res_f2 = st.columns(2)
+    with res_f1:
+        if sim["retenir_frais_reels_1"]:
+            st.success(
+                f"✅ **Vous — Frais réels retenus : {ui.eur(sim['frais_reels_1'], 0)}** "
+                f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_1'], 0)}, "
+                f"soit **+{ui.eur(sim['frais_reels_1'] - sim['abattement_10_1'], 0)}** de déduction supplémentaire).\n\n"
+                f"👉 **Inscrivez `{sim['case_1ak']} €` en case `1AK`** ({sim['frais_km_formule_1']} · {sim['frais_repas_formule_1']})."
+            )
+        else:
+            st.info(
+                f"ℹ️ **Vous — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_1'], 0)}** "
+                f"(frais réels : {ui.eur(sim['frais_reels_1'], 0)}). **Laissez la case `1AK` vide.**"
+            )
+    with res_f2:
+        if couple and salaire_2 > 0:
+            if sim["retenir_frais_reels_2"]:
+                st.success(
+                    f"✅ **Conjoint — Frais réels retenus : {ui.eur(sim['frais_reels_2'], 0)}** "
+                    f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_2'], 0)}, "
+                    f"soit **+{ui.eur(sim['frais_reels_2'] - sim['abattement_10_2'], 0)}** de déduction supplémentaire).\n\n"
+                    f"👉 **Inscrivez `{sim['case_1bk']} €` en case `1BK`** ({sim['frais_km_formule_2']} · {sim['frais_repas_formule_2']})."
+                )
+            else:
+                st.info(
+                    f"ℹ️ **Conjoint — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_2'], 0)}** "
+                    f"(frais réels : {ui.eur(sim['frais_reels_2'], 0)}). **Laissez la case `1BK` vide.**"
+                )
 
 # ---------------------------------------------------------------------------
 # 2. VOS FORMULAIRES DE DÉCLARATION (FERMÉS PAR DÉFAUT — CLIQUEZ POUR DÉPLOYER)
