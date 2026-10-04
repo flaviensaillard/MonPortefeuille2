@@ -161,10 +161,10 @@ def generer_ordres(
 
         # Répartition de l'ordre entre les actifs de la poche, au prorata de leur
         # valeur. Simple, et évite de concentrer le rééquilibrage sur un seul ETF.
-        total_poche = sum(a.valeur_eur for a in e.actifs) or 1.0
+        total_poche = sum(a.valeur_eur for a in e.actifs)
         ecart_u = abs(getattr(e, "ecart_usd", ecart))
         for a in e.actifs:
-            part = a.valeur_eur / total_poche
+            part = (a.valeur_eur / total_poche) if total_poche > 0 else (1.0 / len(e.actifs))
             montant = abs(ecart) * part
             montant_u = ecart_u * part
             quantite = montant / (a.prix * (a.dernier_taux or 1.0)) if a.prix > 0 else 0.0

@@ -691,6 +691,7 @@ def detail_2074_de_lannee(
 
     soldes: dict[str, dict[str, float]] = {}
     operations: list[dict] = []
+    pv_par_annee: dict[int, float] = {}
 
     for t in triees:
         if t.date.year > annee:
@@ -714,6 +715,7 @@ def detail_2074_de_lannee(
                 etat["qte"] = 0.0
                 etat["cout_eur"] = 0.0
 
+            pv_par_annee[t.date.year] = pv_par_annee.get(t.date.year, 0.0) + pv_eur
             if t.date.year == annee:
                 operations.append({
                     "actif": t.ticker,
@@ -725,6 +727,26 @@ def detail_2074_de_lannee(
                     "cession_globale_eur": net_eur,
                     "plus_value_eur": pv_eur,
                 })
+
+    # Suivi FIFO des moins-values mobilières antérieures reportables sur 10 ans (CGI art. 150-0 D, 11)
+    files_mv_ant: list[list[float]] = []  # [[annee_origine, montant_restant], ...]
+    for y in sorted(k for k in pv_par_annee if k < annee):
+        files_mv_ant = [item for item in files_mv_ant if y - int(item[0]) <= 10 and item[1] > 1e-6]
+        solde_y = pv_par_annee[y]
+        if solde_y < 0:
+            files_mv_ant.append([float(y), abs(solde_y)])
+        elif solde_y > 0 and files_mv_ant:
+            gain_y = solde_y
+            for item in files_mv_ant:
+                if gain_y <= 0:
+                    break
+                conso = min(gain_y, item[1])
+                item[1] -= conso
+                gain_y -= conso
+            files_mv_ant = [item for item in files_mv_ant if item[1] > 1e-6]
+
+    files_mv_ant = [item for item in files_mv_ant if annee - int(item[0]) <= 10 and item[1] > 1e-6]
+    mv_anterieures_dispo = round(sum(item[1] for item in files_mv_ant), 2)
 
     # Agrégation annuelle par titre (Cadre 5 : lignes 511 à 524)
     par_actif: list[dict] = []
@@ -756,9 +778,10 @@ def detail_2074_de_lannee(
     ligne_913 = abs(sum(a["ligne_524"] for a in par_actif if a["ligne_524"] < 0))
     bilan_net = ligne_905 - ligne_913
 
-    # Cadre 11 (Bloc 1133) : imputation des moins-values de l'année sur les gains
+    # Cadre 11 (Bloc 1133) : imputation des moins-values de l'année (Col B) et antérieures (Col D) sur les gains
     cadre_11: list[dict] = []
     mv_restante = ligne_913
+    mv_ant_restante = mv_anterieures_dispo
     for a in par_actif:
         if a["ligne_524"] <= 0:
             continue
@@ -766,15 +789,20 @@ def detail_2074_de_lannee(
         imput = min(gain_a, mv_restante)
         mv_restante = max(0.0, mv_restante - imput)
         col_c = gain_a - imput
+        imput_ant = min(col_c, mv_ant_restante)
+        mv_ant_restante = max(0.0, mv_ant_restante - imput_ant)
+        col_e = col_c - imput_ant
         cadre_11.append({
             "Titre (Bloc 1133)": a["actif"],
             "Col A — Gain (€)": round(gain_a, 2),
             "Col B — Perte de l'année imputée (€)": round(imput, 2),
             "Col C — Solde (A − B) (€)": round(col_c, 2),
-            "Col D — Pertes antérieures (€)": 0.0,
-            "Col E — Gain net imposable (C − D) (€)": round(col_c, 2),
+            "Col D — Pertes antérieures (€)": round(imput_ant, 2),
+            "Col E — Gain net imposable (C − D) (€)": round(col_e, 2),
             "Col F/G — Abattement durée détention (€)": 0.0,
         })
+
+    pv_nette_apres_mv_ant = max(0.0, bilan_net - mv_anterieures_dispo) if bilan_net > 0 else 0.0
 
     return {
         "annee": annee,
@@ -783,7 +811,8 @@ def detail_2074_de_lannee(
         "ligne_905": round(ligne_905, 2),
         "ligne_913": round(ligne_913, 2),
         "bilan_net": round(bilan_net, 2),
-        "case_3vg": round(bilan_net, 2) if bilan_net > 0 else 0.0,
+        "mv_anterieures_reportables": mv_anterieures_dispo,
+        "case_3vg": round(pv_nette_apres_mv_ant, 2) if bilan_net > 0 else 0.0,
         "case_3vh": round(abs(bilan_net), 2) if bilan_net < 0 else 0.0,
         "cadre_11": cadre_11,
         "choix_regime": choix_regime,
@@ -990,11 +1019,28 @@ def simuler_foyer_complet(
         ir_salaires.impot_net / (sal1 + sal2) if (sal1 + sal2) > 0 else 0.0
     )
 
-    # Taux de prélèvement à la source (PAS) individualisés (1 part chacun, sans décote)
-    ir_indiv_1 = impot_revenu(rev_net_1, 1.0, annee, "Célibataire", avec_decote=False)
-    ir_indiv_2 = impot_revenu(rev_net_2, 1.0, annee, "Célibataire", avec_decote=False) if couple else None
-    taux_pas_1 = ir_indiv_1.impot_net / sal1 if sal1 > 0 else 0.0
-    taux_pas_2 = (ir_indiv_2.impot_net / sal2) if (couple and sal2 > 0 and ir_indiv_2) else 0.0
+    # Taux de prélèvement à la source (PAS) individualisés (CGI art. 204 M) :
+    # - Le conjoint au revenu le plus faible se voit appliquer les règles d'un
+    #   célibataire avec la moitié des parts du foyer (`parts / 2`, incluant la
+    #   moitié des parts des personnes à charge) et la décote d'un célibataire.
+    # - Le conjoint au revenu le plus élevé supporte le solde de l'impôt du foyer
+    #   (`ir_foyer - ir_faible`), garantissant que la somme des prélèvements
+    #   égale exactement l'impôt du foyer.
+    if couple and sal1 > 0 and sal2 > 0:
+        demi_parts_foyer = max(1.0, parts / 2.0)
+        if rev_net_1 <= rev_net_2:
+            ir_faible = impot_revenu(rev_net_1, demi_parts_foyer, annee, "Célibataire", avec_decote=True)
+            impot_1 = min(ir_salaires.impot_net, ir_faible.impot_net)
+            impot_2 = max(0.0, ir_salaires.impot_net - impot_1)
+        else:
+            ir_faible = impot_revenu(rev_net_2, demi_parts_foyer, annee, "Célibataire", avec_decote=True)
+            impot_2 = min(ir_salaires.impot_net, ir_faible.impot_net)
+            impot_1 = max(0.0, ir_salaires.impot_net - impot_2)
+        taux_pas_1 = impot_1 / sal1 if sal1 > 0 else 0.0
+        taux_pas_2 = impot_2 / sal2 if sal2 > 0 else 0.0
+    else:
+        taux_pas_1 = taux_moyen_salaires
+        taux_pas_2 = 0.0
 
     return {
         "annee": annee,

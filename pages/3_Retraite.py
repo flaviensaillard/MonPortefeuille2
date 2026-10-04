@@ -124,18 +124,20 @@ def simuler(rendement: float, inflation: float) -> pd.DataFrame:
     apport = apport_mensuel
     trajectoire = []
     apports_cumules = apports_auj_usd
+    mois_cumules = 0
 
-    for i, annee in enumerate(annees):
+    for annee in annees:
         mois = 12 if annee > annee_courante else max(1, 13 - dt.date.today().month)
         for _ in range(mois):
             cap += apport
             apports_cumules += apport
             cap *= (1 + r_m)
+        mois_cumules += mois
         trajectoire.append({
             "Année": annee,
             "Capital nominal": cap,
             "Apports cumulés": apports_cumules,
-            "Capital réel": metrics.pouvoir_achat(cap, inflation, i + 1),
+            "Capital réel": metrics.pouvoir_achat(cap, inflation, mois_cumules / 12.0),
         })
         apport *= (1 + inflation)   # <-- l'inflation de CE scénario
 

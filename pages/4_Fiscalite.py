@@ -664,7 +664,11 @@ if arb is not None:
         st.markdown("**Option 2 — Barème Progressif (Case `2OP` cochée)**")
         st.metric("Supplément d'IR au barème (après décote)", ui.eur(arb["bareme"]["ir_marginal"]))
         st.metric(f"Prélèvements sociaux ({ps_taux * 100:.1f} %)", ui.eur(arb["bareme"]["ps"]))
-        st.metric("CSG déductible (6,8 %)", ui.eur(-arb["bareme"]["csg_deductible"]))
+        st.metric(
+            "Dont abattement CSG déductible (6,8 %)",
+            ui.eur(arb["bareme"]["csg_deductible"]),
+            help="Réduction de votre base imposable au barème (l'économie d'IR correspondante est déjà intégrée dans le supplément d'IR ci-dessus).",
+        )
         st.metric("Coût total avec le Barème", ui.eur(arb["bareme"]["total"]))
 
     if sim["cocher_2op"]:
@@ -672,13 +676,18 @@ if arb is not None:
             f"✅ **Recommandation : COCHEZ la case `2OP` (Barème Progressif) !** "
             f"Le barème vous coûte **{ui.eur(arb['bareme']['total'])}** contre **{ui.eur(arb['pfu']['total'])}** "
             f"au PFU, soit une économie nette de **{ui.eur(arb['gain'])}** "
-            f"(grâce à votre quotient familial de `{parts}` parts et à la décote)."
+            f"(grâce à votre quotient familial de `{parts}` parts et à la CSG déductible de 6,8 %)."
         )
     else:
+        explication_decote = (
+            " *(Note : bien que votre TMI soit à 11 %, votre foyer bénéficie de la **décote** : chaque euro ajouté au barème réduit votre décote de 45,25 %, ce qui porte le taux marginal réel d'IR au barème à 14,89 % après CSG déductible, contre 12,80 % au PFU.)*"
+            if (sim["ir_salaires"].decote > 0 and abs(sim["ir_salaires"].tmi - 0.11) < 1e-4)
+            else ""
+        )
         st.success(
             f"✅ **Recommandation : NE COCHEZ PAS la case `2OP` (conservez la Flat Tax / PFU) !** "
             f"La Flat Tax vous coûte **{ui.eur(arb['pfu']['total'])}** contre **{ui.eur(arb['bareme']['total'])}** "
-            f"au barème, soit une économie de **{ui.eur(arb['gain'])}**."
+            f"au barème, soit une économie de **{ui.eur(arb['gain'])}**.{explication_decote}"
         )
 
 st.markdown("#### 📌 Bilan complet de votre Impôt sur le Revenu")
@@ -704,11 +713,11 @@ b4.metric(
     delta=f"TMI : {sim['ir_salaires'].tmi * 100:.0f} %",
 )
 
-st.markdown("#### 👨‍👩‍👧‍👦 Taux de Prélèvement à la Source (PAS)")
+st.markdown("#### 👨‍👩‍👧‍👦 Taux de Prélèvement à la Source (PAS — CGI art. 204 H & 204 M)")
 p1, p2, p3 = st.columns(3)
 p1.info(f"👨‍👩‍👧‍👦 **Taux de PAS du foyer (taux non personnalisé) :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
 if couple:
-    p2.info(f"👤 **Taux individualisé estimé (Vous — 1 part) :** **{sim['taux_pas_1'] * 100:.2f} %**")
-    p3.info(f"👤 **Taux individualisé estimé (Conjoint — 1 part) :** **{sim['taux_pas_2'] * 100:.2f} %**")
+    p2.info(f"👤 **Taux individualisé (Vous — CGI art. 204 M) :** **{sim['taux_pas_1'] * 100:.2f} %**")
+    p3.info(f"👤 **Taux individualisé (Conjoint — CGI art. 204 M, {parts/2:g} part(s)) :** **{sim['taux_pas_2'] * 100:.2f} %**")
 else:
     p2.info(f"👤 **Taux personnalisé estimé :** **{sim['taux_pas_foyer'] * 100:.2f} %**")

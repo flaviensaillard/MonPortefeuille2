@@ -238,12 +238,6 @@ OR_PHYS_PV_IR = 0.19          # voûte plus-value : IR
 OR_PHYS_PV_PS = 0.172         # voûte plus-value : PS (le régime 150 VI reste à 17,2 %)
 OR_PHYS_ABATTEMENT_MAX = 22   # années pour l'exonération totale
 
-# Or physique, article 150 VI.
-OR_PHYS_TFMP = 0.115          # taxe forfaitaire sur les métaux précieux, sur le brut
-OR_PHYS_PV_IR = 0.19          # voûte plus-value : IR
-OR_PHYS_PV_PS = 0.172         # voûte plus-value : prélèvements sociaux
-OR_PHYS_ABATTEMENT_MAX = 22   # années pour l'exonération totale
-
 
 def bareme_de(annee: int) -> Bareme:
     """Barème applicable à une année de revenus.
@@ -404,6 +398,9 @@ def parts_fiscales_auto(statut: str, enfants: int) -> float:
 
 URL_ASSISTANT_MAJ_BAREMES = "https://arena.ai/agent/01a0f24c-13af-734b-9dd4-91b1ceafa74f"
 
+# Cache mémoire (TTL 1 h) pour éviter d'interroger data.gouv.fr à chaque interaction UI.
+_CACHE_SONDE_DATAGOUV: dict[int, tuple[float, dict | None]] = {}
+
 
 def verifier_maj_baremes_fiscaux(
     annee_selectionnee: int | None = None,
@@ -419,9 +416,10 @@ def verifier_maj_baremes_fiscaux(
     - `message` (str) : explication détaillée de l'état.
     """
     import datetime as dt
-    import re
-    import urllib.request
     import json
+    import re
+    import time
+    import urllib.request
 
     auj = date_reference if isinstance(date_reference, dt.date) else dt.date.today()
     derniere_annee = max(BAREMES.keys())
@@ -453,31 +451,44 @@ def verifier_maj_baremes_fiscaux(
             ),
         }
 
-    # 3. Sonde rapide sur data.gouv.fr pour détecter la publication d'un millésime > derniere_annee
-    try:
-        req = urllib.request.Request(
-            "https://www.data.gouv.fr/api/1/datasets/?q=bareme+impot+sur+le+revenu&page_size=3",
-            headers={"User-Agent": "MonPortefeuille2/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            for item in payload.get("data", []):
-                titre = str(item.get("title") or "")
-                for m in re.findall(r"\b(20[2-9]\d)\b", titre):
-                    an_trouve = int(m)
-                    # Le barème de l'année N porte sur les revenus N-1 ou N
-                    if an_trouve > derniere_annee + 1:
-                        return {
-                            "disponible": True,
-                            "derniere_annee": derniere_annee,
-                            "url": URL_ASSISTANT_MAJ_BAREMES,
-                            "message": (
-                                f"Un nouveau jeu de données officiel (« {titre} ») a été "
-                                f"détecté sur data.gouv.fr au-delà du millésime {derniere_annee}."
-                            ),
-                        }
-    except Exception:
-        pass
+    # 3. Sonde rapide sur data.gouv.fr (avec cache 1 h) pour détecter la publication d'un millésime > derniere_annee
+    now_ts = time.time()
+    cached = _CACHE_SONDE_DATAGOUV.get(derniere_annee)
+    if cached is not None and (now_ts - cached[0]) < 3600:
+        if cached[1] is not None:
+            return cached[1]
+    else:
+        trouve_remote: dict | None = None
+        try:
+            req = urllib.request.Request(
+                "https://www.data.gouv.fr/api/1/datasets/?q=bareme+impot+sur+le+revenu&page_size=3",
+                headers={"User-Agent": "MonPortefeuille2/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                for item in payload.get("data", []):
+                    titre = str(item.get("title") or "")
+                    for m in re.findall(r"\b(20[2-9]\d)\b", titre):
+                        an_trouve = int(m)
+                        # Le barème de l'année N porte sur les revenus N-1 ou N
+                        if an_trouve > derniere_annee + 1:
+                            trouve_remote = {
+                                "disponible": True,
+                                "derniere_annee": derniere_annee,
+                                "url": URL_ASSISTANT_MAJ_BAREMES,
+                                "message": (
+                                    f"Un nouveau jeu de données officiel (« {titre} ») a été "
+                                    f"détecté sur data.gouv.fr au-delà du millésime {derniere_annee}."
+                                ),
+                            }
+                            break
+                    if trouve_remote:
+                        break
+        except Exception:
+            pass
+        _CACHE_SONDE_DATAGOUV[derniere_annee] = (now_ts, trouve_remote)
+        if trouve_remote is not None:
+            return trouve_remote
 
     return {
         "disponible": False,
@@ -502,7 +513,7 @@ def generer_prompt_maj_baremes(annee_cible: int | None = None) -> str:
 2. Recherche sur les sources officielles françaises (Loi de Finances, BOFiP, Légifrance, service-public.fr, URSSAF) les barèmes officiels applicables aux **revenus {derniere_annee}** (consolidation BOFiP) et aux **revenus {prochaine_annee}** (et toute année ultérieure déjà votée) :
    - **Barème progressif de l'impôt sur le revenu (`BAREMES`)** : seuils des 4 premières tranches (`tranches`), taux des tranches (`taux`), et paramètres de la décote (`decote_base_celibataire`, `decote_plafond_celibataire`, `decote_base_couple`, `decote_plafond_couple`, `decote_taux`).
    - **Statut de vérification (`SOURCE_PAR_ANNEE`)** : indique la référence exacte (Loi de Finances / BOFiP) et retire la mention « à recouper BOFiP » pour les années désormais définitives.
-   - **Prélèvements sociaux et PFU (`PS_CAPITAL_PAR_ANNEE`, `IR_FORFAITAIRE`, `CSG_DEDUCTIBLE_BAREME`)** : taux des prélèvements sociaux sur les plus-values mobilières et revenus du capital pour {derniere_annee} et {prochaine_annee}.
+   - **Prélèvements sociaux et PFU (`PS_PAR_ANNEE`, `PS_ANNEE_INCERTAINE`, `IR_FORFAITAIRE`, `CSG_DEDUCTIBLE`)** : taux des prélèvements sociaux sur les plus-values mobilières et revenus du capital pour {derniere_annee} et {prochaine_annee}.
    - **Abattement forfaitaire de 10 % sur les salaires (`PLANCHER_ABATTEMENT_10_PAR_ANNEE` et `PLAFOND_ABATTEMENT_10_PAR_ANNEE`)** : plancher et plafond officiels (CGI art. 83, 3°).
    - **Frais professionnels aux frais réels (`FORFAIT_REPAS_PAR_ANNEE` et `BAREME_KM_VOITURE`)** : valeur forfaitaire du repas URSSAF/DGFiP pour {derniere_annee} et {prochaine_annee}, et barème kilométrique officiel voitures (3 CV à 7+ CV, CGI ann. IV art. 6 B).
 3. Conserve intégralement toutes les années historiques existantes (`2022` à `{derniere_annee}`) ainsi que **toutes les fonctions et constantes existantes sans modifier leurs signatures** (`Bareme`, `bareme_de`, `annees_disponibles`, `source_de`, `taux_ps`, `taux_pfu`, `forfait_repas_de`, `abattement_10_salaire`, `frais_kilometriques`, `frais_repas`, `parts_fiscales_auto`, `URL_ASSISTANT_MAJ_BAREMES`, `verifier_maj_baremes_fiscaux`, `generer_prompt_maj_baremes`).

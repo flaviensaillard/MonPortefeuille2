@@ -328,3 +328,46 @@ class TestQuotientFamilialCoupleEnfants:
         res_3p = tax.impot_revenu(180_000.0, parts=3.0, annee=2025, statut="Marié(e) / Pacsé(e)")
         res_2p = tax.impot_revenu(180_000.0, parts=2.0, annee=2025, statut="Marié(e) / Pacsé(e)")
         assert res_2p.impot_brut - res_3p.impot_brut == pytest.approx(2 * 1_759.0, abs=0.05)
+
+    def test_taux_pas_individualises_cgi_204m(self):
+        """CGI art. 204 M : la somme des prélèvements aux taux individualisés
+        (taux_pas_1 * sal1 + taux_pas_2 * sal2) doit être égale à l'IR du foyer."""
+        sim = tax.simuler_foyer_complet(
+            annee=2025,
+            statut="Marié(e) / Pacsé(e)",
+            enfants=2,
+            parts=3.0,
+            salaire_1=32_473.0,
+            utiliser_frais_reels_1=True,
+            km_1=9120,
+            cv_1=5,
+            jours_repas_1=240,
+            salaire_2=29_772.0,
+            utiliser_frais_reels_2=True,
+            km_2=9120,
+            cv_2=5,
+            jours_repas_2=200,
+        )
+        pas_total = sim["taux_pas_1"] * sim["salaire_1"] + sim["taux_pas_2"] * sim["salaire_2"]
+        assert pas_total == pytest.approx(sim["ir_salaires"].impot_net, abs=0.01)
+        assert sim["taux_pas_2"] < sim["taux_pas_foyer"] < sim["taux_pas_1"]
+
+    def test_report_moins_values_anterieures_2074_cgi_150_0_d(self):
+        """CGI art. 150-0 D, 11 : une moins-value nette de N-1 s'impute en Col D
+        du Cadre 11 et réduit la case 3VG de l'année N."""
+        from core.portfolio import Transaction
+        txs = [
+            Transaction("FLXC.L", "achat", dt.date(2024, 1, 10), 10.0, 100.0, 0.0, "EUR", 1000.0),
+            Transaction("FLXC.L", "vente", dt.date(2024, 6, 10), 10.0, 80.0, 0.0, "EUR", 800.0),   # MV 2024 = -200 €
+            Transaction("XDW0.L", "achat", dt.date(2025, 1, 10), 10.0, 100.0, 0.0, "EUR", 1000.0),
+            Transaction("XDW0.L", "vente", dt.date(2025, 6, 10), 10.0, 150.0, 0.0, "EUR", 1500.0),  # PV 2025 = +500 €
+        ]
+        d24 = tax.detail_2074_de_lannee(txs, 2024)
+        assert d24["case_3vh"] == pytest.approx(200.0)
+        d25 = tax.detail_2074_de_lannee(txs, 2025)
+        assert d25["ligne_905"] == pytest.approx(500.0)
+        assert d25["mv_anterieures_reportables"] == pytest.approx(200.0)
+        assert d25["cadre_11"][0]["Col D — Pertes antérieures (€)"] == pytest.approx(200.0)
+        assert d25["cadre_11"][0]["Col E — Gain net imposable (C − D) (€)"] == pytest.approx(300.0)
+        assert d25["case_3vg"] == pytest.approx(300.0)
+
