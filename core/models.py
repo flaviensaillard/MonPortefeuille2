@@ -226,15 +226,18 @@ POCHES_INVESTIES_DEFAUT: list[dict] = [
 ]
 
 ALLOCATION_ACTIFS_DEFAUT: list[dict] = [
-    {"ticker": "IGLN.L", "nom": "Or (iShares Physical Gold ETC)", "poche": "rv_physique", "cible_pct": 15.0, "classe": "or", "devise": "USD"},
-    {"ticker": "BTCUSDT", "nom": "Bitcoin", "poche": "rv_numerique", "cible_pct": 5.0, "classe": "crypto", "devise": "USD"},
-    {"ticker": "XDW0.L", "nom": "Xtrackers MSCI World Energy", "poche": "energie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
-    {"ticker": "FLXC.L", "nom": "Franklin FTSE China UCITS ETF", "poche": "asie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
-    {"ticker": "XJSE.SW", "nom": "Xtrackers II Japan Govt Bond", "poche": "jgb", "cible_pct": 20.0, "classe": "obligation_etf", "devise": "JPY"},
+    {"ticker": "IGLN.L", "nom": "Or (iShares Physical Gold ETC)", "poche": "rv_physique", "cible_pct": 15.0, "bande_pct": 3.0, "classe": "or", "devise": "USD"},
+    {"ticker": "BTCUSDT", "nom": "Bitcoin", "poche": "rv_numerique", "cible_pct": 5.0, "bande_pct": 3.0, "classe": "crypto", "devise": "USD"},
+    {"ticker": "XDW0.L", "nom": "Xtrackers MSCI World Energy", "poche": "energie", "cible_pct": 30.0, "bande_pct": 5.0, "classe": "action_etf", "devise": "USD"},
+    {"ticker": "FLXC.L", "nom": "Franklin FTSE China UCITS ETF", "poche": "asie", "cible_pct": 30.0, "bande_pct": 5.0, "classe": "action_etf", "devise": "USD"},
+    {"ticker": "XJSE.SW", "nom": "Xtrackers II Japan Govt Bond", "poche": "jgb", "cible_pct": 20.0, "bande_pct": 5.0, "classe": "obligation_etf", "devise": "JPY"},
 ]
 
 CIBLES_ACTIFS: dict[str, float] = {
     a["ticker"]: float(a["cible_pct"]) / 100.0 for a in ALLOCATION_ACTIFS_DEFAUT
+}
+BANDES_ACTIFS: dict[str, float] = {
+    a["ticker"]: float(a["bande_pct"]) / 100.0 for a in ALLOCATION_ACTIFS_DEFAUT
 }
 NOMS_ACTIFS: dict[str, str] = {
     a["ticker"]: str(a["nom"]) for a in ALLOCATION_ACTIFS_DEFAUT
@@ -244,6 +247,15 @@ NOMS_ACTIFS: dict[str, str] = {
 def cible_actif(ticker: str) -> float:
     """Retourne l'allocation cible (en fraction, ex. 0.30 pour 30 %) d'un actif."""
     return CIBLES_ACTIFS.get(str(ticker).upper().strip(), 0.0)
+
+
+def bande_actif(ticker: str) -> float:
+    """Retourne la fenêtre de dérive (en fraction, ex. 0.05 pour ±5 pts, 0.02 pour ±2 pts) d'un actif."""
+    tk = str(ticker).upper().strip()
+    if tk in BANDES_ACTIFS:
+        return BANDES_ACTIFS[tk]
+    p = poche_de(tk)
+    return p.bande if p else 0.05
 
 
 def allocation_par_defaut() -> dict:
@@ -284,6 +296,16 @@ def _lire_bande_pct_poche(p: dict) -> float:
     if "bande_pct" in p and p["bande_pct"] is not None:
         return max(0.5, float(p["bande_pct"]))
     return 5.0
+
+
+def _lire_bande_pct_actif(a: dict, defaut_pct: float = 5.0) -> float:
+    """Extrait la fenêtre de dérive d'un actif en points de % (ex. 2.0, 3.0, 5.0), qu'elle soit stockée sous `bande` (0.02) ou `bande_pct` (2.0)."""
+    if "bande" in a and a["bande"] is not None:
+        val = float(a["bande"])
+        return max(0.5, val * 100.0 if val <= 1.0 + 1e-6 else val)
+    if "bande_pct" in a and a["bande_pct"] is not None:
+        return max(0.5, float(a["bande_pct"]))
+    return max(0.5, float(defaut_pct))
 
 
 def verifier_allocation_cible(cfg_alloc: dict | None = None) -> dict:
@@ -430,9 +452,14 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
             cles_connues.add(p_cle)
 
     CIBLES_ACTIFS.clear()
+    BANDES_ACTIFS.clear()
     NOMS_ACTIFS.clear()
     membres_par_poche: dict[str, list[str]] = {str(p["cle"]): [] for p in poches_cfg}
     cible_par_poche: dict[str, float] = {str(p["cle"]): 0.0 for p in poches_cfg}
+    bandes_actifs_par_poche: dict[str, list[tuple[float, float]]] = {str(p["cle"]): [] for p in poches_cfg}
+    bandes_def_poche: dict[str, float] = {
+        str(p["cle"]): _lire_bande_pct_poche(p) for p in poches_cfg
+    }
 
     for a in actifs_cfg:
         tk = str(a.get("ticker") or "").upper().strip()
@@ -440,12 +467,17 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
             continue
         p_cle = str(a.get("poche") or "rv_physique").strip()
         c_pct = _lire_cible_pct_actif(a)
+        b_def = bandes_def_poche.get(p_cle, 3.0 if p_cle.startswith("rv") else 5.0)
+        b_a_pct = _lire_bande_pct_actif(a, defaut_pct=b_def)
         CIBLES_ACTIFS[tk] = c_pct / 100.0
+        BANDES_ACTIFS[tk] = b_a_pct / 100.0
         NOMS_ACTIFS[tk] = str(a.get("nom") or tk)
         membres_par_poche.setdefault(p_cle, [])
         if tk not in membres_par_poche[p_cle]:
             membres_par_poche[p_cle].append(tk)
         cible_par_poche[p_cle] = cible_par_poche.get(p_cle, 0.0) + (c_pct / 100.0)
+        if "bande" in a or "bande_pct" in a:
+            bandes_actifs_par_poche.setdefault(p_cle, []).append((c_pct, b_a_pct))
 
     nouvelles_poches: list[Poche] = []
     for p_info in poches_cfg:
@@ -454,7 +486,16 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
         if not membres:
             continue
         cible_p = round(cible_par_poche.get(cle, 0.0), 6)
-        bande_p = max(0.005, _lire_bande_pct_poche(p_info) / 100.0)
+        b_liste = bandes_actifs_par_poche.get(cle, [])
+        if b_liste:
+            tot_w = sum(w for w, _ in b_liste)
+            if tot_w > 0:
+                bande_pct_eff = sum(w * b for w, b in b_liste) / tot_w
+            else:
+                bande_pct_eff = sum(b for _, b in b_liste) / len(b_liste)
+            bande_p = max(0.005, round(bande_pct_eff / 100.0, 6))
+        else:
+            bande_p = max(0.005, _lire_bande_pct_poche(p_info) / 100.0)
         nouvelles_poches.append(Poche(
             cle=cle,
             nom=str(p_info.get("nom") or cle),

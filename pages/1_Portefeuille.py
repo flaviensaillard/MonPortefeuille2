@@ -95,6 +95,8 @@ with tab_actifs:
                 if ctx.total_investi_usd > 0 and a.est_investi else "—",
                 "Cible actif": ui.pct(models.cible_actif(a.ticker))
                 if a.est_investi and models.cible_actif(a.ticker) > 0 else "—",
+                "Fenêtre dérive": f"±{models.bande_actif(a.ticker) * 100:.1f} pts".replace(".0 pts", " pts")
+                if a.est_investi else "—",
                 "PRU": ui.usd_eur(pos.pru_usd, pos.pru_eur) if pos and pos.pru_usd else "—",
                 "Perf. ($)": ui.pct(pos.perf_globale_usd, decimales=2, signe=True)
                 if pos and pos.perf_globale_usd is not None else "—",
@@ -215,7 +217,7 @@ with tab_reeq:
                 "Cible": ui.pct(e.poids_cible),
                 "Réel (sur assiette)": ui.pct(e.poids_reel),
                 "Écart": ui.points(e.ecart_points),
-                "Bande": f"±{e.bande * 100:.0f} pts",
+                "Bande": f"±{e.bande * 100:.1f} pts".replace(".0 pts", " pts"),
                 "Valeur actuelle ($ / €)": ui.usd_eur(e.valeur_usd, e.valeur_eur),
                 "Valeur cible ($ / €)": ui.usd_eur(e.valeur_cible_usd, e.valeur_cible_eur),
                 "Ajustement ($ / €)": ui.usd_eur(e.ecart_usd, e.ecart_eur, signe=True),
@@ -901,27 +903,34 @@ with tab_alloc:
         for a in ctx.actifs
     }
 
-    st.markdown("#### 1. Modifier l'allocation cible de vos actifs (%)")
+    st.markdown("#### 1. Modifier l'allocation cible (%) et la fenêtre de dérive (± pts) de vos actifs")
 
     nouvelles_cibles_pct: dict[str, float] = {}
+    nouvelles_bandes_actif_pct: dict[str, float] = {}
     nouvelles_poches_actif: dict[str, str] = {}
+    bandes_poche_map = {
+        p["cle"]: models._lire_bande_pct_poche(p) for p in poches_cfg
+    }
 
-    ent1, ent2, ent3, ent4 = st.columns([2.2, 2.2, 1.3, 1.5])
+    ent1, ent2, ent3, ent4, ent5 = st.columns([2.1, 2.0, 1.1, 1.3, 1.3])
     ent1.markdown("**Actif (Ticker & Libellé)**")
     ent2.markdown("**Poche stratégique**")
-    ent3.markdown("**Poids réel actuel**")
+    ent3.markdown("**Poids réel**")
     ent4.markdown("**Allocation cible (%)**")
+    ent5.markdown("**Fenêtre dérive (± pts)**")
 
     for idx_a, a_item in enumerate(actifs_cfg):
         tk = str(a_item.get("ticker", "")).upper().strip()
         nom_a = str(a_item.get("nom") or tk)
-        poche_actuelle = str(a_item.get("poche") or (cles_poches[0] if cles_poches else "reserve_valeur"))
+        poche_actuelle = str(a_item.get("poche") or (cles_poches[0] if cles_poches else "rv_physique"))
         if poche_actuelle not in cles_poches and cles_poches:
             poche_actuelle = cles_poches[0]
         cible_actuelle_pct = round(models._lire_cible_pct_actif(a_item), 2)
+        def_bande_a = bandes_poche_map.get(poche_actuelle, 3.0 if poche_actuelle.startswith("rv") else 5.0)
+        bande_actuelle_pct = round(models._lire_bande_pct_actif(a_item, defaut_pct=def_bande_a), 1)
         poids_reel_pct = valeurs_reelles_par_ticker.get(tk, 0.0)
 
-        ca1, ca2, ca3, ca4 = st.columns([2.2, 2.2, 1.3, 1.5])
+        ca1, ca2, ca3, ca4, ca5 = st.columns([2.1, 2.0, 1.1, 1.3, 1.3])
         ca1.markdown(f"**`{tk}`** — {nom_a}")
         nouvelles_poches_actif[tk] = ca2.selectbox(
             f"Poche ({tk})",
@@ -942,6 +951,17 @@ with tab_alloc:
             key=f"alloc_cible_{tk}_{idx_a}",
             label_visibility="collapsed",
         )
+        nouvelles_bandes_actif_pct[tk] = ca5.number_input(
+            f"Fenêtre dérive ± pts ({tk})",
+            min_value=0.5,
+            max_value=25.0,
+            value=float(bande_actuelle_pct),
+            step=0.5,
+            format="%.1f",
+            key=f"alloc_bande_actif_{tk}_{idx_a}",
+            label_visibility="collapsed",
+            help="Fenêtre de dérive autorisée autour de la cible (ex. ±2,0 pts, ±3,0 pts, ±5,0 pts).",
+        )
 
     total_cible_live = round(sum(nouvelles_cibles_pct.values()), 2)
     ecart_100_live = round(total_cible_live - 100.0, 2)
@@ -960,10 +980,10 @@ with tab_alloc:
     else:
         st.success(f"✅ **Répartition cible totale équilibrée : {total_cible_live:.1f} %**")
 
-    with st.expander("⚖️ Récapitulatif & bandes de tolérance par poche", expanded=False):
+    with st.expander("⚖️ Récapitulatif par poche (cibles & fenêtres de dérive)", expanded=False):
         nouvelles_bandes_pct: dict[str, float] = {}
         lignes_recap_poches = []
-        for idx_p, p_item in enumerate(poches_cfg):
+        for p_item in poches_cfg:
             cle_p = p_item["cle"]
             cible_poche_live = sum(
                 nouvelles_cibles_pct.get(str(a_it["ticker"]).upper().strip(), 0.0)
@@ -975,24 +995,25 @@ with tab_alloc:
                 for a_it in actifs_cfg
                 if nouvelles_poches_actif.get(str(a_it["ticker"]).upper().strip()) == cle_p
             ]
-            bande_def_pct = round(models._lire_bande_pct_poche(p_item), 1)
-            cp1, cp2, cp3 = st.columns([2.5, 2.5, 1.5])
-            cp1.markdown(f"**{p_item['nom']}** (`{cible_poche_live:.1f} %`)")
-            cp2.caption("Actifs : " + (", ".join(actifs_de_la_poche) if actifs_de_la_poche else "Aucun"))
-            nouvelles_bandes_pct[cle_p] = cp3.number_input(
-                f"Bande ± pts ({p_item['nom']})",
-                min_value=1.0,
-                max_value=25.0,
-                value=float(bande_def_pct),
-                step=0.5,
-                format="%.1f",
-                key=f"alloc_bande_{cle_p}_{idx_p}",
-            )
+            if actifs_de_la_poche:
+                w_tot = sum(nouvelles_cibles_pct.get(tk_p, 0.0) for tk_p in actifs_de_la_poche)
+                if w_tot > 0:
+                    b_p_live = sum(
+                        nouvelles_cibles_pct.get(tk_p, 0.0) * nouvelles_bandes_actif_pct.get(tk_p, 5.0)
+                        for tk_p in actifs_de_la_poche
+                    ) / w_tot
+                else:
+                    b_p_live = sum(
+                        nouvelles_bandes_actif_pct.get(tk_p, 5.0) for tk_p in actifs_de_la_poche
+                    ) / len(actifs_de_la_poche)
+            else:
+                b_p_live = round(models._lire_bande_pct_poche(p_item), 1)
+            nouvelles_bandes_pct[cle_p] = round(b_p_live, 1)
             lignes_recap_poches.append({
                 "Poche": p_item["nom"],
                 "Actifs rattachés": ", ".join(actifs_de_la_poche) if actifs_de_la_poche else "—",
                 "Cible poche (%)": f"{cible_poche_live:.1f} %",
-                "Bande de tolérance": f"±{nouvelles_bandes_pct[cle_p]:.1f} pts",
+                "Fenêtre de dérive": f"±{nouvelles_bandes_pct[cle_p]:.1f} pts",
             })
         ui.tableau(pd.DataFrame(lignes_recap_poches))
 
@@ -1001,8 +1022,11 @@ with tab_alloc:
         for a_it in actifs_cfg:
             tk = str(a_it["ticker"]).upper().strip()
             c_pct = round(nouvelles_cibles_pct.get(tk, 0.0), 4)
+            b_a_pct = round(nouvelles_bandes_actif_pct.get(tk, 5.0), 2)
             a_it["cible_pct"] = c_pct
             a_it["cible"] = round(c_pct / 100.0, 6)
+            a_it["bande_pct"] = b_a_pct
+            a_it["bande"] = round(b_a_pct / 100.0, 4)
             a_it["poche"] = nouvelles_poches_actif.get(tk, a_it.get("poche"))
         for p_it in poches_cfg:
             cle_p = p_it["cle"]
@@ -1016,7 +1040,7 @@ with tab_alloc:
         if etat_apres["depasse_100"]:
             st.warning(etat_apres["message"])
         else:
-            st.success("✅ Nouvelle allocation cible enregistrée et appliquée à tout le portefeuille.")
+            st.success("✅ Nouvelle allocation cible et fenêtres de dérive enregistrées et appliquées.")
         S.vider_cache()
         st.rerun()
 
@@ -1035,7 +1059,7 @@ with tab_alloc:
         "Vous pouvez le rattacher à une poche existante ou créer directement une nouvelle poche."
     )
 
-    na1, na2, na3 = st.columns([1.4, 2.0, 1.2])
+    na1, na2, na3, na3b = st.columns([1.3, 1.9, 1.1, 1.1])
     nv_ticker = na1.text_input("Ticker de l'actif (ex. NESN.SW, TTE.PA, PAXG-USD)", key="nv_actif_ticker").upper().strip()
     nv_nom = na2.text_input("Nom / Libellé de l'actif (ex. Nestlé SA, TotalEnergies)", key="nv_actif_nom").strip()
     nv_cible_pct = na3.number_input(
@@ -1046,6 +1070,16 @@ with tab_alloc:
         step=0.5,
         format="%.1f",
         key="nv_actif_cible_pct",
+    )
+    nv_bande_pct = na3b.number_input(
+        "Fenêtre dérive (± pts)",
+        min_value=0.5,
+        max_value=25.0,
+        value=5.0,
+        step=0.5,
+        format="%.1f",
+        key="nv_actif_bande_pct",
+        help="Fenêtre de dérive autorisée autour de la cible (ex. ±2,0 pts, ±5,0 pts).",
     )
 
     CLASSES_OPTIONS = {
@@ -1082,18 +1116,10 @@ with tab_alloc:
     nv_poche_bande_pct = 5.0
     nv_poche_desc = ""
     if choix_poche_nv == "__NOUVELLE_POCHE__":
-        np1, np2, np3 = st.columns([1.8, 1.2, 2.2])
+        np1, np2 = st.columns([2.0, 2.5])
         nv_poche_nom = np1.text_input("Nom de la nouvelle poche (ex. Actions suisses)", key="nv_poche_nom").strip()
-        nv_poche_bande_pct = np2.number_input(
-            "Bande de tolérance (± pts)",
-            min_value=1.0,
-            max_value=25.0,
-            value=5.0,
-            step=0.5,
-            format="%.1f",
-            key="nv_poche_bande_pct",
-        )
-        nv_poche_desc = np3.text_input("Description de la poche (optionnel)", key="nv_poche_desc").strip()
+        nv_poche_bande_pct = float(nv_bande_pct)
+        nv_poche_desc = np2.text_input("Description de la poche (optionnel)", key="nv_poche_desc").strip()
 
     total_apres_ajout_pct = round(total_cible_live + float(nv_cible_pct), 2)
     if nv_cible_pct > 0 and total_apres_ajout_pct > 100.0 + 1e-4:
@@ -1135,6 +1161,10 @@ with tab_alloc:
                     c_pct = round(nouvelles_cibles_pct[tk_ex], 4)
                     a_it["cible_pct"] = c_pct
                     a_it["cible"] = round(c_pct / 100.0, 6)
+                if tk_ex in nouvelles_bandes_actif_pct:
+                    b_a_pct = round(nouvelles_bandes_actif_pct[tk_ex], 2)
+                    a_it["bande_pct"] = b_a_pct
+                    a_it["bande"] = round(b_a_pct / 100.0, 4)
                 if tk_ex in nouvelles_poches_actif:
                     a_it["poche"] = nouvelles_poches_actif[tk_ex]
 
@@ -1144,6 +1174,8 @@ with tab_alloc:
                 "poche": cle_cible_poche,
                 "cible_pct": round(float(nv_cible_pct), 4),
                 "cible": round(float(nv_cible_pct) / 100.0, 6),
+                "bande_pct": round(float(nv_bande_pct), 2),
+                "bande": round(float(nv_bande_pct) / 100.0, 4),
                 "classe": nv_classe,
                 "devise": nv_devise,
             })

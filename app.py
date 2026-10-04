@@ -329,7 +329,7 @@ for e in ctx.ecarts:
         "Cible": ui.pct(e.poids_cible),
         "Réel": ui.pct(e.poids_reel),
         "Écart": ui.points(e.ecart_points),
-        "Bande": f"±{e.bande * 100:.0f} pts",
+        "Bande": f"±{e.bande * 100:.1f} pts".replace(".0 pts", " pts"),
         "Valeur ($ / €)": ui.usd_eur(e.valeur_usd, e.valeur_eur),
         "État": "🔴 hors bande" if e.hors_bande else "🟢 dans la bande",
     })

@@ -16,6 +16,7 @@ from core.models import (
     POCHES_PAR_CLE,
     allocation_par_defaut,
     appliquer_allocation_personnalisee,
+    bande_actif,
     cible_actif,
     poche_de,
     reinitialiser_allocation_par_defaut,
@@ -136,4 +137,25 @@ def test_ajout_nouvel_actif_et_nouvelle_poche():
         assert etat["depasse_100"] is False
     finally:
         reinitialiser_allocation_par_defaut()
+
+
+def test_modification_fenetre_de_derive_actif():
+    """Vérifie que l'utilisateur peut changer la fenêtre de dérive d'un actif
+    (ex. ±2 pts pour BTCUSDT et ±5 pts pour IGLN.L) et que la bande de la poche
+    se met immédiatement à jour."""
+    try:
+        cfg = allocation_par_defaut()
+        for a in cfg["actifs"]:
+            if a["ticker"] == "BTCUSDT":
+                a["bande_pct"] = 2.0
+            elif a["ticker"] == "IGLN.L":
+                a["bande_pct"] = 5.0
+        appliquer_allocation_personnalisee(cfg)
+        assert abs(bande_actif("BTCUSDT") - 0.02) < 1e-6
+        assert abs(POCHES_PAR_CLE["rv_numerique"].bande - 0.02) < 1e-6
+        assert abs(bande_actif("IGLN.L") - 0.05) < 1e-6
+        assert abs(POCHES_PAR_CLE["rv_physique"].bande - 0.05) < 1e-6
+    finally:
+        reinitialiser_allocation_par_defaut()
+
 
