@@ -178,3 +178,276 @@ class Actif:
     def est_investi(self) -> bool:
         p = POCHES_PAR_CLE.get(self.poche)
         return bool(p and p.perimetre == Perimetre.INVESTI)
+
+
+# ---------------------------------------------------------------------------
+# Allocation cible personnalisable par actif et par poche
+# ---------------------------------------------------------------------------
+
+POCHES_INVESTIES_DEFAUT: list[dict] = [
+    {
+        "cle": "rv",
+        "nom": "Réserve de valeur",
+        "bande_pct": 3.0,
+        "description": "Or (ETC) + Bitcoin. Substituts assumés face à la dépréciation monétaire.",
+    },
+    {
+        "cle": "energie",
+        "nom": "Énergie",
+        "bande_pct": 5.0,
+        "description": "ETF énergie. Surexposition volontaire à la croissance.",
+    },
+    {
+        "cle": "asie",
+        "nom": "Asie / Chine",
+        "bande_pct": 5.0,
+        "description": "ETF Chine (Franklin FTSE China). Surexposition volontaire à la croissance.",
+    },
+    {
+        "cle": "jgb",
+        "nom": "Obligations japonaises",
+        "bande_pct": 5.0,
+        "description": "ETF dettes d'État japonaises. Poche de désinflation et de récession.",
+    },
+]
+
+ALLOCATION_ACTIFS_DEFAUT: list[dict] = [
+    {"ticker": "IGLN.L", "nom": "Or (iShares Physical Gold ETC)", "poche": "rv", "cible_pct": 10.0, "classe": "or", "devise": "USD"},
+    {"ticker": "BTCUSDT", "nom": "Bitcoin", "poche": "rv", "cible_pct": 10.0, "classe": "crypto", "devise": "USD"},
+    {"ticker": "XDW0.L", "nom": "Xtrackers MSCI World Energy", "poche": "energie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
+    {"ticker": "FLXC.L", "nom": "Franklin FTSE China UCITS ETF", "poche": "asie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
+    {"ticker": "XJSE.SW", "nom": "Xtrackers II Japan Govt Bond", "poche": "jgb", "cible_pct": 20.0, "classe": "obligation_etf", "devise": "JPY"},
+]
+
+CIBLES_ACTIFS: dict[str, float] = {
+    a["ticker"]: float(a["cible_pct"]) / 100.0 for a in ALLOCATION_ACTIFS_DEFAUT
+}
+NOMS_ACTIFS: dict[str, str] = {
+    a["ticker"]: str(a["nom"]) for a in ALLOCATION_ACTIFS_DEFAUT
+}
+
+
+def cible_actif(ticker: str) -> float:
+    """Retourne l'allocation cible (en fraction, ex. 0.30 pour 30 %) d'un actif."""
+    return CIBLES_ACTIFS.get(str(ticker).upper().strip(), 0.0)
+
+
+def allocation_par_defaut() -> dict:
+    """Retourne une copie neuve du plan d'allocation par défaut (poches + actifs)."""
+    return {
+        "poches": [dict(p) for p in POCHES_INVESTIES_DEFAUT],
+        "actifs": [dict(a) for a in ALLOCATION_ACTIFS_DEFAUT],
+    }
+
+
+def slug_poche(nom: str) -> str:
+    """Transforme un nom de poche libre en identifiant snake_case."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(nom or "").strip().lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    if not s or s in ("precaution", "courant", "inconnu"):
+        s = f"poche_{s or 'nouvelle'}"
+    return s
+
+
+def _lire_cible_pct_actif(a: dict) -> float:
+    """Extrait la cible d'un actif en pourcentage (0 à 100 %), qu'elle soit stockée sous `cible` (0.10) ou `cible_pct` (10.0)."""
+    if "cible" in a and a["cible"] is not None:
+        val = float(a["cible"])
+        return max(0.0, val * 100.0 if val <= 1.0 + 1e-6 else val)
+    if "cible_pct" in a and a["cible_pct"] is not None:
+        return max(0.0, float(a["cible_pct"]))
+    return 0.0
+
+
+def _lire_bande_pct_poche(p: dict) -> float:
+    """Extrait la bande d'une poche en points de % (ex. 5.0), qu'elle soit stockée sous `bande` (0.05) ou `bande_pct` (5.0)."""
+    if "bande" in p and p["bande"] is not None:
+        val = float(p["bande"])
+        return max(0.5, val * 100.0 if val <= 1.0 + 1e-6 else val)
+    if "bande_pct" in p and p["bande_pct"] is not None:
+        return max(0.5, float(p["bande_pct"]))
+    return 5.0
+
+
+def verifier_allocation_cible(cfg_alloc: dict | None = None) -> dict:
+    """Vérifie la somme des allocations cibles des actifs (ou des poches investies).
+
+    Retourne un dictionnaire contenant :
+    - `total_pct` : total des allocations cibles en % (ex. 100.0, 115.0)
+    - `depasse_100` : True si la répartition totale dépasse 100 % (> 100 %)
+    - `inferieur_100` : True si la répartition totale est inférieure à 100 % (< 100 %)
+    - `est_valide` / `equilibre_100` : True si la répartition totale vaut exactement 100 %
+    - `ecart_pct` / `ecart_100_pct` : `total_pct - 100.0`
+    - `message` : message d'alerte (ou chaîne vide si équilibré à 100 %).
+    """
+    if cfg_alloc and isinstance(cfg_alloc, dict) and "actifs" in cfg_alloc:
+        total_pct = round(
+            sum(_lire_cible_pct_actif(a) for a in cfg_alloc.get("actifs", [])),
+            2,
+        )
+    else:
+        total_pct = round(
+            sum(p.cible * 100.0 for p in POCHES if p.perimetre == Perimetre.INVESTI),
+            2,
+        )
+
+    depasse_100 = total_pct > 100.0 + 1e-4
+    inferieur_100 = total_pct < 100.0 - 1e-4
+    est_valide = not depasse_100 and not inferieur_100
+    ecart_pct = round(total_pct - 100.0, 2)
+
+    if depasse_100:
+        message = (
+            f"🚨 Alerte : la répartition cible totale de vos actifs représente **{total_pct:.1f} %** "
+            f"(soit **+{ecart_pct:.1f} %** au-dessus de 100 %) ! "
+            "Veuillez réduire l'allocation cible d'un ou plusieurs actifs pour revenir à 100 %."
+        )
+    elif inferieur_100:
+        message = (
+            f"⚠️ Attention : la répartition cible totale de vos actifs représente **{total_pct:.1f} %** "
+            f"(il manque **{100.0 - total_pct:.1f} %** pour atteindre 100 %)."
+        )
+    else:
+        message = ""
+
+    return {
+        "total_pct": total_pct,
+        "depasse_100": depasse_100,
+        "inferieur_100": inferieur_100,
+        "est_valide": est_valide,
+        "equilibre_100": est_valide,
+        "ecart_pct": ecart_pct,
+        "ecart_100_pct": ecart_pct,
+        "message": message,
+    }
+
+
+def reinitialiser_allocation_par_defaut() -> dict:
+    """Restaure en mémoire les poches et actifs par défaut."""
+    return appliquer_allocation_personnalisee(allocation_par_defaut())
+
+
+def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
+    """Applique en mémoire (dans `POCHES`, `POCHES_PAR_CLE`, `POCHES_INVESTIES`,
+    `ACTIF_VERS_POCHE`, `CIBLES_ACTIFS`, `CLASSES`, `DEVISES_COTATION`) une
+    configuration personnalisée d'actifs et de poches."""
+    if not cfg_alloc or not isinstance(cfg_alloc, dict) or not cfg_alloc.get("actifs"):
+        cfg_alloc = allocation_par_defaut()
+
+    poches_cfg = cfg_alloc.get("poches") or [dict(p) for p in POCHES_INVESTIES_DEFAUT]
+    actifs_cfg = cfg_alloc.get("actifs") or [dict(a) for a in ALLOCATION_ACTIFS_DEFAUT]
+
+    # S'assurer que toute poche référencée par un actif existe dans poches_cfg
+    cles_connues = {str(p.get("cle", "")).strip() for p in poches_cfg if p.get("cle")}
+    for a in actifs_cfg:
+        p_cle = str(a.get("poche") or "rv").strip()
+        if p_cle and p_cle not in cles_connues and p_cle not in ("precaution", "courant"):
+            poches_cfg.append({
+                "cle": p_cle,
+                "nom": str(a.get("poche_nom") or p_cle.replace("_", " ").title()),
+                "bande_pct": float(a.get("bande_pct", 5.0)),
+                "description": str(a.get("poche_description") or ""),
+            })
+            cles_connues.add(p_cle)
+
+    CIBLES_ACTIFS.clear()
+    NOMS_ACTIFS.clear()
+    membres_par_poche: dict[str, list[str]] = {str(p["cle"]): [] for p in poches_cfg}
+    cible_par_poche: dict[str, float] = {str(p["cle"]): 0.0 for p in poches_cfg}
+
+    for a in actifs_cfg:
+        tk = str(a.get("ticker") or "").upper().strip()
+        if not tk:
+            continue
+        p_cle = str(a.get("poche") or "rv").strip()
+        c_pct = _lire_cible_pct_actif(a)
+        CIBLES_ACTIFS[tk] = c_pct / 100.0
+        NOMS_ACTIFS[tk] = str(a.get("nom") or tk)
+        membres_par_poche.setdefault(p_cle, [])
+        if tk not in membres_par_poche[p_cle]:
+            membres_par_poche[p_cle].append(tk)
+        cible_par_poche[p_cle] = cible_par_poche.get(p_cle, 0.0) + (c_pct / 100.0)
+
+    nouvelles_poches: list[Poche] = []
+    for p_info in poches_cfg:
+        cle = str(p_info["cle"]).strip()
+        membres = membres_par_poche.get(cle, [])
+        if not membres:
+            continue
+        cible_p = round(cible_par_poche.get(cle, 0.0), 6)
+        bande_p = max(0.005, _lire_bande_pct_poche(p_info) / 100.0)
+        nouvelles_poches.append(Poche(
+            cle=cle,
+            nom=str(p_info.get("nom") or cle),
+            cible=cible_p,
+            bande=bande_p,
+            membres=membres,
+            perimetre=Perimetre.INVESTI,
+            description=str(p_info.get("description") or ""),
+        ))
+
+    # Conserver les 2 poches hors portefeuille (precaution & courant)
+    nouvelles_poches.append(Poche(
+        cle="precaution",
+        nom="Épargne de précaution",
+        cible=0.0,
+        bande=0.0,
+        membres=["CHF", "CNY"],
+        perimetre=Perimetre.PRECAUTION,
+        description="Livret CHF chez Swissquote. Disponible en 5 minutes. Jamais rééquilibré.",
+    ))
+    nouvelles_poches.append(Poche(
+        cle="courant",
+        nom="Compte courant",
+        cible=0.0,
+        bande=0.0,
+        membres=["EUR", "USD"],
+        perimetre=Perimetre.COURANT,
+        description="Revolut. Hors portefeuille d'investissement.",
+    ))
+
+    POCHES[:] = nouvelles_poches
+    POCHES_PAR_CLE.clear()
+    POCHES_PAR_CLE.update({p.cle: p for p in POCHES})
+    POCHES_INVESTIES[:] = [p for p in POCHES if p.perimetre == Perimetre.INVESTI]
+    ACTIF_VERS_POCHE.clear()
+    ACTIF_VERS_POCHE.update({
+        ticker: p.cle for p in POCHES for ticker in p.membres
+    })
+
+    # Enregistrer aussi la classe fiscale et la devise de cotation des actifs personnalisés
+    try:
+        from . import portfolio as _pf
+        _ALIAS_CLASSE = {
+            "action": Classe.ACTION_ETF,
+            "action_etf": Classe.ACTION_ETF,
+            "obligation": Classe.OBLIGATION_ETF,
+            "obligation_etf": Classe.OBLIGATION_ETF,
+            "or_papier": Classe.OR,
+            "or_physique": Classe.OR,
+            "or": Classe.OR,
+            "crypto": Classe.CRYPTO,
+        }
+        for a in actifs_cfg:
+            tk = str(a.get("ticker") or "").upper().strip()
+            if not tk:
+                continue
+            cls_str = str(a.get("classe") or "action_etf").lower().strip()
+            if cls_str in _ALIAS_CLASSE:
+                _pf.CLASSES[tk] = _ALIAS_CLASSE[cls_str]
+            else:
+                for c_enum in Classe:
+                    if c_enum.value == cls_str:
+                        _pf.CLASSES[tk] = c_enum
+                        break
+            dev_str = str(a.get("devise") or "").upper().strip()
+            if dev_str:
+                _pf.DEVISES_COTATION[tk] = dev_str
+    except Exception:
+        pass
+
+    return {"poches": poches_cfg, "actifs": actifs_cfg}
+

@@ -402,6 +402,41 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
         pass
 
 
+def lire_allocation_personnalisee() -> dict:
+    """Lit la configuration d'allocation personnalisée (`pf2_allocation_json`) dans `Config`.
+
+    Retourne le plan par défaut (`models.allocation_par_defaut()`) si aucune
+    configuration personnalisée n'est enregistrée en base.
+    """
+    import json
+    from .models import allocation_par_defaut
+
+    defaut = allocation_par_defaut()
+    try:
+        df = lire("Config")
+        if df is not None and not df.empty and {"Clé", "Valeur"} <= set(df.columns):
+            for _, r in df.iterrows():
+                k = str(r.get("Clé") or "").strip()
+                if k == "pf2_allocation_json":
+                    v = r.get("Valeur")
+                    if v is not None and pd.notna(v) and str(v).strip():
+                        data = json.loads(str(v))
+                        if isinstance(data, dict) and data.get("actifs"):
+                            return data
+    except Exception:
+        pass
+    return defaut
+
+
+def sauver_allocation_personnalisee(cfg_alloc: dict) -> None:
+    """Sauvegarde la configuration d'allocation personnalisée (`pf2_allocation_json`) dans `Config`."""
+    import json
+
+    val_str = json.dumps(cfg_alloc, ensure_ascii=False)
+    sauver_config_fiscale({"pf2_allocation_json": val_str})
+
+
+
 
 def soldes_comptes_liquidites() -> dict[str, dict]:
     """Retourne l'état actuel des comptes de liquidités depuis la table `Donnees`."""

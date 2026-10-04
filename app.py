@@ -24,11 +24,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import importlib
-from core import db, metrics, prices, rebalance
+from core import db, metrics, models, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "_NAV_V2"):
+    importlib.reload(models)
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -307,6 +308,12 @@ if perf_or is not None and perf_or < 0:
 # ---------------------------------------------------------------------------
 st.divider()
 st.subheader("⚖️ Allocation par poche")
+etat_alloc_tb = getattr(ctx, "etat_allocation", None) or models.verifier_allocation_cible()
+if etat_alloc_tb.get("depasse_100"):
+    st.error(etat_alloc_tb["message"])
+elif etat_alloc_tb.get("inferieur_100"):
+    st.warning(etat_alloc_tb["message"])
+
 assiette_reeq_usd = ctx.total_investi_usd + ctx.total_courant_usd
 assiette_reeq_eur = ctx.total_investi_eur + ctx.total_courant_eur
 st.caption(

@@ -237,7 +237,6 @@ class TestAucunePageNeRecalcule:
 
     def test_les_pages_appellent_la_fonction_partagee(self):
         """Au moins une page doit utiliser la source unique."""
-        import pathlib
         appels = 0
         for chemin in self._sources():
             source = chemin.read_text(encoding="utf-8")

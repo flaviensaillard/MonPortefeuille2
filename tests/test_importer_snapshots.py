@@ -253,9 +253,6 @@ class TestLaConversionDesDollars:
 
     def test_un_taux_null_ou_negatif_ne_passe_pas(self):
         """`_taux_usd_eur` ne rend jamais 0 ni un nombre négatif."""
-        import types as _t
-        class Rep:
-            data = []
         def faux(jour):
             return 0.0
         # On teste directement `_taux_usd_eur` sur un cas dégénéré : la fonction

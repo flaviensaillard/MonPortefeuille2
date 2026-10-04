@@ -20,7 +20,13 @@ import pandas as pd
 import streamlit as st
 
 from . import db, fx, metrics, prices
-from .models import Perimetre, POCHES_PAR_CLE
+from .models import (
+    Perimetre,
+    POCHES_PAR_CLE,
+    allocation_par_defaut,
+    appliquer_allocation_personnalisee,
+    verifier_allocation_cible,
+)
 from .portfolio import (
     Actif,
     agreger_par_poche,
@@ -64,6 +70,8 @@ class Contexte:
     tables_absentes: list[str] = field(default_factory=list)
     erreurs: list[str] = field(default_factory=list)
     anomalies_transactions: list[str] = field(default_factory=list)
+    allocation_cfg: dict = field(default_factory=allocation_par_defaut)
+    etat_allocation: dict = field(default_factory=verifier_allocation_cible)
     # Date du dernier import, lue dans `cree_le`. Sert a voir d'un coup
     # d'oeil si l'application regarde des donnees fraiches : un serveur qui
     # tourne sur une vieille version du code affiche une date anterieure au
@@ -333,6 +341,15 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
             + ". Exécutez migrations/001_init.sql dans Supabase."
         )
         return ctx
+
+    # --- Allocation cible personnalisée (actifs & poches) ---
+    try:
+        ctx.allocation_cfg = db.lire_allocation_personnalisee()
+        appliquer_allocation_personnalisee(ctx.allocation_cfg)
+        ctx.etat_allocation = verifier_allocation_cible(ctx.allocation_cfg)
+    except Exception:
+        ctx.allocation_cfg = allocation_par_defaut()
+        ctx.etat_allocation = verifier_allocation_cible(ctx.allocation_cfg)
 
     # --- Transactions -> positions ---
     try:

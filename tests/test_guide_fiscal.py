@@ -18,13 +18,10 @@ Ces tests verrouillent trois choses que la page Fiscalité avait perdues :
 
 from __future__ import annotations
 
-import datetime as dt
-
 import pytest
 
 from core import fiscal_bars as fb
 from core import guide_fiscal as guide
-from core.models import Classe
 
 
 class _FauxResultat:

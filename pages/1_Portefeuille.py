@@ -14,12 +14,13 @@ import pandas as pd
 import streamlit as st
 
 import importlib
-from core import db, fx, metrics, prices, rebalance, session as S
+from core import db, fx, metrics, models, prices, rebalance, session as S
 from core import ui
 from core.models import POCHES_PAR_CLE
 from core.portfolio import devise_cotation_de
 
-if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "_NAV_V2"):
+    importlib.reload(models)
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -39,10 +40,18 @@ ui.bandeau_erreurs(ctx.echecs_cours, "cours")
 if ctx.erreurs:
     st.stop()
 
-tab_actifs, tab_reeq, tab_fonds = st.tabs([
+cfg_alloc = getattr(ctx, "allocation_cfg", None) or db.lire_allocation_personnalisee()
+etat_alloc = models.verifier_allocation_cible(cfg_alloc)
+if etat_alloc["depasse_100"]:
+    st.error(etat_alloc["message"])
+elif etat_alloc["inferieur_100"]:
+    st.warning(etat_alloc["message"])
+
+tab_actifs, tab_reeq, tab_fonds, tab_alloc = st.tabs([
     "📋 1. Liste des actifs & Poches",
     "⚖️ 2. Rééquilibrage & Transactions",
     "💰 3. Fonds & Comptes de liquidités",
+    "🎯 4. Allocation cible & Nouvel actif",
 ])
 
 # ===========================================================================
@@ -84,6 +93,8 @@ with tab_actifs:
                 "Valeur ($ / €)": ui.usd_eur(val_u, a.valeur_eur),
                 "Poids (investi)": ui.pct(val_u / ctx.total_investi_usd)
                 if ctx.total_investi_usd > 0 and a.est_investi else "—",
+                "Cible actif": ui.pct(models.cible_actif(a.ticker))
+                if a.est_investi and models.cible_actif(a.ticker) > 0 else "—",
                 "PRU": ui.usd_eur(pos.pru_usd, pos.pru_eur) if pos and pos.pru_usd else "—",
                 "Perf. ($)": ui.pct(pos.perf_globale_usd, decimales=2, signe=True)
                 if pos and pos.perf_globale_usd is not None else "—",
@@ -252,7 +263,8 @@ with tab_reeq:
         with st.form("nouvelle_transaction", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
             date_tx = c1.date_input("Date", value=dt.date.today())
-            tickers_connus = sorted({t.ticker for t in ctx.transactions})
+            tickers_cfg = {str(a.get("ticker", "")).upper().strip() for a in cfg_alloc.get("actifs", []) if a.get("ticker")}
+            tickers_connus = sorted({t.ticker for t in ctx.transactions} | tickers_cfg)
             ticker = c2.selectbox("Actif", options=tickers_connus + ["➕ Nouveau…"])
             if ticker == "➕ Nouveau…":
                 ticker = c2.text_input("Nouveau ticker")
@@ -840,3 +852,310 @@ with tab_fonds:
             for _, r in df.iterrows()
         )
         ui.metric_usd_eur(st, "Apports nets cumulés", apports_nets_usd, apports_nets_eur)
+
+# ===========================================================================
+# ONGLET 4 : ALLOCATION CIBLE & NOUVEL ACTIF
+# ===========================================================================
+with tab_alloc:
+    st.subheader("🎯 Allocation cible des actifs & Gestion des poches")
+    st.caption(
+        "Modifiez ici la répartition cible (%) de chacun de vos actifs, ajoutez un nouvel actif "
+        "et rattachez-le à une poche existante ou créez une nouvelle poche stratégique. "
+        "La cible de chaque poche est automatiquement égale à la somme des cibles des actifs qui la composent."
+    )
+
+    poches_cfg = [dict(p) for p in cfg_alloc.get("poches", [])]
+    actifs_cfg = [dict(a) for a in cfg_alloc.get("actifs", [])]
+    poches_map_nom = {p["cle"]: p["nom"] for p in poches_cfg}
+    cles_poches = [p["cle"] for p in poches_cfg]
+
+    valeurs_reelles_par_ticker = {
+        a.ticker: (getattr(a, "valeur_usd", a.valeur_eur) / ctx.total_investi_usd * 100.0)
+        if (ctx.total_investi_usd > 0 and a.est_investi) else 0.0
+        for a in ctx.actifs
+    }
+
+    st.markdown("#### 1. Modifier l'allocation cible de vos actifs (%)")
+
+    nouvelles_cibles_pct: dict[str, float] = {}
+    nouvelles_poches_actif: dict[str, str] = {}
+
+    ent1, ent2, ent3, ent4 = st.columns([2.2, 2.2, 1.3, 1.5])
+    ent1.markdown("**Actif (Ticker & Libellé)**")
+    ent2.markdown("**Poche stratégique**")
+    ent3.markdown("**Poids réel actuel**")
+    ent4.markdown("**Allocation cible (%)**")
+
+    for idx_a, a_item in enumerate(actifs_cfg):
+        tk = str(a_item.get("ticker", "")).upper().strip()
+        nom_a = str(a_item.get("nom") or tk)
+        poche_actuelle = str(a_item.get("poche") or (cles_poches[0] if cles_poches else "reserve_valeur"))
+        if poche_actuelle not in cles_poches and cles_poches:
+            poche_actuelle = cles_poches[0]
+        cible_actuelle_pct = round(models._lire_cible_pct_actif(a_item), 2)
+        poids_reel_pct = valeurs_reelles_par_ticker.get(tk, 0.0)
+
+        ca1, ca2, ca3, ca4 = st.columns([2.2, 2.2, 1.3, 1.5])
+        ca1.markdown(f"**`{tk}`** — {nom_a}")
+        nouvelles_poches_actif[tk] = ca2.selectbox(
+            f"Poche ({tk})",
+            options=cles_poches,
+            index=cles_poches.index(poche_actuelle) if poche_actuelle in cles_poches else 0,
+            format_func=lambda c: poches_map_nom.get(c, c),
+            key=f"alloc_poche_{tk}_{idx_a}",
+            label_visibility="collapsed",
+        )
+        ca3.markdown(f"`{poids_reel_pct:.1f} %`")
+        nouvelles_cibles_pct[tk] = ca4.number_input(
+            f"Cible % ({tk})",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(cible_actuelle_pct),
+            step=0.5,
+            format="%.1f",
+            key=f"alloc_cible_{tk}_{idx_a}",
+            label_visibility="collapsed",
+        )
+
+    total_cible_live = round(sum(nouvelles_cibles_pct.values()), 2)
+    ecart_100_live = round(total_cible_live - 100.0, 2)
+
+    if total_cible_live > 100.0 + 1e-4:
+        st.error(
+            f"🚨 **Alerte : la répartition cible totale de vos actifs représente {total_cible_live:.1f} % "
+            f"(soit +{ecart_100_live:.1f} % au-dessus de 100 %) !** "
+            "Veuillez réduire l'allocation d'un ou plusieurs actifs pour revenir à 100,0 %."
+        )
+    elif total_cible_live < 100.0 - 1e-4:
+        st.warning(
+            f"⚠️ **Attention : la répartition cible totale de vos actifs représente {total_cible_live:.1f} % "
+            f"(il manque {abs(ecart_100_live):.1f} % pour atteindre 100,0 %).**"
+        )
+    else:
+        st.success(f"✅ **Répartition cible totale équilibrée : {total_cible_live:.1f} %**")
+
+    with st.expander("⚖️ Récapitulatif & bandes de tolérance par poche", expanded=False):
+        nouvelles_bandes_pct: dict[str, float] = {}
+        lignes_recap_poches = []
+        for idx_p, p_item in enumerate(poches_cfg):
+            cle_p = p_item["cle"]
+            cible_poche_live = sum(
+                nouvelles_cibles_pct.get(str(a_it["ticker"]).upper().strip(), 0.0)
+                for a_it in actifs_cfg
+                if nouvelles_poches_actif.get(str(a_it["ticker"]).upper().strip()) == cle_p
+            )
+            actifs_de_la_poche = [
+                str(a_it["ticker"]).upper().strip()
+                for a_it in actifs_cfg
+                if nouvelles_poches_actif.get(str(a_it["ticker"]).upper().strip()) == cle_p
+            ]
+            bande_def_pct = round(models._lire_bande_pct_poche(p_item), 1)
+            cp1, cp2, cp3 = st.columns([2.5, 2.5, 1.5])
+            cp1.markdown(f"**{p_item['nom']}** (`{cible_poche_live:.1f} %`)")
+            cp2.caption("Actifs : " + (", ".join(actifs_de_la_poche) if actifs_de_la_poche else "Aucun"))
+            nouvelles_bandes_pct[cle_p] = cp3.number_input(
+                f"Bande ± pts ({p_item['nom']})",
+                min_value=1.0,
+                max_value=25.0,
+                value=float(bande_def_pct),
+                step=0.5,
+                format="%.1f",
+                key=f"alloc_bande_{cle_p}_{idx_p}",
+            )
+            lignes_recap_poches.append({
+                "Poche": p_item["nom"],
+                "Actifs rattachés": ", ".join(actifs_de_la_poche) if actifs_de_la_poche else "—",
+                "Cible poche (%)": f"{cible_poche_live:.1f} %",
+                "Bande de tolérance": f"±{nouvelles_bandes_pct[cle_p]:.1f} pts",
+            })
+        ui.tableau(pd.DataFrame(lignes_recap_poches))
+
+    b_save_col, b_reset_col = st.columns([2, 1])
+    if b_save_col.button("💾 Enregistrer la nouvelle allocation cible", type="primary", use_container_width=True):
+        for a_it in actifs_cfg:
+            tk = str(a_it["ticker"]).upper().strip()
+            c_pct = round(nouvelles_cibles_pct.get(tk, 0.0), 4)
+            a_it["cible_pct"] = c_pct
+            a_it["cible"] = round(c_pct / 100.0, 6)
+            a_it["poche"] = nouvelles_poches_actif.get(tk, a_it.get("poche"))
+        for p_it in poches_cfg:
+            cle_p = p_it["cle"]
+            b_pct = round(nouvelles_bandes_pct.get(cle_p, models._lire_bande_pct_poche(p_it)), 2)
+            p_it["bande_pct"] = b_pct
+            p_it["bande"] = round(b_pct / 100.0, 4)
+        nouvelle_cfg = {"poches": poches_cfg, "actifs": actifs_cfg}
+        db.sauver_allocation_personnalisee(nouvelle_cfg)
+        models.appliquer_allocation_personnalisee(nouvelle_cfg)
+        etat_apres = models.verifier_allocation_cible(nouvelle_cfg)
+        if etat_apres["depasse_100"]:
+            st.warning(etat_apres["message"])
+        else:
+            st.success("✅ Nouvelle allocation cible enregistrée et appliquée à tout le portefeuille.")
+        S.vider_cache()
+        st.rerun()
+
+    if b_reset_col.button("🔄 Réinitialiser l'allocation par défaut (20/30/30/20)", use_container_width=True):
+        cfg_def = models.allocation_par_defaut()
+        db.sauver_allocation_personnalisee(cfg_def)
+        models.reinitialiser_allocation_par_defaut()
+        st.success("✅ Allocation par défaut restaurée.")
+        S.vider_cache()
+        st.rerun()
+
+    st.divider()
+    st.markdown("#### 2. ➕ Ajouter un nouvel actif (et choisir ou créer sa poche)")
+    st.caption(
+        "Ajoutez ici un nouveau titre, ETF, cryptomonnaie ou métal précieux à votre plan d'allocation. "
+        "Vous pouvez le rattacher à une poche existante ou créer directement une nouvelle poche."
+    )
+
+    na1, na2, na3 = st.columns([1.4, 2.0, 1.2])
+    nv_ticker = na1.text_input("Ticker de l'actif (ex. NESN.SW, TTE.PA, PAXG-USD)", key="nv_actif_ticker").upper().strip()
+    nv_nom = na2.text_input("Nom / Libellé de l'actif (ex. Nestlé SA, TotalEnergies)", key="nv_actif_nom").strip()
+    nv_cible_pct = na3.number_input(
+        "Allocation cible (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.0,
+        step=0.5,
+        format="%.1f",
+        key="nv_actif_cible_pct",
+    )
+
+    CLASSES_OPTIONS = {
+        "action": "Action / ETF Actions (PFU 150-0 A)",
+        "obligation": "Obligation / ETF Obligataire (PFU 150-0 A)",
+        "or_papier": "Or papier / ETC (PFU 150-0 A)",
+        "crypto": "Cryptomonnaie (Art. 150 VH bis — 2086)",
+        "or_physique": "Or physique (Art. 150 VI)",
+    }
+    DEVISES_COTATION_OPTIONS = ["USD", "EUR", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
+
+    na4, na5, na6 = st.columns([1.6, 1.2, 2.0])
+    nv_classe = na4.selectbox(
+        "Classe fiscale de l'actif",
+        options=list(CLASSES_OPTIONS.keys()),
+        format_func=lambda k: CLASSES_OPTIONS[k],
+        key="nv_actif_classe",
+    )
+    nv_devise = na5.selectbox(
+        "Devise de cotation",
+        options=DEVISES_COTATION_OPTIONS,
+        index=0,
+        key="nv_actif_devise",
+    )
+    OPTIONS_POCHE_NV = cles_poches + ["__NOUVELLE_POCHE__"]
+    choix_poche_nv = na6.selectbox(
+        "Poche de rattachement",
+        options=OPTIONS_POCHE_NV,
+        format_func=lambda c: "➕ Créer une nouvelle poche…" if c == "__NOUVELLE_POCHE__" else poches_map_nom.get(c, c),
+        key="nv_actif_choix_poche",
+    )
+
+    nv_poche_nom = ""
+    nv_poche_bande_pct = 5.0
+    nv_poche_desc = ""
+    if choix_poche_nv == "__NOUVELLE_POCHE__":
+        np1, np2, np3 = st.columns([1.8, 1.2, 2.2])
+        nv_poche_nom = np1.text_input("Nom de la nouvelle poche (ex. Actions suisses)", key="nv_poche_nom").strip()
+        nv_poche_bande_pct = np2.number_input(
+            "Bande de tolérance (± pts)",
+            min_value=1.0,
+            max_value=25.0,
+            value=5.0,
+            step=0.5,
+            format="%.1f",
+            key="nv_poche_bande_pct",
+        )
+        nv_poche_desc = np3.text_input("Description de la poche (optionnel)", key="nv_poche_desc").strip()
+
+    total_apres_ajout_pct = round(total_cible_live + float(nv_cible_pct), 2)
+    if nv_cible_pct > 0 and total_apres_ajout_pct > 100.0 + 1e-4:
+        st.error(
+            f"🚨 **Alerte : avec cet actif à {nv_cible_pct:.1f} %, la répartition cible totale atteindra "
+            f"{total_apres_ajout_pct:.1f} % (soit +{total_apres_ajout_pct - 100.0:.1f} % au-dessus de 100 %) !** "
+            "Pensez à réduire d'autant la cible des autres actifs ci-dessus."
+        )
+    elif nv_cible_pct > 0:
+        st.info(
+            f"💡 **Aperçu après ajout :** la répartition cible totale passera de **{total_cible_live:.1f} %** "
+            f"à **{total_apres_ajout_pct:.1f} %**."
+        )
+
+    if st.button("➕ Ajouter cet actif au portefeuille", type="primary"):
+        if not nv_ticker:
+            st.error("Veuillez saisir le ticker du nouvel actif (ex. `NESN.SW` ou `TTE.PA`).")
+        elif any(str(a_it.get("ticker", "")).upper().strip() == nv_ticker for a_it in actifs_cfg):
+            st.error(f"L'actif `{nv_ticker}` fait déjà partie de votre plan d'allocation ci-dessus.")
+        elif choix_poche_nv == "__NOUVELLE_POCHE__" and not nv_poche_nom:
+            st.error("Veuillez saisir le nom de la nouvelle poche à créer.")
+        else:
+            if choix_poche_nv == "__NOUVELLE_POCHE__":
+                cle_cible_poche = models.slug_poche(nv_poche_nom)
+                if not any(p_it["cle"] == cle_cible_poche for p_it in poches_cfg):
+                    poches_cfg.append({
+                        "cle": cle_cible_poche,
+                        "nom": nv_poche_nom,
+                        "bande_pct": round(float(nv_poche_bande_pct), 2),
+                        "bande": round(float(nv_poche_bande_pct) / 100.0, 4),
+                        "description": nv_poche_desc,
+                    })
+            else:
+                cle_cible_poche = choix_poche_nv
+
+            for a_it in actifs_cfg:
+                tk_ex = str(a_it["ticker"]).upper().strip()
+                if tk_ex in nouvelles_cibles_pct:
+                    c_pct = round(nouvelles_cibles_pct[tk_ex], 4)
+                    a_it["cible_pct"] = c_pct
+                    a_it["cible"] = round(c_pct / 100.0, 6)
+                if tk_ex in nouvelles_poches_actif:
+                    a_it["poche"] = nouvelles_poches_actif[tk_ex]
+
+            actifs_cfg.append({
+                "ticker": nv_ticker,
+                "nom": nv_nom or nv_ticker,
+                "poche": cle_cible_poche,
+                "cible_pct": round(float(nv_cible_pct), 4),
+                "cible": round(float(nv_cible_pct) / 100.0, 6),
+                "classe": nv_classe,
+                "devise": nv_devise,
+            })
+            nouvelle_cfg = {"poches": poches_cfg, "actifs": actifs_cfg}
+            db.sauver_allocation_personnalisee(nouvelle_cfg)
+            models.appliquer_allocation_personnalisee(nouvelle_cfg)
+            st.success(
+                f"✅ Actif **`{nv_ticker}`** ({nv_nom or nv_ticker}) ajouté dans la poche "
+                f"**{nv_poche_nom if choix_poche_nv == '__NOUVELLE_POCHE__' else poches_map_nom.get(cle_cible_poche, cle_cible_poche)}** "
+                f"avec une cible de **{nv_cible_pct:.1f} %**."
+            )
+            S.vider_cache()
+            st.rerun()
+
+    if len(actifs_cfg) > 1:
+        with st.expander("🗑️ Retirer un actif du plan d'allocation", expanded=False):
+            tickers_supprimables = [str(a_it["ticker"]).upper().strip() for a_it in actifs_cfg]
+            tk_a_retirer = st.selectbox(
+                "Actif à retirer du plan d'allocation",
+                options=tickers_supprimables,
+                format_func=lambda t: f"{t} — {models.NOMS_ACTIFS.get(t, t)} ({models.cible_actif(t) * 100:.1f} %)",
+                key="alloc_retirer_ticker",
+            )
+            if st.button("🗑️ Retirer cet actif du plan d'allocation", type="secondary"):
+                actifs_restants = [
+                    a_it for a_it in actifs_cfg
+                    if str(a_it.get("ticker", "")).upper().strip() != tk_a_retirer
+                ]
+                poches_utilisees = {str(a_it.get("poche")) for a_it in actifs_restants}
+                cles_defaut = {p.cle for p in models.POCHES_INVESTIES_DEFAUT}
+                poches_restantes = [
+                    p_it for p_it in poches_cfg
+                    if p_it["cle"] in poches_utilisees or p_it["cle"] in cles_defaut
+                ]
+                nouvelle_cfg = {"poches": poches_restantes, "actifs": actifs_restants}
+                db.sauver_allocation_personnalisee(nouvelle_cfg)
+                models.appliquer_allocation_personnalisee(nouvelle_cfg)
+                st.success(f"🗑️ Actif `{tk_a_retirer}` retiré du plan d'allocation.")
+                S.vider_cache()
+                st.rerun()
+
