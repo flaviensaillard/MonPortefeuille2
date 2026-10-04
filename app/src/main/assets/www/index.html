@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0B0F17">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Porte-feuille">
+<title>Porte-feuille</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="app">
+    <header class="topbar">
+        <h1 id="titreOnglet">Tableau de bord<span class="sub" id="sousTitre">chargement…</span></h1>
+        <button class="iconbtn" id="btnRefresh" aria-label="Rafraîchir">⟳</button>
+        <button class="iconbtn" id="btnReglages" aria-label="Réglages">⚙︎</button>
+    </header>
+
+    <div class="pull" id="pull">↻ tirer pour actualiser</div>
+    <main id="view"></main>
+</div>
+
+<div class="voile" id="voile"></div>
+<div class="feuille" id="feuille"></div>
+<div class="toast" id="toast"></div>
+
+<nav class="bottom" id="nav">
+    <button data-onglet="bord" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"/></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"/></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"/></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"/></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"/></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+
+<script src="js/util.js"></script>
+<script src="js/models.js"></script>
+<script src="js/net.js"></script>
+<script src="js/store.js"></script>
+<script src="js/metrics.js"></script>
+<script src="js/portfolio.js"></script>
+<script src="js/rebalance.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/fiscal.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

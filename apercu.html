@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Porte-feuille — aperçu</title>
+<style>
+/* Porte-feuille — thème mobile.
+   Règles d'ergonomie tenues d'un bout à l'autre :
+   - cibles tactiles >= 44 px, texte jamais en dessous de 12 px ;
+   - un seul accent fort par écran (le chiffre), le reste en gris ;
+   - pas de cadre, pas d'ombre lourde : des cartes posées sur un fond profond. */
+
+:root {
+    --bg: #0B0F17;
+    --bg-2: #0E1420;
+    --card: #131A26;
+    --card-2: #18212F;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --txt: #F2F5FA;
+    --txt-2: #9AA7BC;
+    --txt-3: #6B7789;
+    --up: #2ECC71;
+    --down: #E74C3C;
+    --flat: #38BDF8;
+    --gold: #F5C451;
+    --euro: #5AA9FF;
+    --r: 18px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--txt);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
+    overscroll-behavior-y: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(120% 60% at 50% -10%, rgba(245, 196, 81, 0.10), transparent 60%),
+        radial-gradient(90% 50% at 100% 100%, rgba(56, 189, 248, 0.07), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ------------------------------------------------------------------ coque */
+
+#app {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    padding-bottom: calc(78px + var(--safe-b));
+}
+
+header.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: calc(var(--safe-t) + 12px) 16px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: linear-gradient(180deg, rgba(11, 15, 23, 0.98) 60%, rgba(11, 15, 23, 0));
+    backdrop-filter: blur(12px);
+}
+
+header.topbar h1 {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0;
+    flex: 1;
+    letter-spacing: -0.01em;
+}
+
+header.topbar .sub {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--txt-3);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-top: 1px;
+}
+
+.iconbtn {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--txt-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    cursor: pointer;
+    transition: transform .12s ease, background .2s ease, color .2s ease;
+}
+.iconbtn:active { transform: scale(0.92); background: rgba(255, 255, 255, 0.09); color: var(--txt); }
+.iconbtn.spin { animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+main#view { padding: 4px 14px 8px; }
+main#view.enter { animation: in .26s cubic-bezier(.2, .8, .2, 1); }
+@keyframes in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* --------------------------------------------------------------- cartes */
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 15px 15px 14px;
+    margin: 0 0 12px;
+}
+.card.tight { padding: 12px 14px; }
+.card.gold { border-color: rgba(245, 196, 81, 0.28); background: linear-gradient(160deg, rgba(245, 196, 81, 0.10), rgba(19, 26, 38, 0.9) 55%); }
+.card.flat { background: rgba(255, 255, 255, 0.03); }
+
+.titre {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--txt-3);
+    margin: 18px 4px 9px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.titre:first-child { margin-top: 6px; }
+.titre .n { color: var(--txt-2); font-weight: 600; letter-spacing: 0; text-transform: none; }
+
+.lbl { font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--txt-3); }
+.montant-usd { font-size: 25px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.montant-eur { font-size: 13.5px; font-weight: 600; color: var(--euro); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.montant-usd.sm { font-size: 19px; }
+.montant-eur.sm { font-size: 12px; }
+.up { color: var(--up) !important; }
+.down { color: var(--down) !important; }
+.flat { color: var(--flat) !important; }
+.mut { color: var(--txt-2); }
+.dim { color: var(--txt-3); }
+
+.grille { display: grid; gap: 10px; }
+.g2 { grid-template-columns: 1fr 1fr; }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+
+.mini {
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    padding: 11px 12px;
+}
+.mini .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.mini .e { font-size: 11.5px; color: var(--euro); font-variant-numeric: tabular-nums; margin-top: 1px; }
+.mini .l { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--txt-3); margin-bottom: 5px; }
+
+/* --------------------------------------------------- lignes & listes */
+
+.ligne {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line);
+}
+.ligne:last-child { border-bottom: none; }
+.ligne .gr { flex: 1; min-width: 0; }
+.ligne .tt { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.ligne .st { font-size: 12px; color: var(--txt-3); margin-top: 1px; }
+.ligne .dr { text-align: right; font-variant-numeric: tabular-nums; }
+.ligne .dr .a { font-size: 15px; font-weight: 650; }
+.ligne .dr .b { font-size: 11.5px; color: var(--euro); }
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.badge.ok { background: rgba(46, 204, 113, 0.14); color: var(--up); }
+.badge.warn { background: rgba(231, 76, 60, 0.15); color: var(--down); }
+.badge.info { background: rgba(56, 189, 248, 0.14); color: var(--flat); }
+.badge.mut { background: rgba(255, 255, 255, 0.07); color: var(--txt-2); }
+
+.fleche { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* barres de progression (allocation) */
+.barre { height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); position: relative; overflow: hidden; }
+.barre > i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--gold); transition: width .5s cubic-bezier(.2, .8, .2, 1); }
+.barre > u { position: absolute; top: -3px; width: 2px; height: 14px; background: rgba(255, 255, 255, 0.85); border-radius: 2px; }
+
+/* --------------------------------------------------------- navigation */
+
+nav.bottom {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 40;
+    display: flex;
+    padding: 6px 4px calc(6px + var(--safe-b));
+    background: rgba(13, 18, 28, 0.96);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(14px);
+}
+nav.bottom button {
+    flex: 1;
+    background: none;
+    border: 0;
+    color: var(--txt-3);
+    padding: 6px 2px 4px;
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    position: relative;
+    transition: color .18s ease;
+}
+nav.bottom button svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: .78;
+    transition: opacity .18s ease, transform .18s ease;
+}
+nav.bottom button.actif { color: var(--gold); }
+nav.bottom button.actif svg { opacity: 1; transform: translateY(-1px); }
+nav.bottom button span { font-size: 10.5px; }
+nav.bottom button.actif::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 26px; height: 3px;
+    border-radius: 999px;
+    background: var(--gold);
+}
+
+/* ------------------------------------------------------- chips / mois */
+
+.chips { display: flex; gap: 7px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--txt-2);
+    border-radius: 999px;
+    padding: 8px 14px;
+    min-height: 38px;
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: all .16s ease;
+}
+.chip.actif { background: var(--gold); border-color: var(--gold); color: #1A1305; }
+.chip:active { transform: scale(0.95); }
+
+/* ----------------------------------------------------------- feuille */
+
+.voile {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(3, 6, 12, 0.66);
+    opacity: 0; pointer-events: none;
+    transition: opacity .22s ease;
+}
+.voile.ouvert { opacity: 1; pointer-events: auto; }
+
+.feuille {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 61;
+    background: var(--bg-2);
+    border-top: 1px solid var(--line-strong);
+    border-radius: 22px 22px 0 0;
+    padding: 10px 16px calc(18px + var(--safe-b));
+    transform: translateY(102%);
+    transition: transform .3s cubic-bezier(.2, .85, .25, 1);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.feuille.ouvert { transform: none; }
+.feuille .poignee { width: 42px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); margin: 4px auto 14px; }
+.feuille h3 { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
+.feuille .aide { font-size: 12.5px; color: var(--txt-3); margin-bottom: 14px; }
+
+.champ { margin-bottom: 12px; }
+.champ label { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--txt-3); margin-bottom: 6px; }
+.champ input, .champ select, .champ textarea {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    color: var(--txt);
+    font-size: 16px;
+    padding: 12px 13px;
+    min-height: 48px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .18s ease, background .18s ease;
+}
+.champ input:focus, .champ select:focus, .champ textarea:focus { border-color: var(--gold); background: rgba(245, 196, 81, 0.07); }
+.champ select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--txt-3) 50%), linear-gradient(135deg, var(--txt-3) 50%, transparent 50%); background-position: calc(100% - 20px) 22px, calc(100% - 14px) 22px; background-size: 6px 6px; background-repeat: no-repeat; }
+
+.btn {
+    width: 100%;
+    min-height: 52px;
+    border-radius: 15px;
+    border: 0;
+    background: var(--gold);
+    color: #181203;
+    font-size: 15.5px;
+    font-weight: 750;
+    cursor: pointer;
+    transition: transform .12s ease, opacity .2s ease;
+    font-family: inherit;
+}
+.btn:active { transform: scale(0.97); }
+.btn.sec { background: rgba(255, 255, 255, 0.08); color: var(--txt); }
+.btn.danger { background: rgba(231, 76, 60, 0.16); color: var(--down); }
+.btn.ghost { background: transparent; border: 1px solid var(--line-strong); color: var(--txt-2); }
+.btn:disabled { opacity: .45; }
+.btn-row { display: flex; gap: 10px; }
+.btn-row .btn { flex: 1; }
+
+/* ---------------------------------------------------------- divers */
+
+.toast {
+    position: fixed;
+    left: 50%; bottom: calc(86px + var(--safe-b));
+    transform: translate(-50%, 20px);
+    z-index: 90;
+    background: rgba(24, 33, 47, 0.97);
+    border: 1px solid var(--line-strong);
+    color: var(--txt);
+    padding: 11px 18px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s ease, transform .22s ease;
+    max-width: 88vw;
+    text-align: center;
+}
+.toast.ouvert { opacity: 1; transform: translate(-50%, 0); }
+
+.pull {
+    position: absolute;
+    top: -46px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    color: var(--txt-3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity .2s;
+}
+
+.vide { text-align: center; padding: 34px 18px; color: var(--txt-3); font-size: 13.5px; }
+.vide .g { font-size: 34px; display: block; margin-bottom: 10px; opacity: .8; }
+
+.sep { height: 1px; background: var(--line); margin: 12px 0; }
+
+svg.graphique { width: 100%; height: 170px; display: block; overflow: visible; }
+svg.graphique .grille line { stroke: rgba(255, 255, 255, 0.07); stroke-width: 1; }
+svg.graphique .aire { fill: url(#degradeAire); }
+svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+
+.tableau { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tableau th {
+    text-align: left;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--txt-3);
+    font-weight: 700;
+    padding: 0 8px 7px 0;
+    border-bottom: 1px solid var(--line);
+}
+.tableau td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.tableau td:last-child, .tableau th:last-child { padding-right: 0; text-align: right; }
+.tableau tr:last-child td { border-bottom: none; }
+
+.accordeon { border: 1px solid var(--line); border-radius: 15px; margin-bottom: 10px; overflow: hidden; background: var(--card); }
+.accordeon > .tete {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 14px;
+    cursor: pointer;
+    font-size: 14.5px; font-weight: 650;
+    min-height: 52px;
+}
+.accordeon > .tete .p { flex: 1; }
+.accordeon > .tete .chev { transition: transform .25s ease; color: var(--txt-3); font-size: 12px; }
+.accordeon.ouvert > .tete .chev { transform: rotate(90deg); }
+.accordeon > .corps { display: none; padding: 0 14px 14px; }
+.accordeon.ouvert > .corps { display: block; animation: in .22s ease; }
+
+.hscroll { display: flex; gap: 10px; overflow-x: auto; padding: 2px 0 6px; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.hscroll::-webkit-scrollbar { display: none; }
+.hscroll > * { scroll-snap-align: start; flex: 0 0 148px; }
+
+.actif-carte {
+    background: linear-gradient(165deg, rgba(255, 255, 255, 0.06), rgba(19, 26, 38, 0.9));
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 12px;
+}
+.actif-carte .tk { font-size: 12.5px; font-weight: 700; color: var(--txt-2); letter-spacing: 0.01em; }
+.actif-carte .pc { font-size: 10.5px; color: var(--txt-3); margin-bottom: 8px; height: 26px; overflow: hidden; }
+.actif-carte .fl { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.actif-carte .vl { font-size: 13px; font-weight: 650; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.actif-carte .ve { font-size: 11.5px; color: var(--euro); font-variant-numeric: tabular-nums; }
+
+.pastille { width: 34px; height: 34px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: 0 0 auto; }
+
+.erreur { background: rgba(231, 76, 60, 0.12); border: 1px solid rgba(231, 76, 60, 0.3); color: #FFC9C2; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+.info { background: rgba(56, 189, 248, 0.10); border: 1px solid rgba(56, 189, 248, 0.26); color: #BFE6FF; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+.ok-vert { background: rgba(46, 204, 113, 0.12); border: 1px solid rgba(46, 204, 113, 0.3); color: #B9F0D0; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+
+.noanim * { animation: none !important; transition: none !important; }
+
+body { background: #060910; }
+body::before { display: none; }
+#app { padding-bottom: 0; }
+.galerie { display: flex; flex-wrap: wrap; gap: 34px; justify-content: center; padding: 30px 16px 60px; }
+.titre-galerie { text-align: center; color: #F5C451; font-size: 24px; font-weight: 700; margin: 34px 0 4px; }
+.sous-titre { text-align: center; color: #6B7789; font-size: 13px; margin-bottom: 6px; }
+.telephone {
+    width: 372px; height: 760px; border-radius: 40px; position: relative; overflow: hidden;
+    background: #0B0F17; border: 1px solid rgba(255,255,255,.10);
+    box-shadow: 0 30px 70px rgba(0,0,0,.55);
+}
+.telephone .ecran { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
+.telephone .ecran::-webkit-scrollbar { width: 0; }
+.telephone .barre-haut {
+    position: sticky; top: 0; z-index: 30; height: 26px; background: #0B0F17;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
+    font-size: 11px; color: #9AA7BC; font-weight: 600;
+}
+.telephone .barre-bas { position: sticky; bottom: 0; height: 14px; background: #0B0F17; }
+.telephone nav.bottom { position: sticky; bottom: 0; }
+</style></head>
+<body>
+<div class="titre-galerie">Porte-feuille</div>
+<div class="sous-titre">Aperçu des cinq écrans — jeu de données de démonstration</div>
+<div class="galerie">
+  <div>
+    <div style="text-align:center;color:#8A96AB;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Tableau de bord</div>
+    <div class="telephone">
+      <div class="ecran">
+        <div class="barre-haut"><span>9:41</span><span>Porte-feuille · Tableau de bord</span><span>100 %</span></div>
+        <header class="topbar" style="position:sticky;top:0">
+          <h1>Tableau de bord<span class="sub">synchronisé 09h41</span></h1>
+          <button class="iconbtn">⟳</button><button class="iconbtn">⚙︎</button>
+        </header>
+        <main id="view-bord" class="view-apercu"><div class="card gold"><div class="lbl">Patrimoine total</div><div class="montant-usd">91 632,28 $</div><div class="montant-eur">81 450,92 €</div><div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="fleche up">↗ +1,25 %</span><span class="dim" style="font-size:12px">depuis le dernier enregistrement</span></div></div><div class="grille g2"><div class="mini"><div class="l">Portefeuille investi</div><div class="v">79 959 $</div><div class="e">71 075 €</div><div style="margin-top:5px;font-size:12px"><span class="fleche down">↘ -0,14 %</span></div></div><div class="mini"><div class="l">Performance depuis le début</div><div class="v up">+11,30 %</div><div class="e">perf. TWR</div></div><div class="mini"><div class="l">Épargne de précaution</div><div class="v">10 433 $</div><div class="e">9 274 €</div></div><div class="mini"><div class="l">Cash disponible</div><div class="v">1 240 $</div><div class="e">1 102 €</div></div></div><div class="titre">Vos actifs <span class="n">depuis le dernier enregistrement</span></div><div class="hscroll"><div class="actif-carte"><div class="tk">IGLN.L</div><div class="pc">Réserve de valeur physique</div><div class="fl up">↗ +0,81 %</div><div class="vl">11 970 $</div><div class="ve">10 640 €</div></div><div class="actif-carte"><div class="tk">BTCUSDT</div><div class="pc">Réserve de valeur numérique</div><div class="fl down">↘ -1,52 %</div><div class="vl">4 002 $</div><div class="ve">3 557 €</div></div><div class="actif-carte"><div class="tk">XDW0.L</div><div class="pc">Énergie</div><div class="fl up">↗ +0,43 %</div><div class="vl">23 987 $</div><div class="ve">21 322 €</div></div><div class="actif-carte"><div class="tk">FLXC.L</div><div class="pc">Asie / Chine</div><div class="fl flat">→ 0,00 %</div><div class="vl">24 006 $</div><div class="ve">21 339 €</div></div><div class="actif-carte"><div class="tk">XJSE.SW</div><div class="pc">Obligations japonaises</div><div class="fl down">↘ -0,21 %</div><div class="vl">15 994 $</div><div class="ve">14 217 €</div></div></div><div class="titre">Allocation par poche <span class="n">équilibré</span></div><div class="card"><div style="margin-bottom:13px"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:13.5px;font-weight:650;flex:1">Réserve de valeur physique</span><span style="font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums">14,7 % <span class="dim">/ 15,0 %</span></span> <span class="badge ok">ok</span></div><div class="barre"><i style="width:14.74%;background:#F5C451"></i><u style="left:15.00%"></u></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-3);margin-top:5px"><span>11 970 $ · 10 640 €</span><span>écart -0,3 pt · bande ±3,0 pt</span></div></div><div style="margin-bottom:13px"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:13.5px;font-weight:650;flex:1">Énergie</span><span style="font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums">29,5 % <span class="dim">/ 30,0 %</span></span> <span class="badge ok">ok</span></div><div class="barre"><i style="width:29.54%;background:#2ECC71"></i><u style="left:30.00%"></u></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-3);margin-top:5px"><span>23 987 $ · 21 322 €</span><span>écart -0,5 pt · bande ±5,0 pt</span></div></div><div style="margin-bottom:13px"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:13.5px;font-weight:650;flex:1">Obligations japonaises</span><span style="font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums">19,7 % <span class="dim">/ 20,0 %</span></span> <span class="badge ok">ok</span></div><div class="barre"><i style="width:19.70%;background:#9B8CFF"></i><u style="left:20.00%"></u></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-3);margin-top:5px"><span>15 994 $ · 14 217 €</span><span>écart -0,3 pt · bande ±5,0 pt</span></div></div><div style="margin-bottom:13px"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:13.5px;font-weight:650;flex:1">Asie / Chine</span><span style="font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums">29,6 % <span class="dim">/ 30,0 %</span></span> <span class="badge ok">ok</span></div><div class="barre"><i style="width:29.56%;background:#38BDF8"></i><u style="left:30.00%"></u></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-3);margin-top:5px"><span>24 006 $ · 21 339 €</span><span>écart -0,4 pt · bande ±5,0 pt</span></div></div><div style="margin-bottom:13px"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-size:13.5px;font-weight:650;flex:1">Réserve de valeur numérique</span><span style="font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums">4,9 % <span class="dim">/ 5,0 %</span></span> <span class="badge ok">ok</span></div><div class="barre"><i style="width:4.93%;background:#F2994A"></i><u style="left:5.00%"></u></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-3);margin-top:5px"><span>4 002 $ · 3 557 €</span><span>écart -0,1 pt · bande ±3,0 pt</span></div></div><div class="sep"></div><div style="font-size:12px;color:var(--txt-3)">Assiette de rééquilibrage (investi + cash disponible) : <b style="color:var(--txt-2)">81 199 $</b></div></div><div class="titre">Épargne de précaution</div><div class="card"><div class="lbl">Disponible en 5 minutes</div><div class="montant-usd">10 433,00 $</div><div class="montant-eur">9 274,00 €</div><div class="sep"></div><div class="lbl">Budget mensuel sur 6 mois</div><div class="montant-usd sm">1 738,83 $</div><div class="montant-eur sm">1 545,67 €</div></div><div class="titre">Rente mensuelle</div><div class="card"><div class="lbl">Revenu net perpétuel, pouvoir d’achat préservé</div><div class="montant-usd">90,84 $</div><div class="montant-eur">80,75 €</div><div class="sep"></div><div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Rente brute</div></div><div class="dr"><div class="a">96 $</div><div class="b">85 €</div></div></div><div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Rendement réel retenu</div></div><div class="dr"><div class="a">1,44 %</div></div></div><div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Inflation retenue</div></div><div class="dr"><div class="a">4,50 %</div></div></div><div style="font-size:11.5px;color:var(--txt-3);margin-top:8px">On ne consomme que le rendement au-dessus de l’inflation : le capital garde son pouvoir d’achat année après année.</div></div></main>
+        <nav class="bottom" id="nav">
+    <button data-onglet="bord" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"></path></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"></path></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"></path></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"></path></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"></path></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+        <div class="barre-bas"></div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div style="text-align:center;color:#8A96AB;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Portefeuille</div>
+    <div class="telephone">
+      <div class="ecran">
+        <div class="barre-haut"><span>9:41</span><span>Porte-feuille · Portefeuille</span><span>100 %</span></div>
+        <header class="topbar" style="position:sticky;top:0">
+          <h1>Portefeuille<span class="sub">synchronisé 09h41</span></h1>
+          <button class="iconbtn">⟳</button><button class="iconbtn">⚙︎</button>
+        </header>
+        <main id="view-portefeuille" class="view-apercu"><div class="chips"><button class="chip actif" data-chip="positions">Positions</button><button class="chip" data-chip="operations">Opérations</button><button class="chip" data-chip="reequilibrage">Rééquilibrage</button><button class="chip" data-chip="allocation">Allocation</button></div><button class="btn" id="btnNouveau" style="margin-bottom:14px">＋ Enregistrer une opération</button><div class="titre">Positions détenues</div><div class="card"><div class="ligne" data-pos="IGLN.L"><div class="pastille" style="background:#F5C45122">🥇</div><div class="gr"><div class="tt">IGLN.L</div><div class="st">Réserve de valeur physique · 350,00 × 34,20 USD</div></div><div class="dr"><div class="a">11 970 $</div><div class="b">10 640 €</div><div style="font-size:12px" class="up">↗ +0,81 %</div></div></div><div class="ligne" data-pos="BTCUSDT"><div class="pastille" style="background:#F2994A22">₿</div><div class="gr"><div class="tt">BTCUSDT</div><div class="st">Réserve de valeur numérique · 0,0656 × 61 000,00 USD</div></div><div class="dr"><div class="a">4 002 $</div><div class="b">3 557 €</div><div style="font-size:12px" class="down">↘ -1,52 %</div></div></div><div class="ligne" data-pos="XDW0.L"><div class="pastille" style="background:#2ECC7122">📊</div><div class="gr"><div class="tt">XDW0.L</div><div class="st">Énergie · 578,00 × 41,50 USD</div></div><div class="dr"><div class="a">23 987 $</div><div class="b">21 322 €</div><div style="font-size:12px" class="up">↗ +0,43 %</div></div></div><div class="ligne" data-pos="FLXC.L"><div class="pastille" style="background:#38BDF822">📊</div><div class="gr"><div class="tt">FLXC.L</div><div class="st">Asie / Chine · 968,00 × 24,80 USD</div></div><div class="dr"><div class="a">24 006 $</div><div class="b">21 339 €</div><div style="font-size:12px" class="flat">→ 0,00 %</div></div></div><div class="ligne" data-pos="XJSE.SW"><div class="pastille" style="background:#9B8CFF22">📜</div><div class="gr"><div class="tt">XJSE.SW</div><div class="st">Obligations japonaises · 1 094,00 × 2 150,00 JPY</div></div><div class="dr"><div class="a">15 994 $</div><div class="b">14 217 €</div><div style="font-size:12px" class="down">↘ -0,21 %</div></div></div><div class="ligne" data-pos="CHF"><div class="pastille" style="background:#5AA9FF22">💵</div><div class="gr"><div class="tt">CHF</div><div class="st">Épargne de précaution · 8 694,00 × 1,00 CHF</div></div><div class="dr"><div class="a">10 433 $</div><div class="b">9 274 €</div><div style="font-size:12px" class="flat">→ 0,00 %</div></div></div><div class="ligne" data-pos="USD"><div class="pastille" style="background:#7C8AA022">💵</div><div class="gr"><div class="tt">USD</div><div class="st">Compte courant · 1 240,00 × 1,00 USD</div></div><div class="dr"><div class="a">1 240 $</div><div class="b">1 102 €</div><div style="font-size:12px" class="flat">→ 0,00 %</div></div></div></div><div class="card tight"><div class="lbl">Plus-values latentes</div><div class="montant-usd sm">9 595,11 $</div><div class="montant-eur sm">8 528,99 €</div></div></main>
+        <nav class="bottom" id="nav">
+    <button data-onglet="bord" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"></path></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"></path></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"></path></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"></path></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"></path></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+        <div class="barre-bas"></div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div style="text-align:center;color:#8A96AB;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Performance</div>
+    <div class="telephone">
+      <div class="ecran">
+        <div class="barre-haut"><span>9:41</span><span>Porte-feuille · Performance</span><span>100 %</span></div>
+        <header class="topbar" style="position:sticky;top:0">
+          <h1>Performance<span class="sub">synchronisé 09h41</span></h1>
+          <button class="iconbtn">⟳</button><button class="iconbtn">⚙︎</button>
+        </header>
+        <main id="view-performance" class="view-apercu"><div class="chips"><button class="chip" data-periode="Progression journalière">Progression journalière</button><button class="chip" data-periode="Progression mensuelle">Progression mensuelle</button><button class="chip" data-periode="Depuis le début du mois">Depuis le début du mois</button><button class="chip" data-periode="Depuis le début de l’année">Depuis le début de l’année</button><button class="chip" data-periode="Depuis 1 an">Depuis 1 an</button><button class="chip actif" data-periode="Depuis le début">Depuis le début</button><button class="chip" data-periode="Période choisie">Période choisie</button></div><div class="card"><div class="lbl">Depuis le début · 08/11/2025 → 04/10/2026</div><div class="montant-usd">79 959,28 $</div><div class="montant-eur">71 074,92 €</div><div style="display:flex;align-items:center;gap:9px;margin-top:7px;flex-wrap:wrap"><span class="fleche up">↗ +11,30 %</span><span class="dim" style="font-size:12px">performance de la période</span></div></div><div class="card"><svg class="graphique" viewBox="0 0 320 160" preserveAspectRatio="none"><defs><linearGradient id="degradeAire" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--up)" stop-opacity="0.28"></stop><stop offset="100%" stop-color="var(--up)" stop-opacity="0"></stop></linearGradient></defs><g class="grille"><line x1="0" y1="12.0" x2="320" y2="12.0"></line><line x1="0" y1="55.3" x2="320" y2="55.3"></line><line x1="0" y1="98.7" x2="320" y2="98.7"></line><line x1="0" y1="142.0" x2="320" y2="142.0"></line></g><path class="aire" d="M0.00,108.81 L2.89,108.63 L5.78,108.56 L8.67,108.62 L11.56,108.78 L14.45,109.05 L17.35,109.41 L20.24,109.88 L23.13,110.43 L26.02,111.06 L28.91,111.77 L31.80,112.55 L34.69,113.38 L37.58,114.26 L40.47,115.19 L43.36,116.15 L46.25,117.14 L49.15,118.14 L52.04,119.15 L54.93,120.16 L57.82,121.16 L60.71,122.14 L63.60,123.09 L66.49,124.00 L69.38,124.87 L72.27,125.69 L75.16,126.44 L78.05,127.13 L80.95,127.74 L83.84,128.26 L86.73,128.70 L89.62,129.04 L92.51,129.27 L95.40,129.40 L98.29,129.42 L101.18,129.32 L104.07,129.10 L106.96,128.75 L109.85,128.28 L112.75,127.68 L115.64,126.95 L118.53,126.09 L121.42,125.10 L124.31,123.97 L127.20,122.72 L130.09,121.34 L132.98,119.84 L135.87,118.21 L138.76,116.46 L141.65,114.59 L144.55,112.62 L147.44,110.53 L150.33,108.35 L153.22,106.07 L156.11,103.70 L159.00,101.25 L161.89,98.73 L164.78,96.13 L167.67,93.48 L170.56,90.78 L173.45,88.03 L176.35,85.25 L179.24,82.44 L182.13,79.62 L185.02,76.79 L187.91,73.95 L190.80,71.13 L193.69,68.33 L196.58,65.55 L199.47,62.81 L202.36,60.11 L205.25,57.47 L208.15,54.89 L211.04,52.37 L213.93,49.94 L216.82,47.58 L219.71,45.32 L222.60,43.15 L225.49,41.08 L228.38,39.12 L231.27,37.27 L234.16,35.54 L237.05,33.93 L239.95,32.44 L242.84,31.08 L245.73,29.85 L248.62,28.75 L251.51,27.78 L254.40,26.93 L257.29,26.22 L260.18,25.64 L263.07,25.19 L265.96,24.87 L268.85,24.66 L271.75,24.58 L274.64,24.61 L277.53,24.76 L280.42,25.01 L283.31,25.37 L286.20,25.82 L289.09,26.35 L291.98,26.98 L294.87,27.67 L297.76,28.44 L300.65,29.26 L303.55,30.14 L306.44,31.06 L309.33,32.02 L312.22,33.00 L315.11,34.00 L318.00,35.01 L318.00,142 L0,142 Z" fill="url(#degradeAire)"></path><path class="trait" d="M0.00,108.81 L2.89,108.63 L5.78,108.56 L8.67,108.62 L11.56,108.78 L14.45,109.05 L17.35,109.41 L20.24,109.88 L23.13,110.43 L26.02,111.06 L28.91,111.77 L31.80,112.55 L34.69,113.38 L37.58,114.26 L40.47,115.19 L43.36,116.15 L46.25,117.14 L49.15,118.14 L52.04,119.15 L54.93,120.16 L57.82,121.16 L60.71,122.14 L63.60,123.09 L66.49,124.00 L69.38,124.87 L72.27,125.69 L75.16,126.44 L78.05,127.13 L80.95,127.74 L83.84,128.26 L86.73,128.70 L89.62,129.04 L92.51,129.27 L95.40,129.40 L98.29,129.42 L101.18,129.32 L104.07,129.10 L106.96,128.75 L109.85,128.28 L112.75,127.68 L115.64,126.95 L118.53,126.09 L121.42,125.10 L124.31,123.97 L127.20,122.72 L130.09,121.34 L132.98,119.84 L135.87,118.21 L138.76,116.46 L141.65,114.59 L144.55,112.62 L147.44,110.53 L150.33,108.35 L153.22,106.07 L156.11,103.70 L159.00,101.25 L161.89,98.73 L164.78,96.13 L167.67,93.48 L170.56,90.78 L173.45,88.03 L176.35,85.25 L179.24,82.44 L182.13,79.62 L185.02,76.79 L187.91,73.95 L190.80,71.13 L193.69,68.33 L196.58,65.55 L199.47,62.81 L202.36,60.11 L205.25,57.47 L208.15,54.89 L211.04,52.37 L213.93,49.94 L216.82,47.58 L219.71,45.32 L222.60,43.15 L225.49,41.08 L228.38,39.12 L231.27,37.27 L234.16,35.54 L237.05,33.93 L239.95,32.44 L242.84,31.08 L245.73,29.85 L248.62,28.75 L251.51,27.78 L254.40,26.93 L257.29,26.22 L260.18,25.64 L263.07,25.19 L265.96,24.87 L268.85,24.66 L271.75,24.58 L274.64,24.61 L277.53,24.76 L280.42,25.01 L283.31,25.37 L286.20,25.82 L289.09,26.35 L291.98,26.98 L294.87,27.67 L297.76,28.44 L300.65,29.26 L303.55,30.14 L306.44,31.06 L309.33,32.02 L312.22,33.00 L315.11,34.00 L318.00,35.01 " style="stroke:var(--up)" vector-effect="non-scaling-stroke"></path><circle cx="318.00" cy="35.01" r="3.4" fill="var(--up)"></circle></svg></div><div class="grille g2"><div class="mini"><div class="l">Gain de marché</div><div class="v">8 119 $</div><div class="e">7 217 €</div></div><div class="mini"><div class="l">Apports de la période</div><div class="v">0 $</div><div class="e">0 €</div></div><div class="mini"><div class="l">Valeur de départ</div><div class="v">71 840 $</div><div class="e">63 858 €</div></div><div class="mini"><div class="l">Volatilité annualisée</div><div class="v up">+3,21 %</div><div class="e">écart-type</div></div></div><div class="titre">Performance par année</div><div class="card"><table class="tableau"><tbody><tr><th>Année</th><th>TWR</th></tr><tr><td>2025</td><td class="down">-1,43 %</td></tr><tr><td>2026</td><td class="up">+12,91 %</td></tr></tbody></table></div><div class="titre">Étalon or</div><div class="card"><div class="ligne"><div class="gr"><div class="tt">Portefeuille en onces d’or</div><div class="st">Cours : 2 650 $ l’once</div></div><div class="dr"><div class="a">30,173 oz</div></div></div></div></main>
+        <nav class="bottom" id="nav">
+    <button data-onglet="bord" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"></path></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"></path></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"></path></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"></path></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"></path></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+        <div class="barre-bas"></div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div style="text-align:center;color:#8A96AB;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Retraite</div>
+    <div class="telephone">
+      <div class="ecran">
+        <div class="barre-haut"><span>9:41</span><span>Porte-feuille · Retraite</span><span>100 %</span></div>
+        <header class="topbar" style="position:sticky;top:0">
+          <h1>Retraite<span class="sub">synchronisé 09h41</span></h1>
+          <button class="iconbtn">⟳</button><button class="iconbtn">⚙︎</button>
+        </header>
+        <main id="view-retraite" class="view-apercu"><div class="card gold"><div class="lbl">Capital projeté en 2055</div><div class="montant-usd">681 784,71 $</div><div class="montant-eur">606 030,86 €</div><div style="font-size:12px;color:var(--txt-3);margin-top:7px">soit 190 228 $ en pouvoir d’achat d’aujourd’hui</div></div><div class="card"><svg class="graphique" viewBox="0 0 320 160" preserveAspectRatio="none"><defs><linearGradient id="degradeAire" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--gold)" stop-opacity="0.28"></stop><stop offset="100%" stop-color="var(--gold)" stop-opacity="0"></stop></linearGradient></defs><g class="grille"><line x1="0" y1="12.0" x2="320" y2="12.0"></line><line x1="0" y1="55.3" x2="320" y2="55.3"></line><line x1="0" y1="98.7" x2="320" y2="98.7"></line><line x1="0" y1="142.0" x2="320" y2="142.0"></line></g><path class="aire" d="M0.00,129.42 L10.97,128.00 L21.93,126.49 L32.90,124.89 L43.86,123.19 L54.83,121.39 L65.79,119.49 L76.76,117.47 L87.72,115.33 L98.69,113.06 L109.66,110.65 L120.62,108.10 L131.59,105.40 L142.55,102.54 L153.52,99.50 L164.48,96.28 L175.45,92.87 L186.41,89.25 L197.38,85.42 L208.34,81.36 L219.31,77.05 L230.28,72.48 L241.24,67.64 L252.21,62.51 L263.17,57.07 L274.14,51.31 L285.10,45.20 L296.07,38.72 L307.03,31.86 L318.00,24.58 L318.00,142 L0,142 Z" fill="url(#degradeAire)"></path><path class="trait" d="M0.00,129.42 L10.97,128.00 L21.93,126.49 L32.90,124.89 L43.86,123.19 L54.83,121.39 L65.79,119.49 L76.76,117.47 L87.72,115.33 L98.69,113.06 L109.66,110.65 L120.62,108.10 L131.59,105.40 L142.55,102.54 L153.52,99.50 L164.48,96.28 L175.45,92.87 L186.41,89.25 L197.38,85.42 L208.34,81.36 L219.31,77.05 L230.28,72.48 L241.24,67.64 L252.21,62.51 L263.17,57.07 L274.14,51.31 L285.10,45.20 L296.07,38.72 L307.03,31.86 L318.00,24.58 " style="stroke:var(--gold)" vector-effect="non-scaling-stroke"></path><circle cx="318.00" cy="24.58" r="3.4" fill="var(--gold)"></circle></svg></div><div class="grille g2"><div class="mini"><div class="l">Rente mensuelle nette</div><div class="v">626 $</div><div class="e">557 €</div></div><div class="mini"><div class="l">Rente brute</div><div class="v">816 $</div><div class="e">725 €</div></div><div class="mini"><div class="l">Apports cumulés</div><div class="v">177 834 $</div><div class="e">158 075 €</div></div><div class="mini"><div class="l">Part de plus-value</div><div class="v up">+73,92 %</div><div class="e">part du capital</div></div></div><div class="titre">Hypothèses</div><div class="card"><div class="ligne" data-reglage="anneeDepartRetraite"><div class="gr"><div class="tt">Départ à la retraite</div><div class="st">Année</div></div><div class="dr"><div class="a">2055</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="apportMensuelEur"><div class="gr"><div class="tt">Apport mensuel</div><div class="st">Versement programmé</div></div><div class="dr"><div class="a">250 €</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="rendementAnnuelCible"><div class="gr"><div class="tt">Rendement annuel</div><div class="st">Hypothèse de marché</div></div><div class="dr"><div class="a">6,0 %</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="inflationReelleEstimee"><div class="gr"><div class="tt">Inflation retenue</div><div class="st">Érosion du pouvoir d’achat</div></div><div class="dr"><div class="a">4,5 %</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="tauxImpositionPV"><div class="gr"><div class="tt">Fiscalité des plus-values</div><div class="st">PFU</div></div><div class="dr"><div class="a">31,4 %</div><div class="b">modifier</div></div></div></div><div style="font-size:11.5px;color:var(--txt-3);padding:6px 4px">La rente ne consomme que le rendement réel au-dessus de l’inflation : le capital reste intact en pouvoir d’achat.</div></main>
+        <nav class="bottom" id="nav">
+    <button data-onglet="bord" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"></path></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"></path></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"></path></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"></path></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"></path></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+        <div class="barre-bas"></div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div style="text-align:center;color:#8A96AB;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Fiscalité</div>
+    <div class="telephone">
+      <div class="ecran">
+        <div class="barre-haut"><span>9:41</span><span>Porte-feuille · Fiscalité</span><span>100 %</span></div>
+        <header class="topbar" style="position:sticky;top:0">
+          <h1>Fiscalité<span class="sub">synchronisé 09h41</span></h1>
+          <button class="iconbtn">⟳</button><button class="iconbtn">⚙︎</button>
+        </header>
+        <main id="view-fiscalite" class="view-apercu"><div class="chips"><button class="chip" data-fisc="annee" data-valeur="2022">Revenus 2022</button><button class="chip" data-fisc="annee" data-valeur="2023">Revenus 2023</button><button class="chip" data-fisc="annee" data-valeur="2024">Revenus 2024</button><button class="chip actif" data-fisc="annee" data-valeur="2025">Revenus 2025</button><button class="chip" data-fisc="annee" data-valeur="2026">Revenus 2026</button></div><div class="info"><b>Nouveaux barèmes disponibles.</b> La campagne de déclaration des revenus 2025 est ouverte au BOFiP : une consolidation officielle des seuils est disponible.<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">Ouvrir l’assistant de mise à jour</button></div><div style="margin-top:8px"><button class="btn ghost" data-fisc="prompt">Voir le prompt à envoyer à l’IA</button></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">Situation familiale</span><span class="chev">›</span></div><div class="corps"><div class="ligne" data-reglage="statutFiscal"><div class="gr"><div class="tt">Statut</div></div><div class="dr"><div class="a">Marié(e) / Pacsé(e)</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="partsFiscales"><div class="gr"><div class="tt">Parts fiscales</div></div><div class="dr"><div class="a">3,0</div><div class="b">modifier</div></div></div><div style="font-size:12px;color:var(--txt-3);margin-top:4px">Foyer de 2 parts + 2 demi-part(s) au titre des enfants.</div></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">Déclaration de base<div style="font-size:11.5px;color:var(--txt-3);font-weight:500">salaires, frais professionnels, revenus étrangers, comptes hors de France</div></span><span class="chev">›</span></div><div class="corps"><div class="ligne" data-reglage="salaireNetImposable1"><div class="gr"><div class="tt">Salaire net imposable — déclarant 1</div></div><div class="dr"><div class="a">0 €</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="salaireNetImposable2"><div class="gr"><div class="tt">Salaire net imposable — déclarant 2</div></div><div class="dr"><div class="a">0 €</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="fraisReels1"><div class="gr"><div class="tt">Frais professionnels déclarant 1</div></div><div class="dr"><div class="a">0 €</div><div class="b">modifier</div></div></div><div class="ligne" data-reglage="fraisReels2"><div class="gr"><div class="tt">Frais professionnels déclarant 2</div></div><div class="dr"><div class="a">0 €</div><div class="b">modifier</div></div></div><div class="ok-vert"><b>Case 1AK — déclarant 1 : 0 €</b><br>Retenu : abattement 10 % (0 €) — le plus favorable des deux.<br><b>Case 1BK — déclarant 2 : 0 €</b><br>Retenu : abattement 10 % (0 €).</div><div style="font-size:12px;color:var(--txt-3)">Abattement forfaitaire 10 % : 0 € / 0 € (plancher 509 €, plafond 14 555 €).</div><div class="sep"></div><div class="ligne" data-reglage="interetsEtrangers"><div class="gr"><div class="tt">Revenus d’intérêts encaissés à l’étranger (€)</div></div><div class="dr"><div class="a">0 €</div><div class="b">modifier</div></div></div><div style="font-size:12px;color:var(--txt-3);margin:6px 0 10px">Formulaire <b>2047</b> puis report en 2TR — à cocher « revenus encaissés à l’étranger ».</div><div class="ligne" style="padding-top:4px"><div class="gr"><div class="tt">Comptes détenus hors de France</div><div class="st">Formulaire 3916-3916 bis + case 8UU</div></div><div class="dr"><span class="badge warn">à déclarer</span></div></div><div style="font-size:12px;color:var(--txt-3)">Un compte ouvert chez un intermédiaire étranger (Swissquote Bank Europe au Luxembourg, par exemple) doit être déclaré même sans opération : amende de 1 500 € par compte et par an.</div></div></div><div class="titre">Impôt sur le revenu</div><div class="card"><div class="lbl">Revenu net imposable</div><div class="montant-usd">0 €</div><div class="sep"></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Impôt brut</div></div><div class="dr"><div class="a">0 €</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Décote</div></div><div class="dr"><div class="a">− 0 €</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Impôt net à payer</div></div><div class="dr"><div class="a" style="font-size:17px;color:var(--gold)">0 €</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Taux marginal (TMI)</div></div><div class="dr"><div class="a">0 %</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Taux moyen</div></div><div class="dr"><div class="a">0,00 %</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Quotient familial</div></div><div class="dr"><div class="a">0 €</div></div></div></div><div class="card tight"><div class="lbl">Prélèvement à la source</div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Taux du foyer</div></div><div class="dr"><div class="a">0,00 %</div></div></div><div class="ligne" style="padding:7px 0"><div class="gr"><div class="st">Taux individualisé</div></div><div class="dr"><div class="a">0,00 %</div></div></div></div><div class="info"><b>Prélèvements sociaux 2025 : taux discuté.</b> LFSS 2026 art. 12 : la hausse de CSG s’applique aux revenus du patrimoine dès 2025, aux produits de placement à partir du 1ᵉʳ janvier 2026. Chez un courtier étranger aucune CSG n’est précomptée : l’assiette est celle du patrimoine, donc 18,6 %. Le module retient 17,2 % par prudence — la fourchette vous est montrée.</div><div id="blocPv"><div class="titre">Plus-values de l’année</div><div class="card"><div class="vide" style="padding:14px">Calcul en cours…</div></div></div><div class="titre">Guide par formulaire</div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">2042 — Déclaration d’ensemble</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>1AJ / 1BJ</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Salaires nets imposables après déduction des frais professionnels.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>1AK / 1BK</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Montant retenu après frais réels ou abattement 10 % — calculé ci-dessus.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>2TR</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Revenus d’intérêts encaissés à l’étranger (après formulaire 2047).</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>2OP</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Option pour le barème progressif sur les revenus du capital. À ne cocher que si le calcul ci-dessus le dit favorable.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>8UU</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Comptes détenus hors de France — à cocher, avec le 3916.</td></tr></tbody></table></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">2042 C — Plus-values</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>3VG</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Plus-value nette de l’année (régime 150-0 A).</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>3VH</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Moins-value nette reportable 10 ans (imputation FIFO, uniquement sur plus-values mobilières).</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>3SG</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Abattement pour durée de détention — titres acquis avant 2018.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>3AN / 3BN</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Plus-value / moins-value de crypto-actifs (après 2086).</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>3CN</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Option barème sur les plus-values de crypto-actifs.</td></tr></tbody></table></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">2074 — Plus-values mobilières</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>Obligation</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Dès qu’il y a compensation entre plus-values et moins-values, ou report.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Ligne 905</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Plus-value brute.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Ligne 913</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Moins-value de l’année.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Report</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Les moins-values antérieures s’imputent d’abord, avant tout report nouveau.</td></tr></tbody></table></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">2086 — Crypto-actifs</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>Formule</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">PV = prix de cession − (prix total d’acquisition × prix de cession / valeur globale du portefeuille).</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Seuil 305 €</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Franchise assise sur le TOTAL des prix de cession de l’année, appréciée au niveau du foyer.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>À savoir</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Dépôt obligatoire même sous le seuil : c’est la 2086 qui prouve l’exonération.</td></tr></tbody></table></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">3916 — Comptes à l’étranger</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>Qui</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Tout compte ouvert hors de France, détenu, utilisé ou clos dans l’année.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Exemple</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Swissquote Bank Europe SA (Luxembourg) : compte à déclarer.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Sanction</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">1 500 € par compte et par an, même sans opération.</td></tr></tbody></table></div></div><div class="accordeon" data-acc=""><div class="tete" data-lie="1"><span style="font-size:16px"></span><span class="p">2047 — Revenus encaissés à l’étranger</span><span class="chev">›</span></div><div class="corps"><table class="tableau"><tbody><tr><th>Case / point</th><th>À savoir</th></tr><tr><td style="text-align:left;white-space:nowrap"><b>Cadre 3</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Plus-values étrangères, à reporter en 3VG.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Crédits d’impôt</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Cases 8VL / 8VM / 8WM / 8UM selon le pays.</td></tr><tr><td style="text-align:left;white-space:nowrap"><b>Case</b></td><td style="text-align:left;color:var(--txt-2);font-size:12.5px">Cocher « revenus encaissés à l’étranger » sur la 2042.</td></tr></tbody></table></div></div></main>
+        <nav class="bottom" id="nav">
+    <button data-onglet="bord" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"></path></svg>
+        <span>Bord</span>
+    </button>
+    <button data-onglet="portefeuille" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v12H3V7Zm0 0 3-3h15M16 13h2"></path></svg>
+        <span>Portefeuille</span>
+    </button>
+    <button data-onglet="performance" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-5 3 3 5-7"></path></svg>
+        <span>Perf.</span>
+    </button>
+    <button data-onglet="retraite" class="">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M12 4v14m0-14a4 4 0 0 1 8 0H4a4 4 0 0 1 8 0Z"></path></svg>
+        <span>Retraite</span>
+    </button>
+    <button data-onglet="fiscalite" class="actif">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h4m-4 4h2M9 8h.01M15 16h.01"></path></svg>
+        <span>Fiscalité</span>
+    </button>
+</nav>
+        <div class="barre-bas"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

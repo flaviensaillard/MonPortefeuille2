@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pf_bg">#FF0B0F17</color>
+    <color name="pf_surface">#FF131A26</color>
+    <color name="pf_accent">#FFF5C451</color>
+    <color name="pf_up">#FF2ECC71</color>
+    <color name="pf_down">#FFE74C3C</color>
+    <color name="pf_flat">#FF38BDF8</color>
+    <color name="pf_status">#FF0B0F17</color>
+    <color name="pf_nav">#FF0B0F17</color>
+</resources>
