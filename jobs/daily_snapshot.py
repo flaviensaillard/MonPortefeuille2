@@ -25,7 +25,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import db, fx, prices  # noqa: E402
-from core.models import POCHES_PAR_CLE, Perimetre  # noqa: E402
+from core.models import (  # noqa: E402
+    POCHES_PAR_CLE,
+    Perimetre,
+    appliquer_allocation_personnalisee,
+)
 from core.portfolio import calculer_positions, charger_transactions, valoriser  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -40,6 +44,13 @@ def main() -> int:
     if manquantes:
         log.error("Tables absentes : %s. Exécutez migrations/001_init.sql.", manquantes)
         return 1
+
+    # --- Charger l'allocation cible personnalisée (actifs & poches) ---
+    try:
+        if hasattr(db, "lire_allocation_personnalisee"):
+            appliquer_allocation_personnalisee(db.lire_allocation_personnalisee())
+    except Exception as exc:
+        log.warning("Allocation personnalisée ignorée : %s", exc)
 
     # --- Transactions -> positions ---
     # Une ligne incohérente ne doit pas empêcher le snapshot : sans lui, vous

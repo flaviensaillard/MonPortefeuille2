@@ -428,21 +428,70 @@ def metric_pct(
     )
 
 
+def metric_points(
+    conteneur,
+    label: str,
+    ecart_points: float | None,
+    decimales: int = 2,
+    help: str | None = None,
+) -> None:
+    """Affiche un écart en points de pourcentage coloré :
+    - Vert (#2ecc71) si > 0
+    - Rouge (#e74c3c) si < 0
+    - Bleu (#38bdf8) si == 0 (stable)
+    """
+    cible = conteneur if conteneur is not None else st
+    v = _nombre(ecart_points)
+    if v is None:
+        bloc_val = "<div style='font-size:1.7rem;font-weight:600;color:#38bdf8;'>—</div>"
+    else:
+        c_val = _couleur_variation(v)
+        txt_pts = points(0.0 if abs(v) <= 1e-6 else v, decimales=decimales)
+        bloc_val = (
+            f"<div style='font-size:1.7rem;font-weight:600;color:{c_val};line-height:1.15;'>{txt_pts}</div>"
+        )
+
+    aide_attr = ""
+    aide_icone = ""
+    if help:
+        echappe = str(help).replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        aide_attr = f' title="{echappe}"'
+        aide_icone = f" <span title='{echappe}' style='cursor:help;opacity:0.6;font-size:0.8em;'>ⓘ</span>"
+
+    cible.markdown(
+        f"<div style='margin-bottom:0.85rem;'{aide_attr}>"
+        f"<div style='font-size:0.875rem;color:rgba(250,250,250,0.75);margin-bottom:0.2rem;'>{label}{aide_icone}</div>"
+        f"{bloc_val}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _formater_cellule_html(val: object) -> str:
     """Convertit une cellule contenant `X $ / Y €` en deux lignes :
-    dollars en blanc au-dessus, euros en bleu (#38bdf8) en dessous."""
+    dollars en blanc (ou vert/rouge si signé) au-dessus, euros en bleu (#38bdf8) en dessous.
+    Colore également les pourcentages et points signés en vert/rouge/bleu."""
     import html as _html
     if val is None or ( isinstance(val, float) and math.isnan(val) ):
         return "—"
     txt = str(val)
     if " $ / " in txt and txt.endswith(" €"):
         part_usd, part_eur = txt.split(" / ", 1)
+        p_u_strip = part_usd.strip()
+        if p_u_strip.startswith("+") or p_u_strip.startswith("-"):
+            c_u = _couleur_delta_texte(p_u_strip)
+        else:
+            c_u = "#ffffff"
         return (
-            f"<div style='color:#ffffff;font-weight:600;line-height:1.25;white-space:nowrap;'>"
+            f"<div style='color:{c_u};font-weight:600;line-height:1.25;white-space:nowrap;'>"
             f"{_html.escape(part_usd)}</div>"
             f"<div style='color:#38bdf8;font-size:0.88em;font-weight:500;line-height:1.25;margin-top:2px;white-space:nowrap;'>"
             f"{_html.escape(part_eur)}</div>"
         )
+    txt_s = txt.strip()
+    if (txt_s.startswith("+") or txt_s.startswith("-")) and (txt_s.endswith("%") or txt_s.endswith("pts")):
+        c_s = _couleur_delta_texte(txt_s)
+        return f"<span style='color:{c_s};font-weight:600;white-space:nowrap;'>{_html.escape(txt)}</span>"
     return _html.escape(txt)
 
 

@@ -29,10 +29,11 @@ import pandas as pd
 import streamlit as st
 
 import importlib
-from core import db, metrics, rebalance, session as S
+from core import db, metrics, models, rebalance, session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(models, "verifier_allocation_cible") or not hasattr(ui, "_NAV_V2"):
+    importlib.reload(models)
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)

@@ -159,12 +159,25 @@ def generer_ordres(
 
         sens = "achat" if ecart > 0 else "vente"
 
-        # Répartition de l'ordre entre les actifs de la poche, au prorata de leur
-        # valeur. Simple, et évite de concentrer le rééquilibrage sur un seul ETF.
+        # Répartition de l'ordre entre les actifs de la poche :
+        # - si l'utilisateur a défini des cibles distinctes entre les actifs de la
+        #   même poche (ex. 15 % Or / 5 % BTC), on répartit au prorata des cibles ;
+        # - sinon (cibles égales ou non différenciées), au prorata de leur valeur.
+        from .models import cible_actif
+        cibles_a = [cible_actif(a.ticker) for a in e.actifs]
+        total_cibles_a = sum(cibles_a)
+        cibles_distinctes = (
+            len(e.actifs) > 1
+            and total_cibles_a > 0
+            and len({round(c, 6) for c in cibles_a}) > 1
+        )
         total_poche = sum(a.valeur_eur for a in e.actifs)
         ecart_u = abs(getattr(e, "ecart_usd", ecart))
-        for a in e.actifs:
-            part = (a.valeur_eur / total_poche) if total_poche > 0 else (1.0 / len(e.actifs))
+        for a, c_a in zip(e.actifs, cibles_a):
+            if cibles_distinctes:
+                part = c_a / total_cibles_a
+            else:
+                part = (a.valeur_eur / total_poche) if total_poche > 0 else (1.0 / len(e.actifs))
             montant = abs(ecart) * part
             montant_u = ecart_u * part
             quantite = montant / (a.prix * (a.dernier_taux or 1.0)) if a.prix > 0 else 0.0

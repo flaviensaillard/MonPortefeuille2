@@ -98,7 +98,7 @@ with tab_actifs:
                 "PRU": ui.usd_eur(pos.pru_usd, pos.pru_eur) if pos and pos.pru_usd else "—",
                 "Perf. ($)": ui.pct(pos.perf_globale_usd, decimales=2, signe=True)
                 if pos and pos.perf_globale_usd is not None else "—",
-                "PV latente ($ / €)": ui.usd_eur(pos.pv_latente_usd, pos.pv_latente_eur) if pos else "—",
+                "PV latente ($ / €)": ui.usd_eur(pos.pv_latente_usd, pos.pv_latente_eur, signe=True) if pos else "—",
             })
 
         ui.tableau(pd.DataFrame(lignes_actifs))
@@ -107,7 +107,7 @@ with tab_actifs:
         st.subheader("Détail par poche")
 
         for cle, etat in ctx.etats.items():
-            if not etat.actifs:
+            if not etat.actifs and etat.poche.perimetre.value != "investi":
                 continue
             p = etat.poche
             perimetre = {
@@ -127,14 +127,23 @@ with tab_actifs:
                         f"Cible {ui.pct(p.cible)} · bande ±{p.bande * 100:.0f} pts · "
                         f"réel {ui.pct(etat.poids_reel)} · écart {ui.points(etat.ecart_points)}"
                     )
-                lignes_poche = [{
-                    "Actif": a.ticker,
-                    "Qté": ui.quantite(a.quantite),
-                    "Valeur ($ / €)": ui.usd_eur(getattr(a, "valeur_usd", a.valeur_eur), a.valeur_eur),
-                    "Part de la poche": ui.pct(a.valeur_eur / etat.valeur_eur)
-                    if etat.valeur_eur else "—",
-                } for a in etat.actifs]
-                ui.tableau(pd.DataFrame(lignes_poche))
+                if etat.actifs:
+                    lignes_poche = [{
+                        "Actif": a.ticker,
+                        "Qté": ui.quantite(a.quantite),
+                        "Valeur ($ / €)": ui.usd_eur(getattr(a, "valeur_usd", a.valeur_eur), a.valeur_eur),
+                        "Part de la poche": ui.pct(a.valeur_eur / etat.valeur_eur)
+                        if etat.valeur_eur else "—",
+                    } for a in etat.actifs]
+                    ui.tableau(pd.DataFrame(lignes_poche))
+                else:
+                    membres_txt = ", ".join(
+                        f"`{m}` ({models.cible_actif(m) * 100:.1f} %)" for m in p.membres
+                    ) if p.membres else "Aucun actif rattaché"
+                    st.info(
+                        f"Aucune part encore détenue dans cette poche. "
+                        f"Actif(s) cible(s) rattaché(s) : {membres_txt}."
+                    )
 
         non_classes = [a for a in ctx.actifs if a.poche == "inconnu"]
         if non_classes:
@@ -209,7 +218,7 @@ with tab_reeq:
                 "Bande": f"±{e.bande * 100:.0f} pts",
                 "Valeur actuelle ($ / €)": ui.usd_eur(e.valeur_usd, e.valeur_eur),
                 "Valeur cible ($ / €)": ui.usd_eur(e.valeur_cible_usd, e.valeur_cible_eur),
-                "Ajustement ($ / €)": ui.usd_eur(e.ecart_usd, e.ecart_eur),
+                "Ajustement ($ / €)": ui.usd_eur(e.ecart_usd, e.ecart_eur, signe=True),
                 "État": "🔴 Hors bande" if e.hors_bande else "🟢 Dans la bande",
             })
         ui.tableau(pd.DataFrame(lignes_ec))
@@ -245,11 +254,28 @@ with tab_reeq:
             } for o in ordres]))
 
         if a_surveiller:
-            st.info(
-                "**Écart hors bande mais sous le seuil de rentabilité** (frais > correction) : "
-                + ", ".join(f"{e.poche_nom} ({ui.points(e.ecart_points)})" for e in a_surveiller)
-                + ". À traiter au prochain apport plutôt que par un ordre dédié."
-            )
+            poches_sans_pos = [e for e in a_surveiller if not e.actifs and abs(e.ecart_eur) >= 250.0]
+            sous_seuil = [e for e in a_surveiller if e.actifs or abs(e.ecart_eur) < 250.0]
+            if poches_sans_pos:
+                details_nv = []
+                for e in poches_sans_pos:
+                    p_obj = POCHES_PAR_CLE.get(e.poche_cle)
+                    membres_str = ", ".join(f"`{m}`" for m in (p_obj.membres if p_obj else [])) or "actif à définir"
+                    details_nv.append(
+                        f"**{e.poche_nom}** (cible {ui.pct(e.poids_cible)} · à investir : "
+                        f"**{ui.usd_eur(abs(getattr(e, 'ecart_usd', e.ecart_eur)), abs(e.ecart_eur))}** sur {membres_str})"
+                    )
+                st.info(
+                    "🆕 **Poche(s) cible(s) sans position encore détenue** : "
+                    + " ; ".join(details_nv)
+                    + ". Enregistrez votre premier achat ci-dessous pour initier la ligne."
+                )
+            if sous_seuil:
+                st.info(
+                    "**Écart hors bande mais sous le seuil de rentabilité** (frais > correction) : "
+                    + ", ".join(f"{e.poche_nom} ({ui.points(e.ecart_points)})" for e in sous_seuil)
+                    + ". À traiter au prochain apport plutôt que par un ordre dédié."
+                )
 
     st.divider()
     st.subheader("Enregistrer une transaction (Achat / Vente)")

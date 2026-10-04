@@ -24,11 +24,13 @@ import importlib
 import pandas as pd
 import streamlit as st
 
-from core import metrics, session as S
+from core import db, metrics, models, session as S
 from core import dates
 from core import ui
 
-if not hasattr(ui, "_NAV_V2") or not hasattr(ui, "metric_pct"):
+if not hasattr(ui, "_NAV_V2") or not hasattr(ui, "metric_pct") or not hasattr(ui, "metric_points") or not hasattr(models, "verifier_allocation_cible") or not hasattr(db, "lire_allocation_personnalisee"):
+    importlib.reload(models)
+    importlib.reload(db)
     importlib.reload(ui)
     importlib.reload(S)
 
@@ -278,10 +280,13 @@ ui.metric_pct(
     c1, "IRR (rendement pondéré)", taux_irr,
     help="Tient compte de votre calendrier d'apports réel.",
 )
-c2.metric("Écart TWR / IRR",
-          ui.points((taux_irr - twr_ann) * 100, 2) if taux_irr is not None else "—",
-          help="Positif : vos apports ont été bien placés. Négatif : vous avez "
-               "alimenté le portefeuille au mauvais moment.")
+ui.metric_points(
+    c2, "Écart TWR / IRR",
+    (taux_irr - twr_ann) * 100 if taux_irr is not None else None,
+    decimales=2,
+    help="Positif : vos apports ont été bien placés. Négatif : vous avez "
+         "alimenté le portefeuille au mauvais moment.",
+)
 
 # ---------------------------------------------------------------------------
 # Par année

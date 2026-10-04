@@ -8,13 +8,15 @@ import importlib
 import pandas as pd
 import streamlit as st
 
-from core import db
+from core import db, models
 from core import fiscal_bars as fb
 from core import guide_fiscal as guide
 from core import session as S, tax
 from core import ui
 
-if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_prompt_maj_baremes") or not hasattr(tax, "_QF_CORRIGE_197") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_prompt_maj_baremes") or not hasattr(models, "verifier_allocation_cible") or not hasattr(tax, "_QF_CORRIGE_197") or not hasattr(ui, "_NAV_V2"):
+    importlib.reload(models)
+    importlib.reload(db)
     importlib.reload(fb)
     importlib.reload(tax)
     importlib.reload(ui)
