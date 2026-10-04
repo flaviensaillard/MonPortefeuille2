@@ -131,8 +131,8 @@ class TestOrdres:
 
     def test_repartition_selon_cibles_distinctes_dans_la_poche(self):
         """Si l'utilisateur a personnalisé deux cibles différentes au sein de la même
-        poche (ex. IGLN.L = 15 % et BTCUSDT = 5 % dans la poche RV à 20 %), l'ordre
-        de rééquilibrage respecte le ratio 75 % / 25 %."""
+        poche (ex. XDW0.L = 22,5 % et TTE.PA = 7,5 % dans la poche Énergie à 30 %),
+        l'ordre de rééquilibrage respecte le ratio 75 % / 25 %."""
         from core.models import (
             Actif,
             Classe,
@@ -143,23 +143,29 @@ class TestOrdres:
         try:
             cfg = allocation_par_defaut()
             for a in cfg["actifs"]:
-                if a["ticker"] == "IGLN.L":
-                    a["cible"] = 0.15
-                elif a["ticker"] == "BTCUSDT":
-                    a["cible"] = 0.05
+                if a["ticker"] == "XDW0.L":
+                    a["cible"] = 0.225
+            cfg["actifs"].append({
+                "ticker": "TTE.PA",
+                "nom": "TotalEnergies",
+                "poche": "energie",
+                "cible": 0.075,
+                "classe": "action",
+                "devise": "EUR",
+            })
             appliquer_allocation_personnalisee(cfg)
-            e = self._ecart("rv", "Réserve de valeur", 0.10, 0.20, 0.03, total=100000.0)
+            e = self._ecart("energie", "Énergie", 0.20, 0.30, 0.05, total=100000.0)
             e.actifs = [
-                Actif(ticker="IGLN.L", classe=Classe.OR, devise_cotation="USD",
-                      poche="rv", quantite=100, prix=50.0, valeur_eur=5000.0, dernier_taux=1.0),
-                Actif(ticker="BTCUSDT", classe=Classe.CRYPTO, devise_cotation="USD",
-                      poche="rv", quantite=1, prix=5000.0, valeur_eur=5000.0, dernier_taux=1.0),
+                Actif(ticker="XDW0.L", classe=Classe.ACTION_ETF, devise_cotation="USD",
+                      poche="energie", quantite=200, prix=50.0, valeur_eur=10000.0, dernier_taux=1.0),
+                Actif(ticker="TTE.PA", classe=Classe.ACTION_ETF, devise_cotation="EUR",
+                      poche="energie", quantite=200, prix=50.0, valeur_eur=10000.0, dernier_taux=1.0),
             ]
             ordres, _ = generer_ordres([e], seuil_min_eur=250.0)
             assert len(ordres) == 2
             montants = {o.ticker: o.montant_eur for o in ordres}
-            assert montants["IGLN.L"] == pytest.approx(7500.0)
-            assert montants["BTCUSDT"] == pytest.approx(2500.0)
+            assert montants["XDW0.L"] == pytest.approx(7500.0)
+            assert montants["TTE.PA"] == pytest.approx(2500.0)
         finally:
             reinitialiser_allocation_par_defaut()
 

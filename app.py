@@ -449,7 +449,7 @@ with st.expander("📋 Historique des snapshots & Évolution des poches dans le 
         df_s = df_s.dropna(subset=["Date_DT"]).sort_values("Date_DT")
 
         POCHES_HIST = {
-            "poche_rv_eur": "Réserve de valeur",
+            "poche_rv_eur": "Réserve de valeur (Physique + Numérique)",
             "poche_energie_eur": "Énergie",
             "poche_asie_eur": "Asie / Chine",
             "poche_jgb_eur": "Obligations japonaises",

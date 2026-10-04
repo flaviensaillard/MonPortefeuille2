@@ -409,7 +409,7 @@ def lire_allocation_personnalisee() -> dict:
     configuration personnalisée n'est enregistrée en base.
     """
     import json
-    from .models import allocation_par_defaut
+    from .models import _migrer_poche_rv, allocation_par_defaut
 
     defaut = allocation_par_defaut()
     try:
@@ -422,7 +422,11 @@ def lire_allocation_personnalisee() -> dict:
                     if v is not None and pd.notna(v) and str(v).strip():
                         data = json.loads(str(v))
                         if isinstance(data, dict) and data.get("actifs"):
-                            return data
+                            poches_m, actifs_m = _migrer_poche_rv(
+                                list(data.get("poches") or defaut["poches"]),
+                                list(data.get("actifs")),
+                            )
+                            return {"poches": poches_m, "actifs": actifs_m}
     except Exception:
         pass
     return defaut

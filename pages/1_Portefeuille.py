@@ -1020,7 +1020,7 @@ with tab_alloc:
         S.vider_cache()
         st.rerun()
 
-    if b_reset_col.button("🔄 Réinitialiser l'allocation par défaut (20/30/30/20)", use_container_width=True):
+    if b_reset_col.button("🔄 Réinitialiser l'allocation par défaut (15/5/30/30/20)", use_container_width=True):
         cfg_def = models.allocation_par_defaut()
         db.sauver_allocation_personnalisee(cfg_def)
         models.reinitialiser_allocation_par_defaut()

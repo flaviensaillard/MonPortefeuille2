@@ -85,12 +85,20 @@ class Poche:
 
 POCHES: list[Poche] = [
     Poche(
-        cle="rv",
-        nom="Réserve de valeur",
-        cible=0.20,
+        cle="rv_physique",
+        nom="Réserve de valeur physique",
+        cible=0.15,
         bande=0.03,
-        membres=["IGLN.L", "BTCUSDT"],
-        description="Or (ETC) + Bitcoin. Substituts assumés face à la dépréciation monétaire.",
+        membres=["IGLN.L"],
+        description="Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.",
+    ),
+    Poche(
+        cle="rv_numerique",
+        nom="Réserve de valeur numérique",
+        cible=0.05,
+        bande=0.03,
+        membres=["BTCUSDT"],
+        description="Bitcoin. Réserve de valeur numérique face à la dépréciation monétaire.",
     ),
     Poche(
         cle="energie",
@@ -186,10 +194,16 @@ class Actif:
 
 POCHES_INVESTIES_DEFAUT: list[dict] = [
     {
-        "cle": "rv",
-        "nom": "Réserve de valeur",
+        "cle": "rv_physique",
+        "nom": "Réserve de valeur physique",
         "bande_pct": 3.0,
-        "description": "Or (ETC) + Bitcoin. Substituts assumés face à la dépréciation monétaire.",
+        "description": "Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.",
+    },
+    {
+        "cle": "rv_numerique",
+        "nom": "Réserve de valeur numérique",
+        "bande_pct": 3.0,
+        "description": "Bitcoin. Réserve de valeur numérique face à la dépréciation monétaire.",
     },
     {
         "cle": "energie",
@@ -212,8 +226,8 @@ POCHES_INVESTIES_DEFAUT: list[dict] = [
 ]
 
 ALLOCATION_ACTIFS_DEFAUT: list[dict] = [
-    {"ticker": "IGLN.L", "nom": "Or (iShares Physical Gold ETC)", "poche": "rv", "cible_pct": 10.0, "classe": "or", "devise": "USD"},
-    {"ticker": "BTCUSDT", "nom": "Bitcoin", "poche": "rv", "cible_pct": 10.0, "classe": "crypto", "devise": "USD"},
+    {"ticker": "IGLN.L", "nom": "Or (iShares Physical Gold ETC)", "poche": "rv_physique", "cible_pct": 15.0, "classe": "or", "devise": "USD"},
+    {"ticker": "BTCUSDT", "nom": "Bitcoin", "poche": "rv_numerique", "cible_pct": 5.0, "classe": "crypto", "devise": "USD"},
     {"ticker": "XDW0.L", "nom": "Xtrackers MSCI World Energy", "poche": "energie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
     {"ticker": "FLXC.L", "nom": "Franklin FTSE China UCITS ETF", "poche": "asie", "cible_pct": 30.0, "classe": "action_etf", "devise": "USD"},
     {"ticker": "XJSE.SW", "nom": "Xtrackers II Japan Govt Bond", "poche": "jgb", "cible_pct": 20.0, "classe": "obligation_etf", "devise": "JPY"},
@@ -330,6 +344,67 @@ def reinitialiser_allocation_par_defaut() -> dict:
     return appliquer_allocation_personnalisee(allocation_par_defaut())
 
 
+def _migrer_poche_rv(poches_cfg: list[dict], actifs_cfg: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Migre automatiquement toute ancienne poche `rv` (« Réserve de valeur ») en deux poches distinctes :
+    - `rv_physique` (« Réserve de valeur physique ») pour l'or (`IGLN.L`),
+    - `rv_numerique` (« Réserve de valeur numérique ») pour Bitcoin (`BTCUSDT`)."""
+    a_migrer = any(str(p.get("cle", "")).strip() == "rv" for p in poches_cfg) or any(
+        str(a.get("poche", "")).strip() == "rv" for a in actifs_cfg
+    )
+    if not a_migrer:
+        return poches_cfg, actifs_cfg
+
+    nouvelles_poches_cfg: list[dict] = []
+    cles_deja: set[str] = set()
+    for p in poches_cfg:
+        cle_p = str(p.get("cle", "")).strip()
+        if cle_p == "rv":
+            for def_rv in POCHES_INVESTIES_DEFAUT[:2]:
+                if def_rv["cle"] not in cles_deja:
+                    nouvelles_poches_cfg.append(dict(def_rv))
+                    cles_deja.add(def_rv["cle"])
+        elif cle_p and cle_p not in cles_deja:
+            nouvelles_poches_cfg.append(dict(p))
+            cles_deja.add(cle_p)
+
+    for def_rv in POCHES_INVESTIES_DEFAUT[:2]:
+        if def_rv["cle"] not in cles_deja:
+            nouvelles_poches_cfg.insert(0, dict(def_rv))
+            cles_deja.add(def_rv["cle"])
+
+    # Si IGLN.L et BTCUSDT étaient tous deux à l'ancien défaut 10 % / 10 % dans "rv",
+    # on passe à 15 % (Or physique) et 5 % (Bitcoin numérique).
+    cibles_rv = {
+        str(a.get("ticker", "")).upper().strip(): _lire_cible_pct_actif(a)
+        for a in actifs_cfg
+        if str(a.get("poche", "")).strip() == "rv"
+    }
+    ancien_defaut_10_10 = (
+        abs(cibles_rv.get("IGLN.L", 0.0) - 10.0) < 1e-4
+        and abs(cibles_rv.get("BTCUSDT", 0.0) - 10.0) < 1e-4
+    )
+
+    nouveaux_actifs_cfg: list[dict] = []
+    for a in actifs_cfg:
+        a_copie = dict(a)
+        tk = str(a_copie.get("ticker", "")).upper().strip()
+        cls_a = str(a_copie.get("classe", "")).lower().strip()
+        if str(a_copie.get("poche", "")).strip() == "rv":
+            if tk == "BTCUSDT" or "crypto" in cls_a or "btc" in tk.lower():
+                a_copie["poche"] = "rv_numerique"
+                if ancien_defaut_10_10 and tk == "BTCUSDT":
+                    a_copie["cible_pct"] = 5.0
+                    a_copie.pop("cible", None)
+            else:
+                a_copie["poche"] = "rv_physique"
+                if ancien_defaut_10_10 and tk == "IGLN.L":
+                    a_copie["cible_pct"] = 15.0
+                    a_copie.pop("cible", None)
+        nouveaux_actifs_cfg.append(a_copie)
+
+    return nouvelles_poches_cfg, nouveaux_actifs_cfg
+
+
 def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
     """Applique en mémoire (dans `POCHES`, `POCHES_PAR_CLE`, `POCHES_INVESTIES`,
     `ACTIF_VERS_POCHE`, `CIBLES_ACTIFS`, `CLASSES`, `DEVISES_COTATION`) une
@@ -337,13 +412,14 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
     if not cfg_alloc or not isinstance(cfg_alloc, dict) or not cfg_alloc.get("actifs"):
         cfg_alloc = allocation_par_defaut()
 
-    poches_cfg = cfg_alloc.get("poches") or [dict(p) for p in POCHES_INVESTIES_DEFAUT]
-    actifs_cfg = cfg_alloc.get("actifs") or [dict(a) for a in ALLOCATION_ACTIFS_DEFAUT]
+    poches_cfg = [dict(p) for p in (cfg_alloc.get("poches") or POCHES_INVESTIES_DEFAUT)]
+    actifs_cfg = [dict(a) for a in (cfg_alloc.get("actifs") or ALLOCATION_ACTIFS_DEFAUT)]
+    poches_cfg, actifs_cfg = _migrer_poche_rv(poches_cfg, actifs_cfg)
 
     # S'assurer que toute poche référencée par un actif existe dans poches_cfg
     cles_connues = {str(p.get("cle", "")).strip() for p in poches_cfg if p.get("cle")}
     for a in actifs_cfg:
-        p_cle = str(a.get("poche") or "rv").strip()
+        p_cle = str(a.get("poche") or "rv_physique").strip()
         if p_cle and p_cle not in cles_connues and p_cle not in ("precaution", "courant"):
             poches_cfg.append({
                 "cle": p_cle,
@@ -362,7 +438,7 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
         tk = str(a.get("ticker") or "").upper().strip()
         if not tk:
             continue
-        p_cle = str(a.get("poche") or "rv").strip()
+        p_cle = str(a.get("poche") or "rv_physique").strip()
         c_pct = _lire_cible_pct_actif(a)
         CIBLES_ACTIFS[tk] = c_pct / 100.0
         NOMS_ACTIFS[tk] = str(a.get("nom") or tk)

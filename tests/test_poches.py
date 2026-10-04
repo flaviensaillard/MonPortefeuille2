@@ -61,6 +61,20 @@ def test_chaque_ticker_appartient_a_au_plus_une_poche():
             vus[ticker] = poche.cle
 
 
+def test_or_et_bitcoin_dans_leurs_poches_respectives():
+    """L'or (IGLN.L) va dans 'Réserve de valeur physique' (15 %) et Bitcoin
+    (BTCUSDT) va dans 'Réserve de valeur numérique' (5 %)."""
+    reinitialiser_allocation_par_defaut()
+    p_or = poche_de("IGLN.L")
+    p_btc = poche_de("BTCUSDT")
+    assert p_or is not None and p_or.cle == "rv_physique"
+    assert p_or.nom == "Réserve de valeur physique"
+    assert abs(p_or.cible - 0.15) < 1e-6
+    assert p_btc is not None and p_btc.cle == "rv_numerique"
+    assert p_btc.nom == "Réserve de valeur numérique"
+    assert abs(p_btc.cible - 0.05) < 1e-6
+
+
 def test_allocation_par_defaut_equilibree_a_100_pct():
     reinitialiser_allocation_par_defaut()
     etat = verifier_allocation_cible()
@@ -73,17 +87,17 @@ def test_allocation_par_defaut_equilibree_a_100_pct():
 
 def test_alerte_allocation_depasse_100_pct():
     cfg = allocation_par_defaut()
-    # On augmente IGLN.L de 10 % à 25 % -> total = 115 % (> 100 %)
+    # On augmente IGLN.L de 15 % à 25 % -> total = 110 % (> 100 %)
     for a in cfg["actifs"]:
         if a["ticker"] == "IGLN.L":
             a["cible"] = 0.25
     etat = verifier_allocation_cible(cfg)
     assert etat["depasse_100"] is True
     assert etat["equilibre_100"] is False
-    assert abs(etat["total_pct"] - 115.0) < 1e-4
-    assert abs(etat["ecart_100_pct"] - 15.0) < 1e-4
+    assert abs(etat["total_pct"] - 110.0) < 1e-4
+    assert abs(etat["ecart_100_pct"] - 10.0) < 1e-4
     assert "Alerte" in etat["message"]
-    assert "115.0 %" in etat["message"]
+    assert "110.0 %" in etat["message"]
 
 
 def test_ajout_nouvel_actif_et_nouvelle_poche():

@@ -144,7 +144,9 @@ def main() -> int:
         "courant_eur": round(totaux[Perimetre.COURANT.value], 2),
         "cours_or_usd": round(cours_or, 2),
         "equivalent_or_oz": round(equivalent_or, 6),
-        "poche_rv_eur": round(poches.get("rv", 0.0), 2),
+        "poche_rv_eur": round(
+            poches.get("rv", 0.0) + poches.get("rv_physique", 0.0) + poches.get("rv_numerique", 0.0), 2
+        ),
         "poche_energie_eur": round(poches.get("energie", 0.0), 2),
         "poche_asie_eur": round(poches.get("asie", 0.0), 2),
         "poche_jgb_eur": round(poches.get("jgb", 0.0), 2),

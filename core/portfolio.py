@@ -467,7 +467,13 @@ def agreger_par_poche(
 
     for a in actifs:
         etat = etats.get(a.poche)
-        if etat is None:
+        if etat is None and a.poche == "rv":
+            p_rv = Poche(
+                cle="rv", nom="Réserve de valeur", cible=0.20, bande=0.03,
+                perimetre=Perimetre.INVESTI,
+            )
+            etat = etats.setdefault("rv", EtatPoche(poche=p_rv, poids_cible=0.20))
+        elif etat is None:
             etat = etats.setdefault("inconnu", EtatPoche(poche=Poche(
                 cle="inconnu", nom="Non classé", cible=0.0, bande=0.0,
                 perimetre=Perimetre.INVESTI,

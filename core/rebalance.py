@@ -160,15 +160,16 @@ def generer_ordres(
         sens = "achat" if ecart > 0 else "vente"
 
         # Répartition de l'ordre entre les actifs de la poche :
-        # - si l'utilisateur a défini des cibles distinctes entre les actifs de la
-        #   même poche (ex. 15 % Or / 5 % BTC), on répartit au prorata des cibles ;
+        # - si l'utilisateur a défini des cibles distinctes entre les actifs
+        #   rattachés à cette même poche, on répartit au prorata des cibles ;
         # - sinon (cibles égales ou non différenciées), au prorata de leur valeur.
-        from .models import cible_actif
+        from .models import ACTIF_VERS_POCHE, cible_actif
         cibles_a = [cible_actif(a.ticker) for a in e.actifs]
         total_cibles_a = sum(cibles_a)
         cibles_distinctes = (
             len(e.actifs) > 1
             and total_cibles_a > 0
+            and all(ACTIF_VERS_POCHE.get(a.ticker) == e.poche_cle for a in e.actifs)
             and len({round(c, 6) for c in cibles_a}) > 1
         )
         total_poche = sum(a.valeur_eur for a in e.actifs)
