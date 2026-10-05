@@ -40,6 +40,7 @@ class CoursIndisponible(Exception):
 
 
 _cache: dict[tuple[str, str], float] = {}
+_cache_var: dict[str, float] = {}
 
 # Histoire entiere par ticker, chargee en UNE requete. Indexee sur le ticker
 # d'origine, comme `_cache` : c'est celui qui figure dans les donnees.
@@ -68,7 +69,14 @@ ALIAS_YAHOO: dict[str, str] = {
 
 def vider_cache() -> None:
     _cache.clear()
+    _cache_var.clear()
     _cache_devise.clear()
+
+
+def variation_recente(ticker: str) -> float | None:
+    """Retourne la variation relative (en fraction, ex. +0.0081 pour +0,81 %)
+    du dernier cours par rapport à la clôture précédente."""
+    return _cache_var.get(str(ticker).upper().strip())
 
 
 def devise_de(ticker: str) -> str | None:
@@ -189,6 +197,8 @@ def cours(ticker: str, date: str | None = None) -> float:
             if fermetures.empty:
                 raise CoursIndisponible(ticker, "", "aucune clôture exploitable")
             valeur = float(fermetures.iloc[-1])
+            if len(fermetures) >= 2 and float(fermetures.iloc[-2]) > 0:
+                _cache_var[ticker] = (valeur / float(fermetures.iloc[-2])) - 1.0
     except CoursIndisponible:
         raise
     except Exception as exc:

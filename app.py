@@ -28,8 +28,9 @@ from core import db, metrics, models, prices, rebalance
 from core import session as S
 from core import ui
 
-if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(S, "progression_periode") or not hasattr(ui, "metric_pct") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(S, "progression_periode") or not hasattr(ui, "fleche_pct") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(models)
+    importlib.reload(prices)
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -112,13 +113,26 @@ prog_origine = S.progression_periode(ctx, "Depuis le début", "Portefeuille inve
 gain_origine_usd = prog_origine.get("gain_marche_usd", 0.0) if not prog_origine.get("vide") else 0.0
 gain_origine_eur = prog_origine.get("gain_marche_eur", 0.0) if not prog_origine.get("vide") else 0.0
 
+prog_dernier_inv = S.progression_periode(ctx, "Progression journalière", "Portefeuille investi") if not ctx.snapshots.empty else {"vide": True}
+prog_dernier_tot = S.progression_periode(ctx, "Progression journalière", "Patrimoine total") if not ctx.snapshots.empty else {"vide": True}
+delta_dernier_inv = (
+    f"{ui.fleche_pct(prog_dernier_inv.get('twr_per', 0.0))} ({ui.usd(prog_dernier_inv.get('gain_marche_usd', 0.0), signe=True)}) depuis dernier enreg."
+    if not prog_dernier_inv.get("vide") else None
+)
+delta_dernier_tot = (
+    f"{ui.fleche_pct(prog_dernier_tot.get('twr_per', 0.0))} ({ui.usd(prog_dernier_tot.get('gain_marche_usd', 0.0), signe=True)}) depuis dernier enreg."
+    if not prog_dernier_tot.get("vide") else None
+)
+
 c1, c2, c3, c4, c5 = st.columns(5)
 ui.metric_usd_eur(
     c1, "Patrimoine total", ctx.patrimoine_total_usd, ctx.patrimoine_total_eur,
+    delta=delta_dernier_tot,
     help="Investi + épargne de précaution + compte courant.",
 )
 ui.metric_usd_eur(
     c2, "Portefeuille investi", ctx.total_investi_usd, ctx.total_investi_eur,
+    delta=delta_dernier_inv,
     help="Actifs stratégiques soumis à l'allocation cible.",
 )
 ui.metric_pct(
@@ -136,6 +150,30 @@ ui.metric_usd_eur(
     c5, "Cash disponible (Compte courant)", ctx.total_courant_usd, ctx.total_courant_eur,
     help="Liquidités courantes ($) incluses dans l'assiette de rééquilibrage.",
 )
+
+# ---------------------------------------------------------------------------
+# Variation des actifs depuis le dernier enregistrement (flèche ↗ / ↘ + %)
+# ---------------------------------------------------------------------------
+actifs_investis_tb = [a for a in ctx.actifs if a.est_investi]
+if actifs_investis_tb:
+    st.divider()
+    st.subheader("📌 Vos actifs depuis le dernier enregistrement")
+    cols_actifs = st.columns(len(actifs_investis_tb))
+    for idx_ac, a in enumerate(actifs_investis_tb):
+        var_a = a.variation_pct if a.variation_pct is not None else ctx.variations_actifs.get(a.ticker, 0.0)
+        txt_fl = ui.fleche_pct(var_a, decimales=2)
+        coul_fl = ui._couleur_variation(var_a)
+        poche_obj = models.POCHES_PAR_CLE.get(a.poche)
+        nom_poche = poche_obj.nom if poche_obj else a.poche
+        cols_actifs[idx_ac].markdown(
+            f"<div style='padding:10px 12px;border:1px solid rgba(250,250,250,0.12);border-radius:8px;background:rgba(17,24,39,0.35);margin-bottom:0.5rem;'>"
+            f"<div style='font-size:0.82rem;color:rgba(250,250,250,0.75);font-weight:600;'>{a.ticker} · {nom_poche}</div>"
+            f"<div style='font-size:1.45rem;font-weight:700;color:{coul_fl};line-height:1.25;margin:4px 0;'>{txt_fl}</div>"
+            f"{ui.html_usd_eur(a.valeur_usd, a.valeur_eur, taille_usd='0.95rem', taille_eur='0.82rem')}"
+            f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-top:3px;'>Cours : {a.prix:,.2f} {a.devise_cotation}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 # ---------------------------------------------------------------------------
 # Progression & Évolution dynamique du portefeuille
@@ -324,8 +362,18 @@ st.caption(
 
 lignes = []
 for e in ctx.ecarts:
+    tot_p_u = sum(getattr(ac, "valeur_usd", ac.valeur_eur) for ac in e.actifs)
+    var_poche = (
+        sum(
+            getattr(ac, "valeur_usd", ac.valeur_eur)
+            * (ac.variation_pct if ac.variation_pct is not None else ctx.variations_actifs.get(ac.ticker, 0.0))
+            for ac in e.actifs
+        ) / tot_p_u
+        if tot_p_u > 0 else None
+    )
     lignes.append({
         "Poche": e.poche_nom,
+        "Depuis dernier enreg.": ui.fleche_pct(var_poche) if var_poche is not None else "—",
         "Cible": ui.pct(e.poids_cible),
         "Réel": ui.pct(e.poids_reel),
         "Écart": ui.points(e.ecart_points),

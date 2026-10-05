@@ -162,6 +162,19 @@ main#view.enter { animation: in .26s cubic-bezier(.2, .8, .2, 1); }
 .mini .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .mini .e { font-size: 11.5px; color: var(--euro); font-variant-numeric: tabular-nums; margin-top: 1px; }
 .mini .l { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--txt-3); margin-bottom: 5px; }
+.mini .dim { color: var(--txt-3); margin-top: 3px; }
+
+/* Sous le doigt, un pourcentage laisse place au montant : un % seul ne dit
+   pas de combien d'argent il s'agit. Le basculement est purement visuel. */
+.mini .alt, .actif-carte .alt { display: none; }
+.mini.revele .pct, .actif-carte.revele .pct { display: none; }
+.mini.revele .alt, .actif-carte.revele .alt { display: block; }
+.mini.revele, .actif-carte.revele { border-color: var(--gold); background: rgba(212, 175, 55, 0.07); }
+.mini, .actif-carte { transition: border-color .12s ease, background .12s ease; }
+.actif-carte .alt .v { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+
+.astuce { font-size: 11.5px; color: var(--txt-3); margin: -2px 0 12px; padding-left: 2px; }
+.ligne .ss { font-size: 11px; color: var(--txt-3); margin-top: 2px; }
 
 /* --------------------------------------------------- lignes & listes */
 
@@ -441,3 +454,119 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .ok-vert { background: rgba(46, 204, 113, 0.12); border: 1px solid rgba(46, 204, 113, 0.3); color: #B9F0D0; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
 
 .noanim * { animation: none !important; transition: none !important; }
+
+.actif-carte .sec {
+    margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+}
+.actif-carte .sec-l { font-size: 10.5px; color: var(--txt-3); }
+.actif-carte .sec-v { font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.actif-carte .alt-sec { display: block; }
+.actif-carte .alt-sec .v2 {
+    font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em; line-height: 1.15;
+}
+.actif-carte .alt-sec .e2 {
+    font-size: 11.5px; color: var(--euro); font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ courbes
+   Une courbe sans échelle n'est pas une information : axe gradué, dates, et
+   lecture du point touché. */
+
+.graph-svg { position: absolute; inset: 0; line-height: 0; }
+.graph-svg svg { display: block; width: 100%; height: 100%; }
+
+.graph-touch {
+    position: absolute;
+    touch-action: pan-y;
+    z-index: 2;
+}
+
+.graph-legende {
+    position: absolute;
+    top: -1px;
+    right: 2px;
+    display: flex;
+    gap: 9px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    font-size: 10.5px;
+    color: var(--txt-3);
+    pointer-events: none;
+}
+.graph-legende span { display: flex; align-items: center; gap: 4px; }
+.graph-legende i { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+
+.graph-bulle {
+    display: none;
+    position: absolute;
+    z-index: 4;
+    min-width: 118px;
+    max-width: 170px;
+    padding: 7px 9px;
+    border: 1px solid var(--line-strong);
+    border-radius: 11px;
+    background: rgba(11, 15, 23, 0.97);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+}
+.gb-d { font-size: 10.5px; color: var(--txt-3); margin-bottom: 4px; }
+.gb-l {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 0;
+}
+.gb-l.seule { font-size: 13.5px; }
+.gb-l b { font-weight: 650; color: var(--txt); }
+.gb-l i.gb-e { font-style: normal; color: var(--euro); font-size: 11.5px; }
+.gb-l > span { flex: 1; font-size: 10.5px; color: var(--txt-3); }
+.gb-l > i:first-child { width: 7px; height: 7px; border-radius: 2px; flex: 0 0 7px; }
+
+/* ------------------------------------------------------- comparaison scénarios */
+
+.tableau.compact { font-size: 12px; }
+.tableau.compact th { font-size: 11px; padding-bottom: 6px; }
+.tableau.compact td { padding: 7px 6px 7px 0; }
+.tableau.compact td:first-child,
+.tableau.compact th:first-child { text-align: left; color: var(--txt-2); }
+.tableau .fort { color: var(--gold); font-weight: 650; }
+
+.recap-l { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 13px; }
+.recap-l span { color: var(--txt-3); }
+.recap-l b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.recap-src { font-size: 11px; color: var(--txt-3); margin: -2px 0 8px 0; }
+
+.ia-fil { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
+.ia-bulle { display: flex; flex-direction: column; max-width: 100%; }
+.ia-bulle.moi { align-items: flex-end; }
+.ia-bulle.ia { align-items: flex-start; }
+.ia-corps { background: var(--card-2); border: 1px solid var(--line); border-radius: 16px;
+    padding: 11px 13px; font-size: 14px; line-height: 1.55; color: var(--txt);
+    max-width: 92%; overflow-wrap: break-word; }
+.ia-bulle.moi .ia-corps { background: rgba(245, 196, 81, 0.13); border-color: rgba(245, 196, 81, 0.30); }
+.ia-bulle.ia .ia-corps { border-color: rgba(255, 255, 255, 0.10); }
+.ia-sources { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; max-width: 92%; }
+.ia-source { font-size: 11.5px; color: var(--gold); text-decoration: none;
+    background: rgba(245, 196, 81, 0.08); border: 1px solid rgba(245, 196, 81, 0.22);
+    border-radius: 999px; padding: 5px 11px; line-height: 1.35; }
+.ia-note { font-size: 11px; color: var(--txt-3); margin-top: 6px; max-width: 92%; line-height: 1.5; }
+.ia-vide { text-align: center; color: var(--txt-3); font-size: 13px;
+    padding: 34px 16px; border: 1px dashed var(--line); border-radius: 18px; }
+.ia-compose { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: 0;
+    padding: 10px 0 4px; background: linear-gradient(to top, var(--bg) 70%, transparent); }
+.ia-compose textarea { flex: 1; resize: none; min-height: 46px; max-height: 130px;
+    background: var(--card-2); border: 1px solid var(--line); color: var(--txt);
+    border-radius: 15px; padding: 12px 13px; font-size: 14.5px; font-family: inherit; line-height: 1.4; }
+.ia-compose textarea:focus { outline: none; border-color: rgba(245, 196, 81, 0.45); }
+.ia-envoi { width: 46px; height: 46px; flex: 0 0 auto; border: 0; cursor: pointer;
+    border-radius: 15px; background: var(--gold); color: #1A1204; font-size: 19px; font-weight: 800; line-height: 1; }
+.ia-envoi:active { transform: scale(.96); }
+.ia-attente { color: var(--txt-3); font-size: 13.5px; }
+.ia-attente span { animation: ia-points 1.2s infinite; }
+.ia-attente span:nth-child(2) { animation-delay: .2s; }
+.ia-attente span:nth-child(3) { animation-delay: .4s; }
+@keyframes ia-points { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }

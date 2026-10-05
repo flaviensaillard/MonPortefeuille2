@@ -1,0 +1,29 @@
+name: Indexation initiale — lancer chaque jour jusqu'à 0 restant
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  indexer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Indexer jusqu'à 1 800 nouveaux passages
+        env:
+          UDE_URL: ${{ secrets.UDE_URL }}
+          UDE_CLE_ADMIN: ${{ secrets.UDE_CLE_ADMIN }}
+        run: python ia/scripts/indexer.py --tranche 1800 --taille 50
+      - name: Sauvegarder la liste des passages déjà indexés
+        run: |
+          git config user.name "ude-corpus-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f ia/corpus/.indexation.json
+          git diff --cached --quiet || git commit -m "Indexation : point de reprise"
+          git push

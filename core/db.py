@@ -442,6 +442,57 @@ def sauver_allocation_personnalisee(cfg_alloc: dict) -> None:
 
 
 
+def variations_donnees_v1() -> dict[str, dict]:
+    """Lit les derniers cours et variations enregistrés dans la table `Donnees` (v1).
+
+    Retourne `{ticker: {"cours_usd": float | None, "var_fraction": float | None}}`.
+    """
+    import re
+    res: dict[str, dict] = {}
+    try:
+        df = lire("Donnees")
+        if df is not None and not df.empty and "Ticker" in df.columns:
+            for _, r in df.iterrows():
+                t = str(r.get("Ticker") or "").strip().upper()
+                if not t:
+                    continue
+                cours_u: float | None = None
+                for col_c in ("Court Num", "Court"):
+                    val_c = r.get(col_c)
+                    if val_c is not None and pd.notna(val_c):
+                        m_c = re.search(r"([+-]?\d+(?:[.,]\d+)?)", str(val_c).replace(" ", "").replace("\u202f", ""))
+                        if m_c:
+                            try:
+                                v_f = float(m_c.group(1).replace(",", "."))
+                                if v_f > 0:
+                                    cours_u = v_f
+                                    break
+                            except Exception:
+                                pass
+                var_f: float | None = None
+                for col_v in ("Var. Jour 🔒", "Var. Jour"):
+                    if col_v in df.columns:
+                        val_v = r.get(col_v)
+                        if val_v is not None and pd.notna(val_v):
+                            s_v = str(val_v).strip()
+                            m_v = re.search(r"([+-]?\d+(?:[.,]\d+)?)", s_v.replace(" ", ""))
+                            if m_v:
+                                try:
+                                    pct_val = float(m_v.group(1).replace(",", "."))
+                                    if "↘" in s_v or "-" in s_v:
+                                        pct_val = -abs(pct_val)
+                                    elif "↗" in s_v or "+" in s_v:
+                                        pct_val = abs(pct_val)
+                                    var_f = pct_val / 100.0
+                                    break
+                                except Exception:
+                                    pass
+                res[t] = {"cours_usd": cours_u, "var_fraction": var_f}
+    except Exception:
+        pass
+    return res
+
+
 def soldes_comptes_liquidites() -> dict[str, dict]:
     """Retourne l'état actuel des comptes de liquidités depuis la table `Donnees`."""
     comptes_defaut = [

@@ -220,6 +220,20 @@ def pct(part: float | None, decimales: int = 1, signe: bool = False) -> str:
     return f"{val:+.{decimales}f} %" if signe else f"{val:.{decimales}f} %"
 
 
+def fleche_pct(part: float | None, decimales: int = 2) -> str:
+    """Formate une variation avec une flèche qui monte (↗), descend (↘) ou reste stable (→)
+    et le pourcentage signé (ex. « ↗ +0,81 % », « ↘ -1,52 % », « → 0,00 % »)."""
+    valeur = _nombre(part)
+    if valeur is None:
+        return "—"
+    val = valeur * 100.0
+    if val > 1e-4:
+        return f"↗ +{val:.{decimales}f} %".replace(".", ",")
+    if val < -1e-4:
+        return f"↘ {val:.{decimales}f} %".replace(".", ",")
+    return f"→ {0.0:.{decimales}f} %".replace(".", ",")
+
+
 def points(ecart: float, decimales: int = 1) -> str:
     """Écart en points de pourcentage, toujours signé."""
     valeur = _nombre(ecart)
@@ -278,8 +292,14 @@ def _couleur_variation(val: float | None) -> str:
 
 
 def _couleur_delta_texte(delta_str: str) -> str:
-    """Détermine la couleur d'un texte delta : vert si positif, rouge si négatif, bleu si stable (0)."""
+    """Détermine la couleur d'un texte delta : vert si positif (↗/+), rouge si négatif (↘/-), bleu si stable (→/0)."""
     s = str(delta_str).strip()
+    if s.startswith("→"):
+        return "#38bdf8"
+    if s.startswith("↘"):
+        return "#e74c3c"
+    if s.startswith("↗"):
+        return "#2ecc71"
     # Chercher s'il y a un nombre non nul dans la chaîne
     import re
     m = re.search(r"([+-]?\d+(?:[.,]\d+)?)", s)
@@ -489,7 +509,10 @@ def _formater_cellule_html(val: object) -> str:
             f"{_html.escape(part_eur)}</div>"
         )
     txt_s = txt.strip()
-    if (txt_s.startswith("+") or txt_s.startswith("-")) and (txt_s.endswith("%") or txt_s.endswith("pts")):
+    if (
+        txt_s.startswith(("↗", "↘", "→", "+", "-"))
+        and (txt_s.endswith("%") or txt_s.endswith("pts"))
+    ):
         c_s = _couleur_delta_texte(txt_s)
         return f"<span style='color:{c_s};font-weight:600;white-space:nowrap;'>{_html.escape(txt)}</span>"
     return _html.escape(txt)

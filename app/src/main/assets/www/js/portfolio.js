@@ -346,10 +346,19 @@
             ctx.config = config;
 
             // --- Inflation
+            /* La table est partagée avec l'application Streamlit, et tout le
+               monde n'y écrit pas la même unité. On normalise (pourcentage ou
+               taux) et on met de côté les lignes qui ne peuvent pas être une
+               inflation annuelle : elles seront signalées à l'écran plutôt que
+               de passer dans un calcul de rente. */
+            ctx.inflationEcartee = [];
             (infRows || []).forEach(function (l) {
                 var a = U.num(l.annee !== undefined ? l.annee : l.Annee, 0);
-                var v = U.num(l.inflation !== undefined ? l.inflation : l.Inflation, 0);
-                if (a) ctx.inflation[a] = v;
+                var brut = U.num(l.inflation !== undefined ? l.inflation : l.Inflation, 0);
+                if (!a) return;
+                var v = U.inflationDepuisTable(brut);
+                if (v === null) { ctx.inflationEcartee.push({ annee: a, valeur: brut }); return; }
+                ctx.inflation[a] = v;
             });
 
             // --- Transactions -> positions

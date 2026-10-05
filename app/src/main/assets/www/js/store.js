@@ -16,24 +16,37 @@
         supabaseUrl: '',
         supabaseKey: '',
 
-        // Identité fiscale
+        // Identité fiscale — miroir des clés « f_* » de la table Config (v1 & v2)
         statutFiscal: 'Marié(e) / Pacsé(e)',
         partsFiscales: 3.0,
         autresRevenusImposables: 0,
         salaireNetImposable1: 0,
         salaireNetImposable2: 0,
-        fraisReels1: 0,
-        fraisReels2: 0,
         interetsEtrangers: 0,
+        paysEtranger: 'Lituanie',
+        nbEnfants: 2,
+        utiliserFraisReels1: true,
+        fraisKm1: 9120, cvFiscal1: 5, joursRepas1: 240, vehiculeElectrique1: false,
+        utiliserFraisReels2: true,
+        fraisKm2: 9120, cvFiscal2: 5, joursRepas2: 200, vehiculeElectrique2: false,
 
-        // Retraite
+        // Retraite — trois scénarios, chacun avec sa propre inflation
         anneeDepartRetraite: 2055,
         apportMensuelEur: 250,
         tauxImpositionPV: 0.314,
         rendementAnnuelCible: 0.06,
+        retraiteRendementA: null,   // null : le CAGR observé de votre portefeuille
+        retraiteInflationA: null,   // null : la dernière inflation INSEE connue
+        retraiteRendementB: 0.05,
+        retraiteInflationB: 0.02,
+        retraiteRendementC: 0.08,
+        retraiteInflationC: 0.02,
 
         // Inflation
         inflationCible: 0.02,
+        iaUrl: '', iaCle: '',
+        perimetrePerf: 'investi',
+        retraiteInflationMode: 'moyenne',
         inflationReelleEstimee: 0.045,
 
         // Rééquilibrage

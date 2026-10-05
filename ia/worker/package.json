@@ -1,0 +1,14 @@
+{
+  "name": "universite-epargne",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Service de discussion de l'Universite de l'Epargne : recherche dans le corpus puis generation, le tout sur Cloudflare Workers AI.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "sante": "wrangler tail --format=pretty"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

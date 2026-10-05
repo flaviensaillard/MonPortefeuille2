@@ -1,0 +1,33 @@
+{
+  "proprietaire": "Flavien Saillard — usage personnel",
+  "principe": "Indexation pour recherche et citation. Aucune republication : les textes restent chez vous et servent uniquement à produire des réponses sourcées.",
+  "sources": [
+    {
+      "nom": "Institut des Libertés",
+      "url": "https://institutdeslibertes.org/",
+      "acces": "API publique WordPress (wp-json/wp/v2/posts)",
+      "usage": "indexation et citation courte avec lien",
+      "documents": 663,
+      "licence": "contenu public, reproduction intégrale exclue"
+    },
+    {
+      "nom": "Université de l'Épargne (YouTube)",
+      "url": "https://www.youtube.com/@CharlesGaveUDE/videos",
+      "acces": "sous-titres publics, sans compte",
+      "usage": "indexation des transcriptions",
+      "documents": 0,
+      "licence": "sous-titres publics ; les vidéos réservées aux abonnés sont exclues"
+    },
+    {
+      "nom": "Manifeste Charles Gave (rédigé dans cet espace)",
+      "type": "document interne",
+      "usage": "indexation libre",
+      "documents": 3
+    }
+  ],
+  "exclus": [
+    "œuvres complètes (livres) — droit d'auteur",
+    "contenu accessible uniquement après authentification — aucun identifiant accepté",
+    "toute source dont la provenance n'est pas établie"
+  ]
+}

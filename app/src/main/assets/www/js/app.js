@@ -35,7 +35,8 @@
         portefeuille: { titre: 'Portefeuille', sous: 'positions & opérations' },
         performance: { titre: 'Performance', sous: 'mesure corrigée des apports' },
         retraite: { titre: 'Retraite', sous: 'projection & rente réelle' },
-        fiscalite: { titre: 'Fiscalité', sous: 'déclaration & simulation' }
+        fiscalite: { titre: 'Fiscalité', sous: 'déclaration & simulation' },
+        ia: { titre: 'IA', sous: 'Université de l’Épargne' }
     };
 
     var etat = {
@@ -58,6 +59,7 @@
         UI.$('#btnRefresh').addEventListener('click', function () { rafraichir(true); });
         UI.$('#btnReglages').addEventListener('click', feuilleReglages);
         UI.$('#view').addEventListener('click', gererClic);
+        installerTuilesRevelables();
         installerPullToRefresh();
 
         etat.onglet = PF.store.ongletCourant('bord');
@@ -70,6 +72,95 @@
 
         if (!PF.store.estConfigure()) { feuilleConnexion(true); return; }
         rafraichir(false);
+    }
+
+    /* Une tuile qui affiche un pourcentage montre, sur un simple appui, le
+       montant correspondant : un % seul ne dit pas de combien d'argent il
+       s'agit. Trois gestes, trois réponses :
+       - appui bref (tap) : la tuile bascule et RESTE en dollars jusqu'à ce
+         qu'on la touche à nouveau — c'est le geste le plus courant ;
+       - doigt qui glisse : chaque tuile survolée se révèle au passage, et
+         l'affichage revient au pourcentage dès que le doigt se lève ;
+       - appui ailleurs : la tuile affichée repasse en pourcentage.
+       Le contenu est déjà dans le DOM : le geste ne fait que basculer une
+       classe, il n'y a donc rien à recalculer, ni latence à craindre. */
+    function installerTuilesRevelables() {
+        var SELECTEUR = '.mini[data-alt="1"], .actif-carte[data-alt="1"]';
+        var SEUIL_GLISSE = 12;                 // px au-delà desquels c'est un glissement
+        var affichee = null;                   // tuile actuellement en dollars
+        var geste = null;
+
+        function cibler(x, y, repli) {
+            if (document.elementFromPoint) {
+                try {
+                    var el = document.elementFromPoint(x, y);
+                    if (el && el.closest) return el.closest(SELECTEUR);
+                } catch (e) { /* environnement sans elementFromPoint : on garde le repli */ }
+            }
+            return repli || null;
+        }
+
+        function cibleDe(e) {
+            return e && e.target && e.target.closest ? e.target.closest(SELECTEUR) : null;
+        }
+
+        function afficher(el) {
+            if (affichee && affichee !== el) affichee.classList.remove('revele');
+            affichee = el;
+            if (el) el.classList.add('revele');
+        }
+
+        function masquer() {
+            if (affichee) affichee.classList.remove('revele');
+            affichee = null;
+        }
+
+        document.addEventListener('touchstart', function (e) {
+            var t = e.touches && e.touches[0];
+            if (!t) return;
+            var el = cibler(t.clientX, t.clientY, cibleDe(e));
+            geste = { x: t.clientX, y: t.clientY, el: el, glisse: false, deja: el !== null && el === affichee };
+            if (el && !geste.deja) el.classList.add('revele');
+        }, { passive: true });
+
+        document.addEventListener('touchmove', function (e) {
+            var t = e.touches && e.touches[0];
+            if (!t || !geste) return;
+            if (!geste.glisse
+                && (Math.abs(t.clientX - geste.x) > SEUIL_GLISSE || Math.abs(t.clientY - geste.y) > SEUIL_GLISSE)) {
+                geste.glisse = true;
+            }
+            if (!geste.glisse) return;
+            var el = cibler(t.clientX, t.clientY, cibleDe(e));
+            if (el) afficher(el); else masquer();
+        }, { passive: true });
+
+        function finDeGeste() {
+            if (!geste) return;
+            var g = geste;
+            geste = null;
+            if (g.glisse) { masquer(); return; }        // glissement : on restitue
+            if (!g.el) { masquer(); return; }           // appui ailleurs
+            if (g.deja) { masquer(); return; }          // second appui : on restitue
+            afficher(g.el);                             // appui : on garde
+        }
+
+        ['touchend', 'touchcancel'].forEach(function (ev) {
+            document.addEventListener(ev, finDeGeste, { passive: true });
+        });
+
+        // Souris : l'aperçu sur ordinateur se consulte aussi.
+        document.addEventListener('mouseover', function (e) {
+            if (!e.target || !e.target.closest) return;
+            var el = cibleDe(e);
+            if (el) afficher(el);
+        }, { passive: true });
+        document.addEventListener('mouseout', function (e) {
+            if (!e.target || !e.target.closest) return;
+            var el = cibleDe(e);
+            if (el && el === affichee && e.relatedTarget && el.contains(e.relatedTarget)) return;
+            if (el && el === affichee) masquer();
+        }, { passive: true });
     }
 
     function rehydrater(c) {
@@ -118,12 +209,14 @@
             entete += '<div class="info">' + UI.h(e) + '</div>';
         });
         vue.innerHTML = entete + fn(etat.ctx);
+        if (PF.ia && PF.ia.attacher) PF.ia.attacher();
         if (!silencieux) {
             vue.classList.remove('enter');
             void vue.offsetWidth;
             vue.classList.add('enter');
         }
         UI.lierAccordeons(vue);
+        UI.lierGraphiques(vue);
         if (etat.onglet === 'fiscalite' && PF.fiscal && PF.fiscal.attacher) {
             vue.dataset.fiscal = '';
             PF.fiscal.attacher();
@@ -184,6 +277,18 @@
             rendre();
             return;
         }
+        var perimetre = cible.closest('[data-perimetre]');
+        if (perimetre) {
+            PF.vues.definirPerimetre(perimetre.getAttribute('data-perimetre'));
+            rendre();
+            return;
+        }
+        var inflation = cible.closest('[data-inflation]');
+        if (inflation) {
+            PF.vues.definirInflation(inflation.getAttribute('data-inflation'));
+            rendre();
+            return;
+        }
         var periode = cible.closest('[data-periode]');
         if (periode) {
             PF.vues.definirPeriode(periode.getAttribute('data-periode'));
@@ -196,6 +301,21 @@
             rafraichir(false);
             return;
         }
+        var scenario = cible.closest('[data-scenario]');
+        if (scenario) {
+            PF.vues.definirScenario(scenario.getAttribute('data-scenario'));
+            rendre();
+            return;
+        }
+        if (cible.closest('#btnVirement')) { feuilleVirement(); return; }
+        if (cible.closest('#btnResetA')) {
+            PF.store.sauverReglages({ retraiteRendementA: null, retraiteInflationA: null });
+            UI.toast('Scénario A revenu à vos chiffres observés');
+            rendre();
+            return;
+        }
+        var aller = cible.closest('[data-aller]');
+        if (aller) { naviguer(aller.getAttribute('data-aller')); return; }
         if (cible.closest('#btnNouveau')) { feuilleNouveau(); return; }
         if (cible.closest('#btnNouvelActif')) { feuilleNouvelActif(); return; }
         if (cible.closest('#btnReinitAlloc')) {
@@ -234,29 +354,246 @@
 
     // ------------------------------------------------------------- connexion
 
+    /* Le rôle porté par la clé. Une clé « anon » (ou « publishable ») est faite
+       pour voyager dans une application ; la clé « service_role » donne tous
+       les droits et ne doit jamais quitter le serveur. */
+    function roleDeLaCle(cle) {
+        var c = String(cle || '').trim();
+        if (!c) return null;
+        if (c.indexOf('sb_secret_') === 0) return 'service_role';
+        if (c.indexOf('sb_publishable_') === 0) return 'anon';
+        if (c.indexOf('eyJ') === 0) {
+            try {
+                var parties = c.split('.');
+                if (parties.length < 2) return null;
+                var b64 = parties[1].replace(/-/g, '+').replace(/_/g, '/');
+                while (b64.length % 4) b64 += '=';
+                var binaire = root.atob ? root.atob(b64) : '';
+                var texte = binaire;
+                if (root.TextDecoder) {
+                    var octets = new Uint8Array(binaire.length);
+                    for (var i = 0; i < binaire.length; i++) octets[i] = binaire.charCodeAt(i);
+                    texte = new root.TextDecoder('utf-8').decode(octets);
+                }
+                var donnees = JSON.parse(texte);
+                return donnees.role || null;
+            } catch (e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /* Diagnostic complet : forme de l'URL, nature de la clé, accessibilité du
+       projet, présence et lisibilité des tables. Le rapport ne contient jamais
+       la clé — seulement son préfixe — pour pouvoir être copié et transmis. */
+    function diagnostiquerConnexion() {
+        var r = PF.store.reglages();
+        var url = String(r.supabaseUrl || '').trim().replace(/\/+$/, '');
+        var cle = String(r.supabaseKey || '').trim();
+        var rapport = [];
+
+        function ajouter(etat, titre, detail) {
+            rapport.push({ etat: etat, titre: titre, detail: detail });
+        }
+
+        // 1. Forme de l'URL
+        if (!url) ajouter('err', 'URL du projet', 'Champ vide.');
+        else if (!/^https:\/\//.test(url)) {
+            ajouter('err', 'URL du projet', 'Elle doit commencer par https:// '
+                + '— « ' + url.slice(0, 48) + ' » n’est pas une URL de projet Supabase.');
+        } else if (/\/rest\/v1/.test(url)) {
+            ajouter('err', 'URL du projet', 'Retirez « /rest/v1 » : l’URL du projet s’arrête avant.');
+        } else ajouter('ok', 'URL du projet', url);
+
+        // 2. Nature de la clé
+        var role = roleDeLaCle(cle);
+        if (!cle) ajouter('err', 'Clé', 'Champ vide.');
+        else if (role === 'service_role') {
+            ajouter('err', 'Clé', 'Vous avez collé la clé service_role (secrète, tous droits). '
+                + 'Prenez la clé « anon public » ou « Publishable key ».');
+        } else if (role === 'anon') {
+            ajouter('ok', 'Clé', 'Clé publique (' + cle.slice(0, 10) + '…) — rôle anon, c’est la bonne.');
+        } else if (role === 'authenticated') {
+            ajouter('warn', 'Clé', 'Cette clé porte le rôle « authenticated » : elle n’ouvre pas l’accès anonyme.');
+        } else {
+            ajouter('warn', 'Clé', 'Rôle indéterminé (' + cle.slice(0, 10) + '…). '
+                + 'Vérifiez qu’il s’agit bien de la clé anon / publishable.');
+        }
+
+        if (!url || !cle) return Promise.resolve(rapport);
+
+        var entetes = PF.net.supabase.entetes({ Accept: 'application/json' });
+        var taches = [];
+
+        // 3. Le projet répond-il ?
+        taches.push(PF.net.req('GET', url + '/rest/v1/', entetes).then(function (res) {
+            if (res.ok) ajouter('ok', 'Serveur du projet', 'Votre projet répond.');
+            else if (res.status === 401 || res.status === 403) {
+                ajouter('err', 'Serveur du projet', 'Clé refusée (HTTP ' + res.status + ') : '
+                    + 'la clé a été révoquée ou régénérée — reprenez la clé affichée aujourd’hui dans le tableau de bord.');
+            } else if (res.status === -1) {
+                ajouter('err', 'Serveur du projet', 'Injoignable. Vérifiez votre connexion, l’orthographe de l’URL, '
+                    + 'et que le projet n’est pas en veille : Supabase met les projets gratuits en pause '
+                    + 'après 7 jours sans activité (bouton « Restore » dans le tableau de bord).');
+            } else {
+                ajouter('warn', 'Serveur du projet', 'Réponse inattendue (HTTP ' + res.status + ').');
+            }
+        }));
+
+        // 4. Tables de la v2 — elles doivent exister et être lisibles.
+        [['pf2_transactions', 'transactions'], ['pf2_apports', 'apports'],
+         ['pf2_snapshots', 'snapshots'], ['pf2_inflation', 'inflation']].forEach(function (couple) {
+            var table = couple[0];
+            taches.push(PF.net.req('GET', url + '/rest/v1/' + table + '?select=*&limit=1', entetes)
+                .then(function (res) {
+                    if (res.ok) ajouter('ok', table, couple[1] + ' — accessible.');
+                    else if (res.status === 404) {
+                        ajouter('err', table, 'Table absente : exécutez migrations/001_init.sql dans l’éditeur SQL.');
+                    } else if (res.status === 401 || res.status === 403) {
+                        ajouter('err', table, 'Refusée (HTTP ' + res.status + ') : RLS activée sans politique '
+                            + 'pour le rôle anon. Ajoutez la politique « pf2_acces_public » de la migration.');
+                    } else ajouter('warn', table, 'Réponse HTTP ' + res.status + '.');
+                }));
+        });
+
+        // 5. Tables de la v1 — utiles, mais l'application fonctionne sans elles.
+        ['Config', 'Donnees', 'Projections', 'Historique'].forEach(function (table) {
+            taches.push(PF.net.req('GET', url + '/rest/v1/' + table + '?select=*&limit=1', entetes)
+                .then(function (res) {
+                    if (res.ok) ajouter('ok', table, 'Table de la v1 lisible.');
+                    else if (res.status === -1) ajouter('warn', table, 'Non testée.');
+                    else ajouter('warn', table, 'Non lisible (HTTP ' + res.status + ') : RLS activée sans politique '
+                        + 'de lecture pour anon. L’application fonctionnera, sans les liquidités ni l’historique de la v1.');
+                }));
+        });
+
+        // 6. Les marchés répondent-ils ?
+        taches.push(PF.net.cours('IGLN.L').then(function (prix) {
+            if (prix) ajouter('ok', 'Cours de marché', 'Yahoo Finance répond (or ' + U.nombre(prix, 2) + ').');
+            else ajouter('warn', 'Cours de marché', 'Yahoo Finance injoignable : les cours resteront vides.');
+        }));
+
+        return Promise.all(taches).then(function () { return rapport; });
+    }
+
+    function feuilleDiagnostic() {
+        var f = UI.feuille({
+            titre: 'Diagnostic de connexion',
+            aide: 'Analyse en cours…',
+            corps: '<div class="vide" style="padding:22px">Interrogation de votre projet…</div>',
+            boutons: [{ texte: 'Fermer', sorte: 'ghost' }]
+        });
+        var zone = f.corps;
+        diagnostiquerConnexion().then(function (rapport) {
+            if (!zone) return;
+            var html = '';
+            rapport.forEach(function (l) {
+                var sorte = l.etat === 'ok' ? 'ok' : (l.etat === 'err' ? 'warn' : 'info');
+                var libelle = l.etat === 'ok' ? 'OK' : (l.etat === 'err' ? 'à corriger' : 'à vérifier');
+                html += '<div class="ligne"><div class="gr"><div class="tt">' + UI.h(l.titre) + '</div>'
+                    + '<div class="st">' + UI.h(l.detail) + '</div></div>'
+                    + '<div class="dr">' + UI.badge(libelle, sorte) + '</div></div>';
+            });
+            var texte = rapport.map(function (l) {
+                return '[' + l.etat.toUpperCase() + '] ' + l.titre + ' — ' + l.detail;
+            }).join('\n');
+            html += '<button class="btn sec" id="dgCopier" style="margin-top:12px">Copier le diagnostic</button>';
+            zone.innerHTML = '<div class="poignee"></div><h3>Diagnostic de connexion</h3>'
+                + '<div class="aide">Ce rapport ne contient aucune clé : vous pouvez le transmettre tel quel.</div>'
+                + html;
+            var bc = zone.querySelector('#dgCopier');
+            if (bc) bc.addEventListener('click', function () { copierTexte('Porte-feuille — diagnostic\n\n' + texte); });
+        });
+        return f;
+    }
+
+    function copierTexte(texte) {
+        try {
+            var zone = document.createElement('textarea');
+            zone.value = texte;
+            zone.style.position = 'fixed';
+            zone.style.opacity = '0';
+            document.body.appendChild(zone);
+            zone.select();
+            var ok = document.execCommand('copy');
+            document.body.removeChild(zone);
+            UI.toast(ok ? 'Copié' : 'Copie impossible');
+            if (!ok && typeof root.Native !== 'undefined' && root.Native.share) {
+                root.Native.share('Porte-feuille — diagnostic', texte);
+            }
+        } catch (e) {
+            UI.toast('Copie impossible');
+        }
+    }
+
+    function feuilleAideConnexion() {
+        var corps = ''
+            + '<div style="font-size:13.5px;line-height:1.65;color:var(--txt-2)">'
+            + '<b style="color:var(--txt)">1. Ouvrez le bon projet.</b><br>'
+            + 'supabase.com → votre projet MonPortefeuille. Si plusieurs projets existent, '
+            + 'prenez celui dont l’URL est déjà dans vos secrets Streamlit.'
+            + '<div class="sep"></div>'
+            + '<b style="color:var(--txt)">2. L’URL.</b><br>'
+            + 'Rouage <b>Project Settings</b> (en bas à gauche) → <b>Data API</b> / <b>API</b> → '
+            + 'champ <b>Project URL</b>.<br>'
+            + '<span style="color:var(--gold)">https://abcdefghijklmnop.supabase.co</span><br>'
+            + 'Copiez-la telle quelle : pas de slash à la fin, pas de « /rest/v1 ».'
+            + '<div class="sep"></div>'
+            + '<b style="color:var(--txt)">3. La clé.</b><br>'
+            + 'Dans la même page, section <b>API Keys</b> :<br>'
+            + '• clé <b>anon</b> <b>public</b> (ancien format, commence par <i>eyJhbGci…</i>), ou<br>'
+            + '• <b>Publishable key</b> (nouveau format, commence par <i>sb_publishable_…</i>).<br>'
+            + '<span style="color:var(--down)">Jamais</span> la clé <b>service_role</b> / <b>Secret key</b> : '
+            + 'elle contourne toutes les règles de sécurité.'
+            + '<div class="sep"></div>'
+            + '<b style="color:var(--txt)">4. Si le projet dort.</b><br>'
+            + 'Un projet gratuit non utilisé pendant 7 jours est mis en pause : le bouton '
+            + '« <b>Restore</b> » ou « <b>Unpause</b> » se trouve en haut du tableau de bord. '
+            + 'Tant qu’il dort, aucune application ne peut s’y connecter.'
+            + '<div class="sep"></div>'
+            + '<b style="color:var(--txt)">5. Astuce de saisie.</b><br>'
+            + 'Le plus simple : copier les valeurs dans le tableau de bord sur l’ordinateur, '
+            + 'se les envoyer par message, puis coller dans l’application. '
+            + 'Évitez de les retaper à la main — une clé fait plus de 200 caractères.'
+            + '</div>';
+        UI.feuille({ titre: 'Où trouver ces deux valeurs ?', corps: corps, boutons: [{ texte: 'Compris', sorte: 'ghost' }] });
+    }
+
     function feuilleConnexion(premiereFois) {
         var r = PF.store.reglages();
         var corps = ''
-            + UI.champ({ id: 'cxUrl', label: 'URL du projet Supabase', valeur: r.supabaseUrl, placeholder: 'https://xxxx.supabase.co' })
-            + UI.champ({ id: 'cxCle', label: 'Clé publique (anon key)', valeur: r.supabaseKey, placeholder: 'eyJhbGci…' })
-            + '<div style="font-size:12px;color:var(--txt-3);margin:2px 0 6px">Ces deux valeurs restent sur votre téléphone. '
-            + 'Elles ne sont envoyées à personne d’autre qu’à votre base Supabase.</div>'
-            + '<button class="btn ghost" id="cxTest" style="margin-bottom:10px">Tester la connexion</button>'
-            + '<button class="btn sec" id="cxDemo" style="margin-bottom:4px">Découvrir sans me connecter</button>';
+            + UI.champ({ id: 'cxUrl', label: 'URL du projet Supabase', valeur: r.supabaseUrl, placeholder: 'https://abcdefgh.supabase.co' })
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin:-6px 0 12px">'
+            + 'Réglages du projet → API → <b>Project URL</b>. Sans « /rest/v1 », sans slash final.</div>'
+            + UI.champ({ id: 'cxCle', label: 'Clé publique (anon / publishable)', valeur: r.supabaseKey, placeholder: 'eyJhbGci… ou sb_publishable_…' })
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin:-6px 0 12px">'
+            + 'Même page, section <b>API Keys</b> : la clé <b>anon public</b> ou <b>Publishable key</b>. '
+            + 'Jamais la clé service_role.</div>'
+            + '<button class="btn sec" id="cxTest" style="margin-bottom:8px">Tester la connexion</button>'
+            + '<button class="btn ghost" id="cxAide" style="margin-bottom:8px">Où trouver ces deux valeurs ?</button>'
+            + '<button class="btn ghost" id="cxDiag" style="margin-bottom:8px">Diagnostiquer le problème</button>'
+            + '<button class="btn sec" id="cxDemo">Découvrir sans me connecter</button>';
 
         function enregistrer() {
-            var url = String(UI.lire('cxUrl') || '').trim().replace(/\/+$/, '');
-            var cle = String(UI.lire('cxCle') || '').trim();
+            var url = String(UI.lire('cxUrl') || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1.*$/, '');
+            var cle = String(UI.lire('cxCle') || '').trim().replace(/\s+/g, '');
             if (!url || !cle) { UI.toast('URL et clé sont nécessaires'); return false; }
+            if (roleDeLaCle(cle) === 'service_role') {
+                UI.toast('C’est la clé service_role : prenez la clé anon / publishable');
+                return false;
+            }
             PF.store.sauverReglages({ supabaseUrl: url, supabaseKey: cle, onboardingFait: true });
-            UI.toast('Connexion enregistrée');
+            UI.toast('Connexion enregistrée — chargement…');
+            etat.demo = false;
             rafraichir(true);
             return true;
         }
 
         var f = UI.feuille({
             titre: premiereFois ? 'Bienvenue dans Porte-feuille' : 'Connexion Supabase',
-            aide: premiereFois ? 'Deux champs à remplir, une seule fois. L’application lit ensuite vos tables directement.' : '',
+            aide: premiereFois ? 'Deux champs à remplir, une seule fois : l’application lit ensuite vos tables '
+                + 'directement, sans passer par aucun serveur intermédiaire.' : '',
             corps: corps,
             boutons: [
                 { texte: 'Annuler', sorte: 'ghost' },
@@ -265,25 +602,35 @@
         });
 
         var corpsEl = f.corps;
-        if (corpsEl) {
-            var bt = corpsEl.querySelector('#cxTest');
-            if (bt) bt.addEventListener('click', function () {
-                var url = String(UI.lire('cxUrl') || '').trim().replace(/\/+$/, '');
-                var cle = String(UI.lire('cxCle') || '').trim();
-                if (!url || !cle) { UI.toast('Renseignez les deux champs'); return; }
-                PF.store.sauverReglages({ supabaseUrl: url, supabaseKey: cle });
-                bt.textContent = 'Test en cours…';
-                PF.net.supabase.tester().then(function (res) {
-                    bt.textContent = res.ok ? '✓ Connexion établie' : '✗ ' + res.detail.slice(0, 60);
-                });
+        if (!corpsEl) return;
+        var bt = corpsEl.querySelector('#cxTest');
+        if (bt) bt.addEventListener('click', function () {
+            var url = String(UI.lire('cxUrl') || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1.*$/, '');
+            var cle = String(UI.lire('cxCle') || '').trim().replace(/\s+/g, '');
+            if (!url || !cle) { UI.toast('Renseignez les deux champs'); return; }
+            PF.store.sauverReglages({ supabaseUrl: url, supabaseKey: cle });
+            bt.textContent = 'Test en cours…';
+            PF.net.supabase.tester().then(function (res) {
+                bt.textContent = res.ok ? '✓ Connexion établie' : '✗ ' + String(res.detail).slice(0, 70);
+                if (!res.ok) bt.classList.add('sec');
             });
-            var bd = corpsEl.querySelector('#cxDemo');
-            if (bd) bd.addEventListener('click', function () {
-                document.querySelector('#voile').click();
-                etat.demo = true;
-                rafraichir(false);
-            });
-        }
+        });
+        var ba = corpsEl.querySelector('#cxAide');
+        if (ba) ba.addEventListener('click', function () {
+            document.querySelector('#voile').click();
+            setTimeout(feuilleAideConnexion, 220);
+        });
+        var bd = corpsEl.querySelector('#cxDiag');
+        if (bd) bd.addEventListener('click', function () {
+            document.querySelector('#voile').click();
+            setTimeout(feuilleDiagnostic, 220);
+        });
+        var bm = corpsEl.querySelector('#cxDemo');
+        if (bm) bm.addEventListener('click', function () {
+            document.querySelector('#voile').click();
+            etat.demo = true;
+            rafraichir(false);
+        });
     }
 
     // ------------------------------------------------------------- opérations
@@ -293,9 +640,11 @@
             { texte: 'Un achat de titres', icone: '＋', cle: 'achat' },
             { texte: 'Une vente de titres', icone: '－', cle: 'vente' },
             { texte: 'Un apport de fonds', icone: '↓', cle: 'apport' },
-            { texte: 'Un retrait de fonds', icone: '↑', cle: 'retrait' }
+            { texte: 'Un retrait de fonds', icone: '↑', cle: 'retrait' },
+            { texte: 'Un virement entre deux comptes', icone: '↔', cle: 'virement' }
         ], function (o) {
             if (o.cle === 'achat' || o.cle === 'vente') feuilleTransaction(null, o.cle);
+            else if (o.cle === 'virement') feuilleVirement();
             else feuilleApport(null, o.cle);
         });
     }
@@ -499,7 +848,22 @@
             var ligne = (rows || []).filter(function (r) {
                 return String(r.Ticker || r.ticker || '').toUpperCase().trim() === t;
             })[0];
-            if (!ligne) return null;
+            if (!ligne) {
+                // Le compte n'existe pas encore dans `Donnees` : on le crée,
+                // avec les mêmes colonnes que la v1, plutôt que de perdre le mouvement.
+                return PF.net.taux(t, date, 'USD').then(function (tUsd) {
+                    var q0 = U.arrondi(Math.max(0, montant), 6);
+                    return PF.net.supabase.insert('Donnees', [{
+                        Ticker: t,
+                        Type: (t === 'CHF' || t === 'CNY') ? '🏦 Cash réserve' : '💵 Cash',
+                        'Devise Cotation': 'Auto',
+                        Court: '$ ' + U.nombre(tUsd || 1, 2),
+                        Quantité: q0,
+                        'Valeur totale': '$ ' + U.nombre(U.arrondi(q0 * (tUsd || 1), 2), 2),
+                        'Pourcentage (%)': 0
+                    }]);
+                }).catch(function () { return null; });
+            }
             var actuel = U.num(String(ligne['Quantité'] !== undefined ? ligne['Quantité'] : 0).replace(/ /g, '').replace(',', '.'), 0);
             var taux = 1;
             if (deviseMouvement !== t) {
@@ -546,6 +910,130 @@
                 Total_Apports_nets: nouveau
             }]);
         }).catch(function () { return null; });
+    }
+
+    // ------------------------------------------------------------------ virement
+
+    var LIBELLES_COMPTES = {
+        USD: 'Compte courant USD', EUR: 'Compte courant EUR',
+        CHF: 'Réserve CHF', CNY: 'Réserve CNY',
+        GBP: 'Compte courant GBP', JPY: 'Compte courant JPY', CAD: 'Compte courant CAD',
+        AUD: 'Compte courant AUD', HKD: 'Compte courant HKD', SGD: 'Compte courant SGD',
+        NOK: 'Compte courant NOK', SEK: 'Compte courant SEK', DKK: 'Compte courant DKK'
+    };
+
+    /* Les comptes réellement présents dans la base, puis les devises ouvrables.
+       Un solde jamais lu n'est jamais affiché : pas de compte inventé. */
+    function comptesLiquidites() {
+        var ctx = etat.ctx || {};
+        var vus = {};
+        var liste = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; }).map(function (a) {
+            vus[a.ticker] = 1;
+            return { ticker: a.ticker, nom: LIBELLES_COMPTES[a.ticker] || ('Compte ' + a.ticker), quantite: a.quantite };
+        });
+        Object.keys(LIBELLES_COMPTES).forEach(function (t) {
+            if (vus[t]) return;
+            liste.push({ ticker: t, nom: LIBELLES_COMPTES[t], quantite: 0 });
+        });
+        if (!liste.length) liste.push({ ticker: 'USD', nom: LIBELLES_COMPTES.USD, quantite: 0 });
+        return liste;
+    }
+
+    function optionsComptes(comptes) {
+        return comptes.map(function (c) {
+            return {
+                valeur: c.ticker,
+                texte: c.ticker + ' — ' + c.nom + (c.quantite ? ' (' + U.quantite(c.quantite) + ' ' + c.ticker + ')' : ' (vide)')
+            };
+        });
+    }
+
+    function feuilleVirement() {
+        var comptes = comptesLiquidites();
+        var options = optionsComptes(comptes);
+        var srcDefaut = comptes.length > 1 ? comptes[1].ticker : comptes[0].ticker;
+
+        var corps = ''
+            + UI.champ({ id: 'viDate', label: 'Date du virement', type: 'date', valeur: U.todayISO() })
+            + UI.champ({ id: 'viMontant', label: 'Montant', type: 'number', valeur: '' })
+            + UI.champ({ id: 'viDevise', label: 'Devise du montant saisi', type: 'select', valeur: 'EUR', options: DEVISES })
+            + UI.champ({ id: 'viSource', label: 'Compte débité', type: 'select', valeur: srcDefaut, options: options })
+            + UI.champ({ id: 'viCible', label: 'Compte crédité', type: 'select', valeur: comptes[0].ticker, options: options })
+            + '<div class="info" id="viApercu">Renseignez le montant : la conversion s’affiche ici, '
+            + 'de chaque côté, au taux du jour de l’opération.</div>';
+
+        var f = UI.feuille({
+            titre: 'Virement entre deux comptes',
+            aide: 'Un virement interne ne change ni votre capital investi ni vos apports : '
+                + 'il déplace des fonds d’un compte à l’autre.',
+            corps: corps,
+            boutons: [
+                { texte: 'Annuler', sorte: 'ghost' },
+                { texte: 'Enregistrer', sorte: '', garder: true, action: enregistrerVirement }
+            ]
+        });
+
+        var c = f.corps;
+        if (!c) return;
+
+        function apercu() {
+            var zone = c.querySelector('#viApercu');
+            if (!zone) return;
+            var montant = U.num(UI.lire('viMontant'), 0);
+            var devise = UI.lire('viDevise');
+            var src = UI.lire('viSource'), dst = UI.lire('viCible');
+            var date = U.parseDate(UI.lire('viDate'));
+            if (src === dst) { zone.textContent = 'Choisissez deux comptes différents.'; return; }
+            if (!(montant > 0) || !date) { zone.textContent = 'Renseignez le montant : la conversion s’affiche ici.'; return; }
+            zone.textContent = 'Conversion…';
+            Promise.all([
+                src === devise ? Promise.resolve(1) : PF.net.taux(devise, date, src),
+                dst === devise ? Promise.resolve(1) : PF.net.taux(devise, date, dst)
+            ]).then(function (t) {
+                if (t[0] === null || t[1] === null) {
+                    zone.textContent = 'Taux de change indisponible à cette date : '
+                        + 'aucun montant ne sera enregistré plutôt qu’une valeur inventée.';
+                    return;
+                }
+                zone.innerHTML = '<b>' + U.nombre(montant, 2) + ' ' + UI.h(devise) + '</b> → '
+                    + '<b>' + U.nombre(montant * t[0], 2) + ' ' + UI.h(src) + '</b> débités, '
+                    + '<b>' + U.nombre(montant * t[1], 2) + ' ' + UI.h(dst) + '</b> crédités.';
+            });
+        }
+
+        ['viDate', 'viDevise', 'viSource', 'viCible'].forEach(function (id) {
+            var e = c.querySelector('#' + id);
+            if (e) e.addEventListener('change', apercu);
+        });
+        var m = c.querySelector('#viMontant');
+        if (m) m.addEventListener('input', U.debounce(apercu, 350));
+    }
+
+    function enregistrerVirement() {
+        var montant = U.num(UI.lire('viMontant'), 0);
+        var devise = String(UI.lire('viDevise') || '').toUpperCase();
+        var src = String(UI.lire('viSource') || '').toUpperCase();
+        var dst = String(UI.lire('viCible') || '').toUpperCase();
+        var date = U.parseDate(UI.lire('viDate'));
+        if (!(montant > 0) || !date) { UI.toast('Montant et date sont requis'); return; }
+        if (src === dst) { UI.toast('Choisissez deux comptes différents'); return; }
+
+        Promise.all([
+            src === devise ? Promise.resolve(1) : PF.net.taux(devise, date, src),
+            dst === devise ? Promise.resolve(1) : PF.net.taux(devise, date, dst)
+        ]).then(function (t) {
+            if (t[0] === null || t[1] === null) throw new Error('taux de change indisponible à cette date');
+            return ajusterSoldeCompte(src, src, -montant * t[0], date).then(function () {
+                return ajusterSoldeCompte(dst, dst, montant * t[1], date);
+            }).then(function () { return { debite: montant * t[0], credite: montant * t[1] }; });
+        }).then(function (r) {
+            UI.toast('Virement enregistré : ' + U.nombre(r.debite, 2) + ' ' + src
+                + ' → ' + U.nombre(r.credite, 2) + ' ' + dst);
+            document.querySelector('#voile').click();
+            rafraichir(true);
+        }).catch(function (e) {
+            UI.toast('Échec : ' + (e && e.message ? e.message : 'écriture refusée'));
+        });
     }
 
     // ------------------------------------------------------------ allocation
@@ -824,6 +1312,19 @@
 
     // -------------------------------------------------------------- réglages
 
+    /* Les paramètres fiscaux vivent dans la table `Config` : c'est ce qui
+       permet à l'application Android et à l'application Streamlit de partager
+       les mêmes valeurs au lieu de se contredire. */
+    var CORRESPONDANCE_CONFIG = {
+        statutFiscal: 'f_statut', partsFiscales: 'f_parts', nbEnfants: 'f_enf',
+        salaireNetImposable1: 'f_s1', salaireNetImposable2: 'f_s2',
+        interetsEtrangers: 'f_int_net', paysEtranger: 'f_pays_etr',
+        utiliserFraisReels1: 'f_u1', fraisKm1: 'f_k1', cvFiscal1: 'f_cv1',
+        joursRepas1: 'f_r1', vehiculeElectrique1: 'f_elec1',
+        utiliserFraisReels2: 'f_u2', fraisKm2: 'f_k2', cvFiscal2: 'f_cv2',
+        joursRepas2: 'f_r2', vehiculeElectrique2: 'f_elec2'
+    };
+
     var REGLES_REGLAGES = {
         anneeDepartRetraite: { label: 'Année de départ à la retraite', type: 'number' },
         apportMensuelEur: { label: 'Apport mensuel (€)', type: 'number' },
@@ -834,9 +1335,33 @@
         partsFiscales: { label: 'Parts fiscales du foyer', type: 'number' },
         salaireNetImposable1: { label: 'Salaire net imposable — déclarant 1 (€)', type: 'number' },
         salaireNetImposable2: { label: 'Salaire net imposable — déclarant 2 (€)', type: 'number' },
-        fraisReels1: { label: 'Frais professionnels déclarant 1 (€)', type: 'number' },
-        fraisReels2: { label: 'Frais professionnels déclarant 2 (€)', type: 'number' },
         interetsEtrangers: { label: 'Revenus d’intérêts encaissés à l’étranger (€)', type: 'number' },
+        paysEtranger: { label: 'Pays des intérêts étrangers', type: 'text' },
+        nbEnfants: { label: 'Enfants à charge', type: 'number' },
+        utiliserFraisReels1: {
+            label: 'Opter pour les frais réels — déclarant 1', type: 'select', options: [
+                { valeur: 'true', texte: 'Oui — kilomètres + repas' },
+                { valeur: 'false', texte: 'Non — abattement 10 %' }
+            ]
+        },
+        fraisKm1: { label: 'Kilomètres annuels — déclarant 1', type: 'number' },
+        cvFiscal1: { label: 'Puissance fiscale — déclarant 1', type: 'select', options: [{ valeur: 3, texte: '3 CV' }, { valeur: 4, texte: '4 CV' }, { valeur: 5, texte: '5 CV' }, { valeur: 6, texte: '6 CV' }, { valeur: 7, texte: '7 CV et +' }] },
+        joursRepas1: { label: 'Jours de repas hors domicile — déclarant 1', type: 'number' },
+        vehiculeElectrique1: { label: 'Véhicule électrique (+20 %) — déclarant 1', type: 'select', options: [{ valeur: 'false', texte: 'Non' }, { valeur: 'true', texte: 'Oui' }] },
+        utiliserFraisReels2: {
+            label: 'Opter pour les frais réels — déclarant 2', type: 'select', options: [
+                { valeur: 'true', texte: 'Oui — kilomètres + repas' },
+                { valeur: 'false', texte: 'Non — abattement 10 %' }
+            ]
+        },
+        fraisKm2: { label: 'Kilomètres annuels — déclarant 2', type: 'number' },
+        cvFiscal2: { label: 'Puissance fiscale — déclarant 2', type: 'select', options: [{ valeur: 3, texte: '3 CV' }, { valeur: 4, texte: '4 CV' }, { valeur: 5, texte: '5 CV' }, { valeur: 6, texte: '6 CV' }, { valeur: 7, texte: '7 CV et +' }] },
+        joursRepas2: { label: 'Jours de repas hors domicile — déclarant 2', type: 'number' },
+        vehiculeElectrique2: { label: 'Véhicule électrique (+20 %) — déclarant 2', type: 'select', options: [{ valeur: 'false', texte: 'Non' }, { valeur: 'true', texte: 'Oui' }] },
+        retraiteRendementB: { label: 'Scénario B — rendement (0,05 = 5 %)', type: 'number' },
+        retraiteInflationB: { label: 'Scénario B — inflation (0,02 = 2 %)', type: 'number' },
+        retraiteRendementC: { label: 'Scénario C — rendement (0,08 = 8 %)', type: 'number' },
+        retraiteInflationC: { label: 'Scénario C — inflation (0,02 = 2 %)', type: 'number' },
         statutFiscal: {
             label: 'Situation familiale', type: 'select', options: [
                 { valeur: 'Célibataire', texte: 'Célibataire' },
@@ -844,7 +1369,9 @@
                 { valeur: 'Divorcé(e) / Séparé(e)', texte: 'Divorcé(e) / Séparé(e)' },
                 { valeur: 'Veuf(ve)', texte: 'Veuf(ve)' }
             ]
-        }
+        },
+        iaUrl: { label: 'Service IA — adresse (https://…workers.dev)', type: 'text' },
+        iaCle: { label: 'Service IA — clé de service', type: 'text' }
     };
 
     function feuilleReglage(cle) {
@@ -859,11 +1386,25 @@
                 { texte: 'Enregistrer', sorte: '', garder: true, action: function () {
                     var brut = UI.lire('rgValeur');
                     var patch = {};
-                    patch[cle] = regle.type === 'select' ? brut : U.num(brut, r[cle]);
+                    patch[cle] = (regle.type === 'select' || regle.type === 'text')
+                        ? brut : U.num(brut, r[cle]);
                     PF.store.sauverReglages(patch);
+                    if (CORRESPONDANCE_CONFIG[cle] && !etat.demo) {
+                        PF.portefeuille.sauverConfigCle(CORRESPONDANCE_CONFIG[cle], patch[cle]);
+                    }
+                    if (cle === 'iaUrl' && PF.ia) {
+                        var url = String(patch[cle] || '').trim().replace(/\/+$/, '');
+                        PF.ia.configurer(url, PF.store.reglages().iaCle);
+                        document.querySelector('#voile').click();
+                        setTimeout(function () { feuilleReglage('iaCle'); }, 220);
+                        return;
+                    }
+                    if (cle === 'iaCle' && PF.ia) {
+                        PF.ia.configurer(PF.store.reglages().iaUrl, String(patch[cle] || '').trim());
+                    }
                     UI.toast('Enregistré');
                     document.querySelector('#voile').click();
-                    rendre();
+                    if (etat.onglet === 'ia') naviguer('ia'); else rendre();
                 } }
             ]
         });
@@ -873,8 +1414,10 @@
         var r = PF.store.reglages();
         var corps = ''
             + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase</button>'
+            + '<button class="btn ghost" id="rgDiag" style="margin-bottom:9px">🩺 Diagnostiquer la connexion</button>'
             + '<button class="btn sec" id="rgInflation" style="margin-bottom:9px">📈 Inflation annuelle</button>'
             + '<button class="btn sec" id="rgFiscal" style="margin-bottom:9px">§ Situation fiscale</button>'
+            + '<button class="btn sec" id="rgIa" style="margin-bottom:9px">◈ Université de l’Épargne (IA)</button>'
             + '<button class="btn ghost" id="rgVider" style="margin-bottom:9px">Vider le cache de l’application</button>'
             + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:10px">'
             + 'Inflation retenue : ' + U.pct(r.inflationReelleEstimee, 1) + ' · rendement : '
@@ -893,6 +1436,10 @@
                 document.querySelector('#voile').click();
                 setTimeout(function () { feuilleConnexion(false); }, 220);
             });
+            c.querySelector('#rgDiag').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(feuilleDiagnostic, 220);
+            });
             c.querySelector('#rgInflation').addEventListener('click', function () {
                 document.querySelector('#voile').click();
                 setTimeout(feuilleInflation, 220);
@@ -900,6 +1447,10 @@
             c.querySelector('#rgFiscal').addEventListener('click', function () {
                 document.querySelector('#voile').click();
                 setTimeout(feuilleSituationFiscale, 220);
+            });
+            c.querySelector('#rgIa').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(function () { feuilleReglage('iaUrl'); }, 220);
             });
             c.querySelector('#rgVider').addEventListener('click', function () {
                 PF.store.viderCache();
@@ -1183,6 +1734,11 @@
     PF.app = {
         etat: etat,
         retourInflation: retourInflation,
+        diagnostiquerConnexion: diagnostiquerConnexion,
+        feuilleConnexion: feuilleConnexion,
+        feuilleVirement: feuilleVirement,
+        comptesLiquidites: comptesLiquidites,
+        CORRESPONDANCE_CONFIG: CORRESPONDANCE_CONFIG,
         naviguer: naviguer,
         rafraichir: rafraichir,
         rendre: rendre,

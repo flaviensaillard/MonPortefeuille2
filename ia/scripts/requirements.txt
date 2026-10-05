@@ -1,0 +1,5 @@
+# Collecte et préparation du corpus.
+# yt-dlp sert uniquement à récupérer les sous-titres des vidéos PUBLIQUES.
+# Aucune de ces dépendances ne contourne quoi que ce soit : pas de pilote de
+# navigateur, pas d'authentification, pas de contournement de DRM.
+yt-dlp>=2025.1.1

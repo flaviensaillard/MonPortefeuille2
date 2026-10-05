@@ -1,168 +1,192 @@
-# Porte-feuille — application Android
+# MonPortefeuille 2
 
-Application mobile autonome reprenant **toutes les fonctionnalités de MonPortefeuille 2**
-(tableau de bord, portefeuille & opérations, performance, retraite, fiscalité), sans
-serveur intermédiaire : l'application parle directement à **votre** base Supabase et à
-Yahoo Finance / l'INSEE.
+Application de suivi de portefeuille, construite sur les mêmes bases que la v1 —
+**Streamlit, Supabase, GitHub Actions** — avec la mécanique de calcul corrigée et
+les tâches répétitives automatisées.
 
-- **Nom** : Porte-feuille · **Paquet** : `com.portefeuille.app`
-- **APK** : `dist/Porte-feuille.apk` (Android 8.0 / API 26 et plus)
-- **Poids** : environ 190 Ko — aucune bibliothèque tierce, aucun traqueur.
+Le portefeuille suivi est celui de l'**Université de l'Épargne**, et les indicateurs
+sont choisis pour refléter la méthode de Charles Gave plutôt que les conventions de
+la finance de marché.
 
 ---
 
-## 1. Ce que fait l'application
+## Ce qui change par rapport à la v1
 
-| Écran | Contenu |
+La v1 fonctionnait, mais six défauts faussaient ses résultats. Ils sont tous
+corrigés, et chacun est verrouillé par un test.
+
+| # | Défaut de la v1 | Correction |
+|---|---|---|
+| 1 | L'assiette de rééquilibrage ignorait les `🏦 Cash réserve` (12 277 €, 13 % du patrimoine). Toutes les dérives affichées étaient fausses. | Le périmètre est porté par le modèle : `INVESTI` / `PRECAUTION` / `COURANT`. L'épargne de précaution est exclue *pour une raison énoncée*, pas oubliée par un filtre de type. |
+| 2 | `TG_Score TWR %` était une copie littérale de `Score TWR %`. Deux performances cumulées divergeant de 21 points, dont une fausse. | Une seule mesure par concept. Le TWR n'est jamais stocké : il est calculé à la demande depuis les snapshots. |
+| 3 | Barèmes fiscaux sur-indexés d'environ 1,3 %, endpoint `api.gouv.fr` inexistant masqué par un `try/except`, et **un seul jeu de barèmes pour tous les exercices**. | Barèmes indexés par **année de cession**, table datée et sourcée, fiabilité affichée honnêtement. |
+| 4 | Or ETC et or physique confondus : tout au régime des valeurs mobilières. | Trois régimes distincts : 150-0 A, 150 VH bis (avec l'abattement de 305 € qui manquait), 150 VI. |
+| 5 | Projection retraite en dollars déflatés par l'inflation française, sans conversion. Apports futurs indexés sur l'inflation du mauvais scénario. | Projection en **euros**, chaque scénario avec sa propre inflation, et une sensibilité au taux de change affichée. |
+| 6 | Replis silencieux : `1,05` pour EUR/USD, `1,0` pour les devises, `2 000 $` pour l'or, `0 %` pour l'inflation 2026. | **Aucune valeur de repli.** Une donnée manquante lève une exception et affiche un bandeau. |
+
+### La correction de fond
+
+La v1 collectait le prix de l'or à chaque apport de capital, dans une colonne
+`Montant Or` dédiée, et **ne s'en servait jamais**. Or pour Gave, l'or n'est pas un
+placement mais l'étalon de valeur : *« l'or montera tant que les monnaies ne
+redeviendront pas des réserves de valeur »*.
+
+La v2 fait de la **performance en onces d'or** une métrique de premier plan, à côté
+de la performance en euros et en euros réels. Une seule courbe répond à la question
+qui compte, et elle est sur la page Suivi.
+
+---
+
+## Installation
+
+### 1. Créer le schéma Supabase
+
+Dans l'éditeur SQL de Supabase, exécutez `migrations/001_init.sql`.
+
+Les tables sont préfixées `pf2_` : **la v1 n'est pas touchée** et continue de
+fonctionner pendant la transition.
+
+### 2. Révoquer l'ancienne clé
+
+La v1 commitait son URL et sa clé Supabase **en dur** dans `take_snapshot.py` et
+`calc_perf.py`, sur un repo public.
+
+1. Supabase → Settings → API → révoquer l'ancienne clé publishable
+2. Créer une nouvelle clé
+3. La stocker dans les secrets GitHub et `.streamlit/secrets.toml` — jamais dans le code
+
+### 3. Configurer les secrets
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# puis renseigner SUPABASE_URL et SUPABASE_KEY
+```
+
+`.streamlit/secrets.toml` est dans `.gitignore`.
+
+### 4. Lancer
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+### 5. Migrer les données de la v1
+
+Un script d'import est fourni : `jobs/importer_v1.py`. Il lit les tables
+`Transaction` et `Historique` de la v1 et écrit dans `pf2_transactions` et
+`pf2_apports`.
+
+```bash
+SUPABASE_URL=... SUPABASE_KEY=... python jobs/importer_v1.py --dry-run
+SUPABASE_URL=... SUPABASE_KEY=... python jobs/importer_v1.py
+```
+
+---
+
+## Le plan d'allocation
+
+Défini dans `core/models.py`, modifiable en un endroit.
+
+| Poche | Cible | Bande | Actifs |
+|---|---|---|---|
+| Réserve de valeur (Or + Bitcoin) | 20 % | ±3 pts | IGLN.L, BTCUSDT |
+| Énergie | 30 % | ±5 pts | XDW0.L, FLXC.L |
+| Asie / Chine | 30 % | ±5 pts | RI.PA |
+| Obligations japonaises | 20 % | ±5 pts | XJSE.SW |
+
+**Hors portefeuille**, suivis mais jamais rééquilibrés :
+
+| Périmètre | Actifs |
 |---|---|
-| **Tableau de bord** | Patrimoine total, portefeuille investi, performance TWR depuis le début, épargne de précaution, cash disponible ; flèche **↗ ↘ →** et pourcentage depuis le dernier enregistrement pour chaque actif ; allocation par poche ; rente mensuelle en bas d'écran. |
-| **Portefeuille** | Positions détenues, **opérations** (achat / vente / apport / retrait, modifiables et supprimables), **rééquilibrage** (assiette = investi + cash disponible, ordres proposés), **allocation** (cible et fenêtre de dérive par actif, ajout d'actif ou de poche, alerte si le total dépasse 100 %). |
-| **Performance** | Période au choix (depuis la veille, mensuelle, mois, année, 1 an, depuis le début, période libre), courbe, gain de marché, apports, volatilité, performance par année, équivalent-or. |
-| **Retraite** | Capital projeté à l'année de départ, pouvoir d'achat, rente mensuelle nette perpétuelle, hypothèses modifiables. |
-| **Fiscalité** | Situation familiale, **déclaration de base** (salaires, frais réels vs abattement 10 %, cases 1AK / 1BK, revenus étrangers, comptes hors de France), impôt sur le revenu, taux de prélèvement à la source, plus-values (PFU vs barème, case 2OP, 2086 et le seuil de 305 €), guide fiscal par formulaire, bandeau de mise à jour des barèmes. |
+| Épargne de précaution | CHF (livret Swissquote) |
+| Compte courant | EUR, USD, CNY (Revolut) |
 
-### Conventions respectées
-
-- **Le dollar est l'unité de compte** : il s'affiche en blanc, en grand ; l'euro est une
-  indication, en bleu, en dessous.
-- **Vert si ça monte, rouge si ça baisse, bleu si c'est stable.**
-- **Aucune valeur n'est inventée.** Un cours ou un taux de change introuvable est
-  signalé ; la ligne est exclue des totaux, jamais remplacée par un chiffre plausible.
-- **L'inflation est récupérée par l'application** (INSEE, jeu Mélodi de l'IPC) puis
-  enregistrée dans votre table `pf2_inflation` — elle continue d'évoluer dans le temps
-  sans intervention.
-- **La répartition entre actifs est la vôtre** : l'application ne la « corrige » jamais
-  vers une répartition théorique. Elle signale seulement si le total dépasse 100 %.
+La bande est plus serrée sur la réserve de valeur parce que c'est la poche qui
+porte la thèse anti-monnaie-fiduciaire : une dérive y coûte plus en doctrine qu'en
+performance.
 
 ---
 
-## 2. Première utilisation
-
-1. Installer l'APK (voir §5).
-2. Ouvrir l'application : une seule fois, renseigner
-   - l'**URL du projet Supabase** (`https://xxxx.supabase.co`) ;
-   - la **clé publique (anon key)** — jamais la clé de service.
-3. « Tester la connexion », puis « Enregistrer ».
-
-Ces deux valeurs restent **sur le téléphone** (stockage local de l'application). Elles ne
-sont envoyées qu'à votre base. Aucun identifiant n'est intégré à l'APK : il n'y en a
-aucun à transmettre, et rien à révoquer si le fichier circule.
-
-Un bouton **« Découvrir sans me connecter »** affiche l'application avec un jeu de
-données de démonstration, pour juger l'ergonomie avant branchement.
-
----
-
-## 3. Architecture
+## Architecture
 
 ```
-app/src/main/
-├── AndroidManifest.xml
-├── java/com/portefeuille/app/
-│   ├── MainActivity.java     coque : WebView plein écran, retour, barres système, splash
-│   └── NativeBridge.java     réseau natif, vibration, partage, téléchargement INSEE
-├── res/                      thème sombre, icône adaptative, mise en page
-└── assets/www/               l'application elle-même
-    ├── index.html            coque HTML, navigation basse
-    ├── css/app.css           thème : cartes, feuilles, graphiques, cibles tactiles ≥ 44 px
-    └── js/
-        ├── util.js           formatage français, flèches, dates
-        ├── models.js         poches, actifs, cibles et bandes de tolérance
-        ├── net.js            Yahoo Finance et Supabase (requêtes asynchrones natives)
-        ├── store.js          réglages et cache local
-        ├── metrics.js        TWR, flux, inflation, rente, projection
-        ├── portfolio.js      transactions → positions → valorisation → contexte
-        ├── rebalance.js      diagnostic par poche et ordres
-        ├── fiscal.js         barèmes, IR, PFU vs barème, guide par formulaire
-        ├── ui.js             composants : cartes, feuilles, graphiques SVG
-        ├── views.js          les cinq écrans
-        └── app.js            navigation, actions, écritures en base
+app.py                  Tableau de bord
+pages/                  Les 7 autres pages (navigation native Streamlit)
+core/
+  models.py             Poches, périmètres, classes d'actifs, régimes fiscaux
+  fiscal_bars.py        Barèmes de l'impôt, indexés par année
+  fx.py                 Taux de change — jamais devinés
+  prices.py             Cours — jamais devinés
+  metrics.py            TWR, rendement réel, rendement en or, IRR, volatilité
+  portfolio.py          Positions calculées depuis les transactions
+  rebalance.py          Rééquilibrage par poche et bande
+  tax.py                Moteur fiscal français
+  config.py             Réglages typés, sans clé en double
+  db.py                 Accès Supabase
+  session.py            Chargement et calcul partagés
+  ui.py                 Helpers d'affichage
+jobs/                   Robots GitHub Actions
+migrations/             Schéma SQL
+tests/                  52 tests, sans réseau ni base
 ```
 
-**Pourquoi le réseau passe par Java.** Une page servie depuis `file://` a une origine
-nulle : de nombreuses API refusent alors les requêtes cross-origin. En confiant les
-requêtes à `HttpURLConnection`, l'application se comporte comme n'importe quel client
-Android : pas de CORS, pas de préflight, et le téléchargement de l'INSEE (4 Mo) est
-analysé côté Java avant de remonter trois nombres à la page.
+### Le principe transversal
 
-**Pourquoi une interface en HTML/CSS.** Aucune dépendance à télécharger, un rendu
-identique sur toutes les versions d'Android, des animations fluides sans bibliothèque
-(graphiques en SVG) et un APK de 190 Ko. La coque native garde la main sur le retour
-arrière, les barres système, la vibration, le partage et le splash screen.
+**Aucune valeur de repli.** Un cours ou un taux de change manquant lève une
+exception, et l'application affiche un bandeau listant ce qui manque. C'est la
+correction structurelle de la v1, où une panne Yahoo produisait des performances
+flatteuses construites sur des chiffres inventés.
 
 ---
 
-## 4. Reconstruire l'APK
+## Automatisation
+
+`.github/workflows/daily.yml` fait tourner quatre robots chaque soir :
+
+| Heure UTC | Robot | Rôle |
+|---|---|---|
+| 21h05 | `update_market_data.py` | Cours et taux de change |
+| 21h35 | `daily_snapshot.py` | Valorisation du jour, en euros **et en onces d'or** |
+| 22h05 | `update_inflation.py` | Inflation annuelle |
+| 22h35 | `fiscal_alerts.py` | Alertes fiscales |
+
+Les secrets `SUPABASE_URL` et `SUPABASE_KEY` doivent être définis dans
+Settings → Secrets and variables → Actions.
+
+`.github/workflows/tests.yml` lance les tests à chaque push.
+
+---
+
+## Ce qu'il reste à vérifier
+
+Le moteur fiscal est une **estimation, pas une déclaration**. À recouper avec le
+BOFiP avant toute déclaration :
+
+- les barèmes et décotes de 2025 et 2026 ;
+- le plafonnement du quotient familial ;
+- la qualification fiscale exacte d'un ETC or (IGLN.L) ;
+- le barème d'abattement de l'or physique (article 150 VI) ;
+- le traitement de l'abattement sur la taxe forfaitaire sur les métaux précieux.
+
+Ces points sont marqués « À VÉRIFIER » dans `core/fiscal_bars.py` et `core/tax.py`.
+
+---
+
+## Tests
 
 ```bash
-# 1. SDK Android (une seule fois)
-mkdir -p ~/.cache/android-sdk && cd ~/.cache/android-sdk
-curl -sL -o cmd.zip https://dl.google.com/android/repository/commandlinetools-linux-9862592_latest.zip
-curl -sL -o plat.zip  https://dl.google.com/android/repository/platform-35_r02.zip
-curl -sL -o bt.zip    https://dl.google.com/android/repository/build-tools_r34-linux.zip
-unzip -q cmd.zip && mkdir -p platforms build-tools
-(cd platforms   && unzip -q ../plat.zip && mv android-15 android-35)
-(cd build-tools && unzip -q ../bt.zip   && mv android-14 34.0.0)
-
-# 2. Icônes (optionnel, Pillow)
-python3 tools/make_icons.py
-
-# 3. APK signé
-./build.sh
+python -m pytest tests/ -v
 ```
 
-`build.sh` enchaîne `aapt2 compile` → `aapt2 link` → `javac` → `d8` → `zipalign` →
-`apksigner` (v1 + v2 + v3). Il crée le keystore `keystore/portefeuille.jks` s'il
-n'existe pas : **ce fichier ne doit jamais être publié** — il est exclu de l'archive
-source. Variables utiles : `VERSION_NAME`, `VERSION_CODE`, `KEY_PASS`, `ANDROID_SDK_ROOT`.
+52 tests, sans réseau ni base de données. Ils verrouillent notamment :
 
-### Tests
-
-```bash
-node tests/test_js.js     # 53 assertions : formatage, allocation, mesures, fiscalité,
-                          # rééquilibrage et chargement complet sur un faux réseau
-node tests/test_rendu.js  # 23 assertions : les cinq écrans rendus dans un DOM simulé
-node tools/apercu.js      # génère apercu.html : les cinq écrans en cadre téléphone
-```
-
-`tests/test_rendu.js` a besoin de `jsdom` :
-`npm install jsdom` dans un dossier quelconque, puis adapter le chemin de require en
-tête du fichier.
-
----
-
-## 5. Installer sur le téléphone
-
-1. Copier `Porte-feuille.apk` sur le téléphone (câble, Drive, mail…).
-2. Ouvrir le fichier : Android demande l'autorisation d'installer une application
-   **source inconnue** — l'accorder pour ce fichier.
-3. Si Android affiche « l'application n'a pas été vérifiée », c'est normal : l'APK est
-   signé avec un certificat personnel, pas avec celui d'un éditeur du Play Store.
-
----
-
-## 6. Publier sur GitHub
-
-Dépôt conseillé : `https://github.com/flaviensaillard/MonPortefeuille2`, dossier
-`mobile/`, avec l'APK en **Release** :
-
-```bash
-git add mobile/
-git commit -m "Application Android Porte-feuille"
-git push
-# puis : Releases > Draft a new release > glisser Porte-feuille.apk
-```
-
-À ne **pas** déposer sur un dépôt public : `keystore/portefeuille.jks`, et bien sûr
-votre clé Supabase (elle n'est dans aucun fichier du projet).
-
----
-
-## 7. Limites connues
-
-- Le premier chargement télécharge l'historique complet de chaque titre et de chaque
-  paire de devises (comme la version web) : compter 10 à 30 secondes, puis le cache
-  local affiche immédiatement vos derniers chiffres au prochain démarrage.
-- L'application lit et écrit les tables `pf2_*`, `Config`, `Donnees`, `Projections` et
-  `Historique` : les politiques RLS doivent autoriser la clé publique, comme sur la
-  version web.
+- le TWR par sous-périodes et la neutralisation des apports ;
+- la relation de Fisher pour le rendement réel ;
+- le rendement en or, qui **refuse** un cours invalide ;
+- l'exclusion de l'épargne de précaution de l'assiette d'allocation ;
+- les bandes par poche et le seuil de rentabilité des ordres ;
+- le barème fiscal, tranche par tranche ;
+- l'abattement de 305 € sur la plus-value crypto ;
+- les deux régimes de l'or physique et le plus favorable des deux ;
+- la CSG déductible dans la comparaison PFU / barème.

@@ -5,7 +5,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { JSDOM, VirtualConsole } = require('/home/user/.cache/jsdom/node_modules/jsdom');
+let JSDOM, VirtualConsole;
+try {
+    ({ JSDOM, VirtualConsole } = require(path.join(__dirname, '..', 'tests', 'deps', 'node_modules', 'jsdom')));
+} catch (e) {
+    ({ JSDOM, VirtualConsole } = require('/home/user/.cache/jsdom/node_modules/jsdom'));
+}
 
 const RACINE = path.join(__dirname, '..');
 const PAGE = path.join(RACINE, 'app', 'src', 'main', 'assets', 'www', 'index.html');
@@ -28,7 +33,8 @@ JSDOM.fromFile(PAGE, { runScripts: 'dangerously', resources: 'usable', pretendTo
             ['portefeuille', 'Portefeuille'],
             ['performance', 'Performance'],
             ['retraite', 'Retraite'],
-            ['fiscalite', 'Fiscalité']
+            ['fiscalite', 'Fiscalité'],
+            ['ia', 'IA — Université de l’Épargne']
         ];
 
         const ecrans = onglets.map(([cle, titre]) => {
@@ -36,6 +42,42 @@ JSDOM.fromFile(PAGE, { runScripts: 'dangerously', resources: 'usable', pretendTo
             const vue = w.document.getElementById('view').innerHTML;
             return { cle, titre, html: vue };
         });
+
+        // Sixième écran : les comptes de liquidités et les virements.
+        PF.vues.definirOngletPortefeuille('comptes');
+        PF.app.naviguer('portefeuille', true);
+        ecrans.push({ cle: 'comptes', titre: 'Portefeuille · Comptes', html: w.document.getElementById('view').innerHTML });
+        PF.vues.definirOngletPortefeuille('positions');
+
+        /* L'écran Fiscalité remplit ses formulaires après lecture des
+           écritures : on attend la résolution, et on ouvre les volets dans
+           l'aperçu pour que le contenu soit visible d'un coup d'œil.
+           Le jeu de démonstration ne comporte que des achats : on y ajoute
+           trois ventes 2025 (en euros, donc sans dépendre d'un cours de
+           change) pour montrer les formulaires 2074 et 2086 remplis. */
+        const ctxApercu = Object.assign({}, ctx, {
+            transactions: ctx.transactions.concat([
+                { id: 90, ticker: 'XDW0.L', type: 'vente', date: '2025-11-15', quantite: 200, cours: 52, frais: 9.9, devise: 'EUR' },
+                { id: 91, ticker: 'FLXC.L', type: 'vente', date: '2025-12-02', quantite: 300, cours: 22, frais: 9.9, devise: 'EUR' },
+                { id: 92, ticker: 'BTCUSDT', type: 'vente', date: '2025-12-18', quantite: 0.02, cours: 95000, frais: 10, devise: 'EUR' }
+            ])
+        });
+        PF.app.etat.ctx = ctxApercu;
+        PF.app.naviguer('fiscalite', true);
+        return new Promise((r) => setTimeout(r, 500)).then(() => {
+            const vue = w.document.getElementById('view');
+            Array.prototype.slice.call(vue.querySelectorAll('.accordeon')).forEach((a) => a.classList.add('ouvert'));
+            ecrans[4] = { cle: 'fiscalite', titre: 'Fiscalité', html: vue.innerHTML };
+            // Septième écran : la discussion, configurée pour l'aperçu.
+            PF.ia.configurer('https://universite-epargne.exemple.workers.dev', 'cle-demo');
+            PF.ia.effacer();
+            PF.app.naviguer('ia', true);
+            ecrans[5] = { cle: 'ia', titre: 'IA — Université de l’Épargne', html: w.document.getElementById('view').innerHTML };
+            PF.ia.configurer('', '');
+            return { w, PF, ecrans };
+        });
+    })
+    .then(({ w, PF, ecrans }) => {
 
         const navHtml = w.document.getElementById('nav').outerHTML
             .replace(/data-onglet="bord" class="actif"/, 'data-onglet="bord" class="actif"');

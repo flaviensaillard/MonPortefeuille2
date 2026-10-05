@@ -1,7 +1,15 @@
 # Diagnostic — à lancer quand un chiffre ne colle pas.
 #
-# Onglet Actions → « Diagnostic » → Run workflow.
+# Allez dans l'onglet Actions du repo → « Diagnostic » → Run workflow.
 # Le rapport s'affiche dans le journal. Il ne modifie RIEN : lecture seule.
+#
+# Il répond à trois questions que le code seul ne peut pas trancher, parce
+# qu'elles dépendent des données :
+#   1. Depuis quand mon historique remonte-t-il, et pourquoi pas plus loin ?
+#   2. Mes apports sont-ils enregistrés avec leur vrai montant ?
+#   3. Que contient la table d'inflation ?
+#
+# À la fin du journal, une section VERDICT dit quoi faire.
 
 name: Diagnostic
 

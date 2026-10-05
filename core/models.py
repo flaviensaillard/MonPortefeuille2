@@ -173,6 +173,7 @@ class Actif:
     valeur_usd: float = 0.0           # valorisation en dollars (unité de compte)
     dernier_taux: float | None = None # taux utilisé, pour traçabilité
     dernier_taux_usd: float | None = None
+    variation_pct: float | None = None # variation en fraction depuis le dernier enregistrement (ex. +0.0081 pour +0,81 %)
 
     def __post_init__(self) -> None:
         if self.valeur_usd == 0.0 and self.valeur_eur != 0.0:

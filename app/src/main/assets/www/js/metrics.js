@@ -116,6 +116,61 @@
         return facteur;
     }
 
+    /* Rendement de chaque sous-période exprimé en ONCES D'OR. Une mesure en or
+       exige un prix réel du métal à chaque date : s'il manque, on ne mesure
+       pas, plutôt que d'afficher un chiffre inventé. */
+    function rendementsEnOr(valeurs, flux, onces) {
+        var n = (valeurs || []).length;
+        if ((onces || []).length !== n) throw new Error('valeurs et onces doivent avoir la même longueur');
+        if (n < 2) return [];
+        flux = flux || new Array(n).fill(0);
+        for (var k = 0; k < n; k++) {
+            if (!onces[k] || onces[k] <= 0) throw new Error('équivalent-or manquant ou nul');
+        }
+        var out = [];
+        for (var i = 1; i < n; i++) {
+            if (!(valeurs[i] > 0) || !(valeurs[i - 1] > 0)) { out.push(0); continue; }
+            var r = (valeurs[i] - valeurs[i - 1] - (flux[i] || 0)) / valeurs[i - 1];
+            // « 1 + r » : sans lui, un or stable donnerait un rendement nul.
+            var unPlusROr = (1 + r) * (valeurs[i - 1] / valeurs[i]) * (onces[i] / onces[i - 1]);
+            out.push(unPlusROr - 1);
+        }
+        return out;
+    }
+
+    function twrEnOr(valeurs, flux, onces) { return twr(rendementsEnOr(valeurs, flux, onces)); }
+
+    /* TRI annualisé : le rendement qui tient compte de VOTRE calendrier
+       d'apports, là où le TWR ne mesure que la stratégie. L'écart entre les
+       deux dit si vous avez bien alimenté le portefeuille. */
+    function irr(flux) {
+        if (!flux || flux.length < 2) return null;
+        var f = flux.slice().sort(function (a, b) { return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0); });
+        var t0 = f[0][0];
+
+        function van(taux) {
+            var total = 0;
+            for (var i = 0; i < f.length; i++) {
+                var annees = U.diffJours(t0, f[i][0]) / 365.25;
+                total += f[i][1] / Math.pow(1 + taux, annees);
+            }
+            return total;
+        }
+
+        var bas = -0.95, haut = 10;
+        var fBas = van(bas), fHaut = van(haut);
+        if (!isFinite(fBas) || !isFinite(fHaut) || fBas * fHaut > 0) return null;
+        for (var it = 0; it < 200; it++) {
+            var milieu = (bas + haut) / 2;
+            var fMilieu = van(milieu);
+            if (!isFinite(fMilieu)) return null;
+            if (Math.abs(fMilieu) < 1e-9) return milieu;
+            if (fBas * fMilieu <= 0) { haut = milieu; fHaut = fMilieu; }
+            else { bas = milieu; fBas = fMilieu; }
+        }
+        return (bas + haut) / 2;
+    }
+
     function twrParAnnee(dates, rendements) {
         var out = {};
         for (var i = 0; i < (rendements || []).length; i++) {
@@ -214,8 +269,19 @@
         var dMax = dates[n - 1], dMin = dates[0];
 
         if (periode === 'Progression journalière') {
-            var deb = Math.max(0, n - 90);
-            for (i = deb; i < n; i++) idxGraphe.push(i);
+            /* La courbe couvre les trente derniers jours, TOUS les
+               enregistrements inclus : c'est la lecture au jour le jour.
+               Le chiffre, lui, reste celui du dernier enregistrement. */
+            var seuil = U.ajouterJours(dMax, -30);
+            var deb30 = -1;
+            for (i = 0; i < n; i++) { if (dates[i] <= seuil) deb30 = i; else break; }
+            if (deb30 >= 0) idxGraphe.push(deb30);
+            for (i = deb30 + 1; i < n; i++) idxGraphe.push(i);
+            if (idxGraphe.length < 2) {
+                var deb = Math.max(0, n - 30);
+                idxGraphe = [];
+                for (i = deb; i < n; i++) idxGraphe.push(i);
+            }
             idxCalc = [Math.max(0, n - 2), n - 1];
         } else if (periode === 'Progression mensuelle') {
             var parMois = {}, ordre = [];
@@ -314,6 +380,80 @@
         };
     }
 
+    /* Le CAGR du portefeuille, corrigé des apports : c'est la seule mesure de
+       rendement qui ne prend pas vos versements pour de la performance. Sert à
+       préremplir le scénario « historique » de la projection retraite. */
+    function twrAnnualise(serie) {
+        if (!serie || !serie.dates || serie.dates.length < 2) return null;
+        var rends = rendementsPeriode(serie.valeurs, serie.flux);
+        if (!rends.length) return null;
+        var total = twr(rends);
+        var jours = U.diffJours(serie.dates[0], serie.dates[serie.dates.length - 1]);
+        if (jours <= 30) return null;
+        var a = annualiser(total, jours);
+        if (a === null || !isFinite(a)) return null;
+        if (a > 1 || a < -0.9) return null;   // historique trop court pour être annualisé
+        return a;
+    }
+
+    /* Projection d'un scénario, mois par mois.
+       Deux règles héritées des corrections de la v2 :
+       1. les apports croissent à l'inflation DE CE scénario — sinon les
+          scénarios partagent l'hypothèse même qu'ils sont censés comparer ;
+       2. la capitalisation est mensuelle, pas annuelle : sur trente ans
+          l'écart se chiffre en dizaines de milliers d'euros. */
+    function projectionScenario(opts) {
+        opts = opts || {};
+        var capital = U.num(opts.capitalInitialUsd, 0);
+        var apport = U.num(opts.apportMensuelUsd, 0);
+        var annee0 = Number(String(opts.dateDepart || U.todayISO()).slice(0, 4)) || new Date().getFullYear();
+        var anneeFin = U.num(opts.anneeDepart, annee0 + 20);
+        var rendement = U.num(opts.rendementAnnuel, 0);
+        var inflation = U.num(opts.inflationAnnuelle, 0);
+        var rM = Math.pow(1 + rendement, 1 / 12) - 1;
+        var apportsCumules = U.num(opts.apportsCumulesUsd, capital);
+        var moisRestants = Math.max(1, 13 - new Date().getMonth());
+        var moisCumules = 0;
+        var lignes = [];
+
+        for (var annee = annee0; annee <= anneeFin; annee++) {
+            var mois = annee === annee0 ? moisRestants : 12;
+            for (var m = 0; m < mois; m++) {
+                capital += apport;
+                apportsCumules += apport;
+                capital *= (1 + rM);
+            }
+            moisCumules += mois;
+            lignes.push({
+                annee: annee,
+                capital_nominal: capital,
+                apports_cumules: apportsCumules,
+                pouvoir_achat: pouvoirAchat(capital, inflation, moisCumules / 12),
+                mois: moisCumules
+            });
+            apport *= (1 + inflation);
+        }
+        return lignes;
+    }
+
+    /* Sensibilité au taux de change : le portefeuille est en dollars, la dépense
+       sera en euros. Une erreur d'hypothèse de 15 % coûte plus que la plupart
+       des écarts de rendement entre scénarios. */
+    function sensibiliteChange(capitalNominalUsd, capitalReelUsd, tauxEurUsd) {
+        var taux = U.num(tauxEurUsd, 0) > 0 ? U.num(tauxEurUsd, 1) : 1.125;
+        var base = capitalReelUsd / taux;
+        return [-0.30, -0.15, 0, 0.15, 0.30].map(function (v) {
+            var t = taux * (1 + v);
+            var reelEur = capitalReelUsd / t;
+            return {
+                variation: v, taux: t,
+                capital_nominal_eur: capitalNominalUsd / t,
+                pouvoir_achat_eur: reelEur,
+                impact: base > 0 ? (reelEur / base - 1) : 0
+            };
+        });
+    }
+
     /* Projection : capital projeté avec apports mensuels, et pouvoir d'achat. */
     function projectionRetraite(capitalUsd, apportMensuelUsd, annees, rendementAnnuel, inflationAnnuelle) {
         var pts = [];
@@ -347,6 +487,10 @@
         progressionPeriode: progressionPeriode,
         renteMensuelle: renteMensuelle,
         projectionRetraite: projectionRetraite,
+        projectionScenario: projectionScenario,
+        sensibiliteChange: sensibiliteChange,
+        twrAnnualise: twrAnnualise,
+        twrEnOr: twrEnOr, rendementsEnOr: rendementsEnOr, irr: irr,
         PERIODES: PERIODES
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

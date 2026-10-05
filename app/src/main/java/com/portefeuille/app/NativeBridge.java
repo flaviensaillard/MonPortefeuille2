@@ -29,6 +29,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -204,23 +205,56 @@ public class NativeBridge {
                     Collections.sort(cles);
                     for (String c : cles) triee.put(c, parMois.get(c));
 
-                    for (String periode : triee.keySet()) {
+                    /* Inflation annuelle = moyenne des douze indices de
+                       l'année divisée par celle de l'année précédente : c'est
+                       la définition de l'INSEE, et c'est celle que retient
+                       l'application Streamlit. Vérifié sur le jeu Mélodi :
+                       2022 → 5,22 %, 2023 → 4,88 %, 2024 → 2,00 %,
+                       2025 → 0,94 %. Le glissement décembre/décembre donne
+                       d'autres chiffres (5,84 % en 2022) : ce n'est pas la
+                       même mesure, et les mélanger dans une même table
+                       fausserait les deux applications.
+
+                       Une année incomplète est écartée : on ne publie pas une
+                       moyenne calculée sur huit mois comme si elle portait sur
+                       douze. */
+                    TreeMap<String, double[]> parAn = new TreeMap<String, double[]>();
+                    for (Map.Entry<String, Double> e : triee.entrySet()) {
+                        String periode = e.getKey();
+                        if (periode.length() < 7) continue;
                         String an = periode.substring(0, 4);
-                        String mois = periode.substring(5, 7);
-                        if (!"12".equals(mois)) continue;
-                        Double decembre = triee.get(periode);
-                        Double janvier = triee.get(an + "-01");
-                        Double base = janvier;
-                        if (base == null) {
-                            String precedent = String.valueOf(Integer.parseInt(an) - 1);
-                            base = triee.get(precedent + "-12");
+                        double[] cumul = parAn.get(an);
+                        if (cumul == null) { cumul = new double[] { 0.0, 0.0 }; parAn.put(an, cumul); }
+                        cumul[0] += e.getValue();
+                        cumul[1] += 1.0;
+                    }
+
+                    Double moyennePrecedente = null;
+                    for (Map.Entry<String, double[]> e : parAn.entrySet()) {
+                        double[] cumul = e.getValue();
+                        if (cumul[1] < 12) { moyennePrecedente = null; continue; }  // année en cours
+                        double moyenne = cumul[0] / cumul[1];
+                        if (moyennePrecedente != null && moyennePrecedente > 0) {
+                            double taux = moyenne / moyennePrecedente - 1.0;
+                            /* Garde-fou : en France, depuis 1996, une inflation
+                               annuelle n'a jamais dépassé 6 % ni été inférieure
+                               à −1 %. Toute valeur hors de cette plage signale
+                               un indice ou un cumul pris pour un taux — on
+                               écarte la ligne plutôt que d'écrire 94 % dans une
+                               table que Streamlit lit aussi. */
+                            if (taux <= 0.15 && taux >= -0.02) {
+                                JSONObject o = new JSONObject();
+                                o.put("annee", Integer.parseInt(e.getKey()));
+                                /* La table stocke un POURCENTAGE (1,7 pour
+                                   1,7 %) : c'est la convention de la v2, qui
+                                   divise par 100 à la lecture. Les deux
+                                   applications partagent la table, l'unité
+                                   doit donc être la même. */
+                                o.put("inflation", Math.round(taux * 10000.0) / 100.0);
+                                annees.put(o);
+                            }
                         }
-                        if (base != null && base > 0 && decembre != null) {
-                            JSONObject o = new JSONObject();
-                            o.put("annee", Integer.parseInt(an));
-                            o.put("inflation", Math.round((decembre / base - 1.0) * 10000.0) / 100.0);
-                            annees.put(o);
-                        }
+                        moyennePrecedente = moyenne;
                     }
                     out.put("ok", annees.length() > 0);
                 } catch (Exception e) {
@@ -297,12 +331,12 @@ public class NativeBridge {
             while ((ligne = lecteur.readLine()) != null) {
                 String[] c = ligne.split(";", -1);
                 if (c.length < entetes.length) continue;
-                if (iInd >= 0 && !"IX".equals(c[iInd].trim())) continue;
-                if (iGeo >= 0 && !"F".equals(c[iGeo].trim())) continue;
-                if (iProd >= 0 && !"_Z".equals(c[iProd].trim())) continue;
-                if (iCoicop >= 0 && !"00".equals(c[iCoicop].trim())) continue;
-                if (iTph >= 0 && !"_T".equals(c[iTph].trim())) continue;
-                if (iFreq >= 0 && !"M".equals(c[iFreq].trim())) continue;
+                if (iInd >= 0 && !"IX".equals(nettoyer(c[iInd]))) continue;
+                if (iGeo >= 0 && !"F".equals(nettoyer(c[iGeo]))) continue;
+                if (iProd >= 0 && !"_Z".equals(nettoyer(c[iProd]))) continue;
+                if (iCoicop >= 0 && !"00".equals(nettoyer(c[iCoicop]))) continue;
+                if (iTph >= 0 && !"_T".equals(nettoyer(c[iTph]))) continue;
+                if (iFreq >= 0 && !"M".equals(nettoyer(c[iFreq]))) continue;
                 lignesUtiles.add(c);
             }
             int iBase = index(entetes, "BASE_PER");
@@ -310,10 +344,10 @@ public class NativeBridge {
                 if (iBase >= 0 && c[iBase].trim().compareTo(baseMax) > 0) baseMax = c[iBase].trim();
             }
             for (String[] c : lignesUtiles) {
-                if (iBase >= 0 && !c[iBase].trim().equals(baseMax)) continue;
-                String periode = c[iTemps].trim();
+                if (iBase >= 0 && !nettoyer(c[iBase]).equals(baseMax)) continue;
+                String periode = nettoyer(c[iTemps]);
                 try {
-                    double v = Double.parseDouble(c[iVal].trim().replace(',', '.'));
+                    double v = Double.parseDouble(nettoyer(c[iVal]).replace(',', '.'));
                     if (periode.length() >= 7 && v > 0) brut.put(periode, v);
                 } catch (Exception ignore) {
                 }
@@ -325,9 +359,22 @@ public class NativeBridge {
         return brut;
     }
 
+    /* Les en-têtes du CSV INSEE sont entre guillemets ("IND_TYPE"), et les
+       valeurs aussi pour la plupart. Sans ce nettoyage, aucune colonne n'est
+       retrouvée et l'import ne renvoie rien — ce qui laisse croire que la base
+       est vide alors qu'elle ne l'est pas. */
+    private static String nettoyer(String s) {
+        if (s == null) return "";
+        String v = s.trim();
+        if (v.length() >= 2 && v.charAt(0) == '"' && v.charAt(v.length() - 1) == '"') {
+            v = v.substring(1, v.length() - 1).trim();
+        }
+        return v;
+    }
+
     private static int index(String[] entetes, String nom) {
         for (int i = 0; i < entetes.length; i++) {
-            if (entetes[i].trim().equalsIgnoreCase(nom)) return i;
+            if (nettoyer(entetes[i]).equalsIgnoreCase(nom)) return i;
         }
         return -1;
     }

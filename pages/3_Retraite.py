@@ -69,32 +69,59 @@ taux_pv = c3.number_input(
     help="PFU 2026 : 12,8 % d'IR + 18,6 % de prélèvements sociaux (31,4 %).",
 ) / 100.0
 
-# Scénario A : le CAGR historique du portefeuille.
-# Le CAGR historique, corrigé des apports.
-#
-# L'ancien calcul faisait `v1 / v0 - 1` puis annualisait : sur le portefeuille
-# reel, +628 % cumule soit **76 % par an**, et c'est ce chiffre qui preremplissait
-# ce champ. Une grande partie de cet ecart est vos versements, pas du rendement.
-# La valeur par defaut de la projection de retraite etait donc un conte de fees.
+# Scénario A : deux données observées, aucune valeur forcée.
+# Le rendement est le TWR annualisé depuis le premier snapshot (2023 chez vous),
+# corrigé des apports. L'inflation vient de l'INSEE : l'utilisateur choisit la
+# période, jamais le taux.
 perf_hist = S.twr_annualise_portefeuille(ctx)
+rendement_a = (perf_hist if perf_hist is not None else 0.05) * 100
+inflations = S.inflation_dict(ctx)  # fractions : 2 % = 0.02
+annees_closes = sorted(
+    (a for a in inflations if a <= annee_courante - 1), reverse=True
+)[:10]
+derniere_inflation = inflations[annees_closes[0]] if annees_closes else 0.02
+moyenne_inflation = (
+    sum(inflations[a] for a in annees_closes) / len(annees_closes)
+    if len(annees_closes) >= 3 else derniere_inflation
+)
 
 st.divider()
-cA, cB, cC = st.columns(3)
-rendement_a = cA.number_input(
-    "Scénario A — rendement (%/an)",
-    min_value=-20.0, max_value=30.0, step=0.1,
-    value=round((perf_hist or 0.05) * 100, 2),
-    help="Prérempli avec le CAGR historique de votre portefeuille investi.",
+st.subheader("Scénario A — historique constaté")
+choix_inflation = st.radio(
+    "Période de l’inflation moyenne",
+    ["Moyenne jusqu’à 10 ans", "L’an passé"],
+    horizontal=True,
+    help="Vous choisissez la période. Le taux lui-même est lu dans la table pf2_inflation et ne peut pas être forcé.",
 )
-inflation_a = cB.number_input(
-    "Inflation scénario A (%)", min_value=0.0, max_value=15.0, step=0.1, value=2.0,
-)
+inflation_a = (moyenne_inflation if choix_inflation.startswith("Moyenne") else derniere_inflation) * 100
+premiere_date = "historique disponible"
+if not ctx.snapshots.empty:
+    try:
+        col_date = "Date" if "Date" in ctx.snapshots.columns else "date"
+        premiere_date = pd.to_datetime(ctx.snapshots[col_date]).min().strftime("%d/%m/%Y")
+    except Exception:
+        pass
+cA, cI = st.columns(2)
+cA.metric("Rendement A — calculé, non modifiable", f"{rendement_a:.2f} %/an")
+cA.caption(f"CAGR/TWR annualisé depuis le premier enregistrement ({premiere_date}), corrigé des apports.")
+cI.metric("Inflation A — mesurée, non modifiable", f"{inflation_a:.2f} %/an")
+if annees_closes:
+    cI.caption(
+        f"L’an passé ({annees_closes[0]}) : {derniere_inflation*100:.2f} % · "
+        f"moyenne de {len(annees_closes)} année(s) close(s) : {moyenne_inflation*100:.2f} %. Source : pf2_inflation / INSEE."
+    )
+else:
+    cI.warning("Aucune inflation INSEE disponible : 2 % retenu faute de données. Lancez la mise à jour de l’inflation.")
+
+st.subheader("Scénario B — hypothèse libre")
+cB, cC = st.columns(2)
 rendement_b = cB.number_input(
-    "Scénario B — rendement (%/an)",
-    min_value=-20.0, max_value=30.0, step=0.1, value=8.0,
+    "Scénario B — rendement (%/an)", min_value=-20.0, max_value=30.0,
+    step=0.1, value=8.0,
 )
 inflation_b = cC.number_input(
-    "Inflation scénario B (%)", min_value=0.0, max_value=15.0, step=0.1, value=2.0,
+    "Scénario B — inflation (%/an)", min_value=0.0, max_value=15.0,
+    step=0.1, value=2.0,
 )
 
 st.caption(

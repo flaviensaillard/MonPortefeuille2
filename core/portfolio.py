@@ -404,6 +404,7 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
                 poche=pos.poche, quantite=pos.quantite, prix=prix,
                 valeur_eur=valeur_eur, valeur_usd=valeur_usd,
                 dernier_taux=taux, dernier_taux_usd=taux_usd,
+                variation_pct=prices.variation_recente(pos.ticker) if hasattr(prices, "variation_recente") else None,
             ))
         except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
             log.warning("Valorisation impossible : %s", exc)

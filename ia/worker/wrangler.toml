@@ -1,0 +1,26 @@
+name = "universite-epargne"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "ude-corpus"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "A_REMPLACER_PAR_ID_KV"
+
+[vars]
+MODELE_GENERATION = "@cf/meta/llama-3.1-8b-instruct"
+MODELE_EMBEDDING = "@cf/baai/bge-base-en-v1.5"
+
+# Secrets à saisir avec `npx wrangler secret put NOM` :
+# CLE_SERVICE    : Android et Streamlit interrogent l'IA
+# CLE_ADMIN      : GitHub Actions indexe le corpus
+# SUPABASE_URL   : https://xxxxx.supabase.co
+# SUPABASE_CLE   : clé service_role (seulement dans Cloudflare)
+#
+# SUPABASE_CLE ne va JAMAIS dans GitHub, l'APK ni Streamlit.

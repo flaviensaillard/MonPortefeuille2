@@ -17,10 +17,7 @@ name: Robots quotidiens
 
 on:
   schedule:
-    - cron: '5 21 * * *'    # cours et taux de change
-    - cron: '35 21 * * *'   # snapshot
-    - cron: '5 22 * * *'    # inflation
-    - cron: '35 22 * * *'   # alertes fiscales
+    - cron: '35 21 * * *'   # chaque soir à 21h35 UTC (market-data -> snapshot -> alertes, et inflation)
   workflow_dispatch:
 
 jobs:

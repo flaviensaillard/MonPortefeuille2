@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+# .indexation.json est volontairement versionné : GitHub reprend où il s'est arrêté.

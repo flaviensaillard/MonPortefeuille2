@@ -125,57 +125,252 @@
 
     // -------------------------------------------------------------- graphique
 
-    function chemin(points, largeur, hauteur, marge) {
-        var d = '';
-        points.forEach(function (p, i) {
-            d += (i === 0 ? 'M' : 'L') + p[0].toFixed(2) + ',' + p[1].toFixed(2) + ' ';
-        });
-        return d;
+    var graphiques = {};
+    var nbGraphiques = 0;
+
+    /* Étiquettes d'axe : 12 k$, 1,25 M$ — jamais « 1234567.89 $ ». */
+    function montantCourt(x, unite) {
+        var u = unite || '$';
+        var a = Math.abs(x);
+        if (!isFinite(x)) return '—';
+        if (a >= 1e9) return U.nombre(x / 1e9, 2) + ' Md' + u;
+        if (a >= 1e6) return U.nombre(x / 1e6, 2) + ' M' + u;
+        if (a >= 1e3) return U.nombre(x / 1e3, 0) + ' k' + u;
+        return U.nombre(x, 0) + ' ' + u;
     }
 
-    /* Courbe simple et lisible : aire dégradée + trait doré + dernier point. */
-    function graphique(valeurs, options) {
+    /* Enregistre un graphique ; le tracé est fait par `lierGraphiques`, une fois
+       le conteneur monté et mesuré (un SVG ne connaît pas sa largeur avant). */
+    function graphique(series, options) {
         options = options || {};
-        var largeur = 320, hauteur = 160, margeB = 18, margeH = 12;
-        var n = (valeurs || []).length;
-        if (n < 2) {
+        var liste = Array.isArray(series) ? series.slice() : [series];
+        if (liste.length && typeof liste[0] === 'number') liste = [{ nom: '', valeurs: liste }];
+        liste = liste.filter(function (s) { return s && s.valeurs && s.valeurs.length >= 2; });
+        if (!liste.length) {
             return '<div class="vide" style="padding:26px 0"><span class="g">◢</span>Pas encore assez d’historique.</div>';
         }
-        var min = Math.min.apply(null, valeurs), max = Math.max.apply(null, valeurs);
-        if (max === min) { max = min + Math.abs(min) * 0.02 + 1; min = min - Math.abs(min) * 0.02 - 1; }
-        var marge = (max - min) * 0.12;
-        min -= marge; max += marge;
+        var id = 'g' + (++nbGraphiques);
+        graphiques[id] = {
+            series: liste.map(function (s) {
+                return {
+                    nom: s.nom || '',
+                    valeurs: (s.valeurs || []).slice(),
+                    dates: (s.dates || []).slice(),
+                    couleur: s.couleur || null
+                };
+            }),
+            options: options
+        };
+        return '<div class="graph" data-graph="' + id + '" style="height:' + (options.hauteur || 186) + 'px"></div>';
+    }
 
-        var pts = valeurs.map(function (v, i) {
-            var x = (i / (n - 1)) * (largeur - 2);
-            var y = margeH + (1 - (v - min) / (max - min)) * (hauteur - margeH - margeB);
-            return [x, y];
+    /* Un graphique se lit : axe gradué et étiqueté, dates, et au toucher la
+       valeur du point visé. C'est ce qui manquait : une courbe sans échelle
+       n'est pas une information, c'est un dessin. */
+    function lierGraphiques(conteneur) {
+        var zones = Array.prototype.slice.call((conteneur || document).querySelectorAll('[data-graph]'));
+        zones.forEach(function (zone) {
+            if (zone.dataset.lie !== '1') dessinerGraphique(zone);
+        });
+    }
+
+    /* Borne haute « ronde » : 1, 2, 2,5 ou 5 fois une puissance de dix. Une
+       graduation qui tombe juste se lit ; 2 347 811 € ne se lit pas. */
+    function echelleHaute(max) {
+        if (!(max > 0) || !isFinite(max)) return 1;
+        var exp = Math.floor(Math.log(max) / Math.LN10);
+        var base = Math.pow(10, exp);
+        var n = max / base;
+        var palier = n <= 1 ? 1 : (n <= 2 ? 2 : (n <= 2.5 ? 2.5 : (n <= 5 ? 5 : 10)));
+        return palier * base;
+    }
+
+    function couleurSerie(i) {
+        var pal = ['var(--gold)', 'var(--up)', 'var(--flat)', 'var(--down)'];
+        return pal[i % pal.length];
+    }
+
+    function dessinerGraphique(zone) {
+        zone.dataset.lie = '1';
+        var id = zone.getAttribute('data-graph');
+        var spec = graphiques[id];
+        if (!spec) return;
+
+        var largeur = Math.round(zone.clientWidth || (zone.getBoundingClientRect ? zone.getBoundingClientRect().width : 0) || 0);
+        if (!largeur || largeur < 120) largeur = 320;
+        var hauteur = parseInt(zone.style.height, 10) || 186;
+        var padL = 54, padR = 12, padT = 16, padB = 24;
+        var w = largeur - padL - padR, hZone = hauteur - padT - padB;
+        if (w <= 20 || hZone <= 20) return;
+
+        var series = spec.series, options = spec.options || {};
+        var n = series[0].valeurs.length;
+        var min = Infinity, max = -Infinity;
+        series.forEach(function (s) {
+            s.valeurs.forEach(function (v) {
+                if (typeof v === 'number' && isFinite(v)) {
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+            });
+        });
+        if (!isFinite(min) || !isFinite(max)) return;
+        if (max === min) { var ec = Math.abs(max) * 0.02 + 1; max += ec; min -= ec; }
+        if (min >= 0) {
+            // Un capital ne descend pas sous zéro : l'axe part de zéro et
+            // s'arrête à une borne ronde, sinon la courbe est écrasée.
+            min = 0;
+            max = echelleHaute(max * 1.02);
+        } else {
+            var marge = (max - min) * 0.10;
+            min -= marge; max += marge;
+        }
+
+        var couleurs = series.map(function (s, i) { return s.couleur || couleurSerie(i); });
+        var dates = series[0].dates && series[0].dates.length === n ? series[0].dates : null;
+
+        function px(i) { return padL + (n <= 1 ? w / 2 : (i / (n - 1)) * w); }
+        function py(v) { return padT + (1 - (v - min) / (max - min)) * hZone; }
+
+        var svg = '<svg width="' + largeur + '" height="' + hauteur + '" viewBox="0 0 ' + largeur + ' ' + hauteur + '">'
+            + '<defs><linearGradient id="air' + id + '" x1="0" y1="0" x2="0" y2="1">'
+            + '<stop offset="0%" stop-color="' + couleurs[0] + '" stop-opacity="0.30"/>'
+            + '<stop offset="100%" stop-color="' + couleurs[0] + '" stop-opacity="0"/>'
+            + '</linearGradient></defs>';
+
+        // --- axe des ordonnates : quatre graduations, étiquetées
+        var unite = options.unite || '$';
+        for (var g = 0; g <= 3; g++) {
+            var gy = padT + (g / 3) * hZone;
+            var val = max - (g / 3) * (max - min);
+            svg += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (padL + w) + '" y2="' + gy.toFixed(1)
+                + '" stroke="rgba(255,255,255,.08)" stroke-width="1"/>'
+                + '<text x="' + (padL - 7) + '" y="' + (gy + 3.4).toFixed(1) + '" text-anchor="end" '
+                + 'font-size="9.5" fill="rgba(226,232,240,.55)">' + h(montantCourt(val, unite)) + '</text>';
+        }
+
+        // --- courbes
+        series.forEach(function (s, i) {
+            var d = s.valeurs.map(function (v, j) {
+                return (j ? 'L' : 'M') + px(j).toFixed(1) + ',' + py(v).toFixed(1);
+            }).join(' ');
+            if (i === 0) {
+                svg += '<path d="' + d + ' L' + px(n - 1).toFixed(1) + ',' + (padT + hZone) + ' L' + padL + ',' + (padT + hZone)
+                    + ' Z" fill="url(#air' + id + ')" opacity="' + (series.length > 1 ? 0.12 : 1) + '"/>';
+            }
+            svg += '<path d="' + d + '" fill="none" stroke="' + couleurs[i] + '" stroke-width="2" '
+                + 'stroke-linejoin="round" stroke-linecap="round"/>';
         });
 
-        var d = chemin(pts);
-        var aire = d + 'L' + pts[n - 1][0].toFixed(2) + ',' + (hauteur - margeB) + ' L0,' + (hauteur - margeB) + ' Z';
-        var dernier = pts[n - 1];
-        var couleur = options.couleur || 'var(--gold)';
-        if (options.couleurSelonSens) {
-            couleur = valeurs[n - 1] >= valeurs[0] ? 'var(--up)' : 'var(--down)';
+        // --- axe des dates
+        if (dates) {
+            [[0, 'start'], [Math.floor((n - 1) / 2), 'middle'], [n - 1, 'end']].forEach(function (c) {
+                var idx = c[0];
+                if (idx < 0 || idx >= n) return;
+                svg += '<text x="' + px(idx).toFixed(1) + '" y="' + (hauteur - 8) + '" text-anchor="' + c[1]
+                    + '" font-size="9.5" fill="rgba(226,232,240,.5)">' + h(U.jourMoisAnneeISO(dates[idx])) + '</text>';
+            });
         }
 
-        var svg = '<svg class="graphique" viewBox="0 0 ' + largeur + ' ' + hauteur + '" preserveAspectRatio="none">'
-            + '<defs><linearGradient id="degradeAire" x1="0" y1="0" x2="0" y2="1">'
-            + '<stop offset="0%" stop-color="' + couleur + '" stop-opacity="0.28"/>'
-            + '<stop offset="100%" stop-color="' + couleur + '" stop-opacity="0"/>'
-            + '</linearGradient></defs>'
-            + '<g class="grille">';
-        for (var g = 0; g <= 3; g++) {
-            var y = margeH + (g / 3) * (hauteur - margeH - margeB);
-            svg += '<line x1="0" y1="' + y.toFixed(1) + '" x2="' + largeur + '" y2="' + y.toFixed(1) + '"/>';
+        // --- curseur de lecture
+        svg += '<line class="gcross" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + hZone)
+            + '" stroke="var(--txt-3)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>';
+        series.forEach(function (s, i) {
+            svg += '<circle class="gdot" r="4" fill="' + couleurs[i] + '" stroke="#0F1520" stroke-width="1.6" opacity="0"/>';
+        });
+        svg += '</svg>';
+
+        var legende = '';
+        var avecNom = series.filter(function (s) { return s.nom; });
+        if (avecNom.length) {
+            legende = '<div class="graph-legende">';
+            series.forEach(function (s, i) {
+                if (!s.nom) return;
+                legende += '<span><i style="background:' + couleurs[i] + '"></i>' + h(s.nom) + '</span>';
+            });
+            legende += '</div>';
         }
-        svg += '</g>'
-            + '<path class="aire" d="' + aire + '" fill="url(#degradeAire)"/>'
-            + '<path class="trait" d="' + d + '" style="stroke:' + couleur + '" vector-effect="non-scaling-stroke"/>'
-            + '<circle cx="' + dernier[0].toFixed(2) + '" cy="' + dernier[1].toFixed(2) + '" r="3.4" fill="' + couleur + '"/>'
-            + '</svg>';
-        return svg;
+
+        zone.style.position = 'relative';
+        zone.innerHTML = '<div class="graph-svg">' + svg + '</div>'
+            + '<div class="graph-touch" style="left:' + padL + 'px;top:' + padT + 'px;width:' + w + 'px;height:' + hZone + 'px"></div>'
+            + '<div class="graph-bulle"></div>' + legende;
+
+        var touch = zone.querySelector('.graph-touch');
+        var bulle = zone.querySelector('.graph-bulle');
+        var cross = zone.querySelector('.gcross');
+        var points = Array.prototype.slice.call(zone.querySelectorAll('.gdot'));
+        if (!touch) return;
+
+        function valeur(v) {
+            var dec = options.dec === undefined ? 0 : options.dec;
+            var txt = '<b>' + h(U.usd(v, { dec: dec })) + '</b>';
+            if (options.tauxEurUsd && options.tauxEurUsd > 0) {
+                txt += '<i class="gb-e">' + h(U.eur(v / options.tauxEurUsd, { dec: dec })) + '</i>';
+            }
+            return txt;
+        }
+
+        function afficher(idx) {
+            var cx = px(idx);
+            cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('opacity', '1');
+            var corps = dates ? '<div class="gb-d">' + h(U.jourMoisAnneeISO(dates[idx])) + '</div>' : '';
+            series.forEach(function (s, i) {
+                var v = s.valeurs[idx];
+                if (points[i]) {
+                    points[i].setAttribute('cx', cx);
+                    points[i].setAttribute('cy', py(v));
+                    points[i].setAttribute('opacity', '1');
+                }
+                corps += '<div class="gb-l' + (series.length > 1 ? '">' : ' seule">')
+                    + (series.length > 1 ? '<i style="background:' + couleurs[i] + '"></i><span>' + h(s.nom) + '</span>' : '')
+                    + valeur(v) + '</div>';
+            });
+            bulle.innerHTML = corps;
+            bulle.style.display = 'block';
+            var lb = bulle.offsetWidth || 128;
+            bulle.style.left = Math.max(2, Math.min(largeur - lb - 2, cx - lb / 2)) + 'px';
+            bulle.style.top = '2px';
+        }
+
+        function effacer() {
+            cross.setAttribute('opacity', '0');
+            points.forEach(function (p) { p.setAttribute('opacity', '0'); });
+            bulle.style.display = 'none';
+        }
+
+        var actif = false, x0 = 0, y0 = 0, horizontal = false;
+        function indice(clientX) {
+            var r = touch.getBoundingClientRect();
+            var f = (clientX - r.left) / (r.width || 1);
+            f = Math.max(0, Math.min(1, f));
+            return Math.round(f * (n - 1));
+        }
+        function debut(cx, cy) { actif = true; x0 = cx; y0 = cy; horizontal = false; afficher(indice(cx)); }
+        function mouvement(cx, cy) {
+            if (!actif) return;
+            if (!horizontal) {
+                if (Math.abs(cx - x0) > Math.abs(cy - y0) + 6) horizontal = true;
+                else if (Math.abs(cy - y0) > 12) { actif = false; effacer(); return; }
+            }
+            if (horizontal) afficher(indice(cx));
+        }
+        function fin() { actif = false; horizontal = false; setTimeout(effacer, 2200); }
+
+        touch.addEventListener('touchstart', function (e) {
+            var t = e.touches[0];
+            debut(t.clientX, t.clientY);
+        }, { passive: true });
+        touch.addEventListener('touchmove', function (e) {
+            var t = e.touches[0];
+            if (horizontal) { try { e.preventDefault(); } catch (err) { /* passif */ } }
+            mouvement(t.clientX, t.clientY);
+        }, { passive: false });
+        touch.addEventListener('touchend', fin, { passive: true });
+        touch.addEventListener('touchcancel', fin, { passive: true });
+        touch.addEventListener('mousedown', function (e) { debut(e.clientX, e.clientY); });
+        touch.addEventListener('mousemove', function (e) { mouvement(e.clientX, e.clientY); });
+        touch.addEventListener('mouseleave', fin);
     }
 
     /* Barres empilées de répartition (cible vs réel). */
@@ -254,7 +449,9 @@
         $: $, $$: $$, el: el, h: h, toast: toast,
         montant: montant, fleche: fleche, badge: badge,
         feuille: feuille, confirmer: confirmer, choix: choix,
-        graphique: graphique, repartition: repartition,
+        graphique: graphique, lierGraphiques: lierGraphiques, montantCourt: montantCourt,
+        echelleHaute: echelleHaute,
+        repartition: repartition,
         champ: champ, lire: lire, lireNum: lireNum,
         accordeon: accordeon, lierAccordeons: lierAccordeons
     };

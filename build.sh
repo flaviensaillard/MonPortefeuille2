@@ -17,6 +17,28 @@ ZIPALIGN="$BT/zipalign"
 APKSIGNER="$BT/apksigner"
 ANDROID_JAR="$PLAT/android.jar"
 
+
+# Un ecran oublie ne doit pas disparaitre en silence. Si un module declare
+# dans index.html manque sur le disque, la construction s'arrete : une APK qui
+# perd un onglet sans rien dire est pire qu'une APK qui ne se construit pas.
+WWW="$ROOT/app/src/main/assets/www"
+for f in js/util.js js/models.js js/net.js js/store.js js/metrics.js js/portfolio.js js/rebalance.js js/ui.js js/fiscal.js js/views.js js/ia.js js/app.js; do
+    if [ ! -f "$WWW/$f" ]; then
+        echo "Module manquant : $WWW/$f" >&2
+        exit 1
+    fi
+    if ! grep -q "$f" "$WWW/index.html"; then
+        echo "$f existe mais n est pas charge par index.html" >&2
+        exit 1
+    fi
+done
+for onglet in bord portefeuille performance retraite fiscalite ia; do
+    if ! grep -q "data-onglet=\"$onglet\"" "$WWW/index.html"; then
+        echo "Onglet $onglet absent de la navigation" >&2
+        exit 1
+    fi
+done
+
 APP="$ROOT/app/src/main"
 BUILD="$ROOT/build"
 OUT="$ROOT/dist"

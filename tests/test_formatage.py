@@ -120,6 +120,12 @@ class TestAutresHelpers:
         for valeur in [0, 1.5, -1.5, 1e9, -1e9, float("nan"), float("inf")]:
             assert isinstance(ui.points(valeur), str)
 
+    def test_fleche_pct(self):
+        assert ui.fleche_pct(0.0081) == "↗ +0,81 %"
+        assert ui.fleche_pct(-0.0152) == "↘ -1,52 %"
+        assert ui.fleche_pct(0.0) == "→ 0,00 %"
+        assert ui.fleche_pct(None) == "—"
+
 
 class TestFormatSpecifiers:
     """Garde-fou contre la réapparition du défaut.

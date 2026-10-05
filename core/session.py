@@ -72,6 +72,7 @@ class Contexte:
     anomalies_transactions: list[str] = field(default_factory=list)
     allocation_cfg: dict = field(default_factory=allocation_par_defaut)
     etat_allocation: dict = field(default_factory=verifier_allocation_cible)
+    variations_actifs: dict[str, float] = field(default_factory=dict)
     # Date du dernier import, lue dans `cree_le`. Sert a voir d'un coup
     # d'oeil si l'application regarde des donnees fraiches : un serveur qui
     # tourne sur une vieille version du code affiche une date anterieure au
@@ -385,6 +386,25 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
 
     # --- Liquidités hors transactions (CHF, CNY, USD de la table Donnees v1) ---
     _completer_liquidites_v1(ctx, aujourdhui_iso)
+
+    # --- Variations de chaque actif depuis le dernier enregistrement ---
+    try:
+        vars_v1 = db.variations_donnees_v1() if hasattr(db, "variations_donnees_v1") else {}
+    except Exception:
+        vars_v1 = {}
+    for a in ctx.actifs:
+        v_rec = a.variation_pct
+        if v_rec is None and hasattr(prices, "variation_recente"):
+            v_rec = prices.variation_recente(a.ticker)
+        info_v1 = vars_v1.get(a.ticker.upper(), {})
+        if (v_rec is None or abs(v_rec) <= 1e-6) and info_v1:
+            c_enreg = info_v1.get("cours_usd")
+            if c_enreg and c_enreg > 0 and a.devise_cotation == "USD" and a.prix > 0 and abs(a.prix - c_enreg) > 1e-4:
+                v_rec = (a.prix / c_enreg) - 1.0
+            elif info_v1.get("var_fraction") is not None:
+                v_rec = info_v1.get("var_fraction")
+        a.variation_pct = v_rec if v_rec is not None else 0.0
+        ctx.variations_actifs[a.ticker] = a.variation_pct
 
     # --- Agrégation par poche, sur le patrimoine INVESTI seulement ---
     perimetres_eur: dict[str, float] = {p.value: 0.0 for p in Perimetre}

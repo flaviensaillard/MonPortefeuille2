@@ -19,8 +19,9 @@ from core import ui
 from core.models import POCHES_PAR_CLE
 from core.portfolio import devise_cotation_de
 
-if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "_NAV_V2"):
+if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(models, "bande_actif") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "fleche_pct") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(models)
+    importlib.reload(prices)
     importlib.reload(db)
     importlib.reload(metrics)
     importlib.reload(rebalance)
@@ -90,6 +91,8 @@ with tab_actifs:
                 "Qté": ui.quantite(a.quantite),
                 "Cours": f"{a.prix:,.4f}".replace(",", " "),
                 "Devise": a.devise_cotation,
+                "Depuis dernier enreg.": ui.fleche_pct(a.variation_pct)
+                if a.est_investi else "—",
                 "Valeur ($ / €)": ui.usd_eur(val_u, a.valeur_eur),
                 "Poids (investi)": ui.pct(val_u / ctx.total_investi_usd)
                 if ctx.total_investi_usd > 0 and a.est_investi else "—",

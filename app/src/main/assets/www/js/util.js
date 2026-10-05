@@ -39,14 +39,43 @@
         opts = opts || {};
         var d = opts.dec === undefined ? 2 : opts.dec;
         var s = opts.signe ? signe(x) : '';
-        return s + nombre(x, d) + ' $';
+        return s + nombre(opts.signe ? Math.abs(x) : x, d) + ' $';
     }
 
     function eur(x, opts) {
         opts = opts || {};
         var d = opts.dec === undefined ? 2 : opts.dec;
         var s = opts.signe ? signe(x) : '';
-        return s + nombre(x, d) + ' €';
+        return s + nombre(opts.signe ? Math.abs(x) : x, d) + ' €';
+    }
+
+    /* Deux fonctions, deux métiers : on ne convertit une unité qu'une seule
+       fois, et jamais au même endroit deux fois. */
+
+    /* Taux déjà exprimé en taux (0,017 pour 1,7 %) — un réglage saisi à la
+       main. Un entier tapé « 2 » pour 2 % est compris ; une valeur qui ne peut
+       pas être une inflation annuelle française est écartée : mieux vaut 2 %
+       par défaut, annoncé, qu'une rente calculée sur 94 %. */
+    function tauxPlausible(x) {
+        if (!estNombre(x)) return null;
+        var t = x;
+        if (Math.abs(t) >= 1) t = t / 100;      // « 2 » pour 2 %
+        if (t > 0.15 || t < -0.02) return null; // hors de ce qu'a connu la France
+        return t;
+    }
+
+    /* Lecture de la table `pf2_inflation`, partagée avec l'application
+       Streamlit : la v2 y stocke un POURCENTAGE et divise par 100 à la lecture
+       (1,7 pour 1,7 %). L'application Android lisait la même colonne sans la
+       diviser : 0,944 s'affichait « 94,4 % ». On reprend la convention de la
+       v2, avec un rattrapage pour les lignes saisies directement en taux
+       (0,017), et on écarte ce qui n'est manifestement pas un taux annuel. */
+    function inflationDepuisTable(v) {
+        if (!estNombre(v)) return null;
+        var t = v / 100;
+        if (Math.abs(v) < 0.05) t = v;          // déjà un taux, saisi à la main
+        if (t > 0.15 || t < -0.02) return null;
+        return t;
     }
 
     function pct(x, dec) {
@@ -175,14 +204,23 @@
 
     function vider(obj) { for (var k in obj) if (obj.hasOwnProperty(k)) delete obj[k]; }
 
+    /* Un réglage peut arriver d'un <select> (chaîne « true » / « false »),
+       de la table Config (idem) ou du code (booléen). */
+    function estVrai(v) {
+        if (v === true || v === 1) return true;
+        var s = String(v === null || v === undefined ? '' : v).trim().toLowerCase();
+        return s === 'true' || s === '1' || s === 'oui' || s === 'yes';
+    }
+
     PF.util = {
         estNombre: estNombre, num: num, nombre: nombre, signe: signe,
         usd: usd, eur: eur, pct: pct, pctSigne: pctSigne, points: points,
+        tauxPlausible: tauxPlausible, inflationDepuisTable: inflationDepuisTable,
         quantite: quantite, fleche: fleche, flecheTexte: flecheTexte,
         parseDate: parseDate, iso: iso, todayISO: todayISO, jourMois: jourMois,
         jourMoisAnnee: jourMoisAnnee, jourMoisAnneeISO: jourMoisAnneeISO,
         diffJours: diffJours, ajouterJours: ajouterJours,
         arrondi: arrondi, echapper: echapper, debounce: debounce, clone: clone,
-        somme: somme, vider: vider, SEUIL_STABLE: SEUIL_STABLE
+        somme: somme, vider: vider, estVrai: estVrai, SEUIL_STABLE: SEUIL_STABLE
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
