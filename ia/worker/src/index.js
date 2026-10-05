@@ -28,7 +28,7 @@ export default {
   const p=new URL(req.url).pathname.replace(/\/+$/,'')||'/';
   try {
    if(p==='/sante') return rep(await sante(env));
-   if(p==='/admin/etat') return rep(await etatCorpus(env));
+   if(p==='/admin/etat') return rep(await etatCorpus(env,true));
    if(req.method!=='POST') return rep({erreur:'Méthode non autorisée'},405);
    const b=await req.json().catch(()=>({}));
    if(p==='/discussion') {
@@ -43,15 +43,35 @@ export default {
     if(!okCle(b.admin||req.headers.get('x-cle-admin'),env.CLE_ADMIN))return rep({erreur:'Clé admin invalide'},401);
     return rep(await indexer(b,env));
    }
+   if(p==='/admin/presents') {
+    if(!okCle(b.admin||req.headers.get('x-cle-admin'),env.CLE_ADMIN))return rep({erreur:'Clé admin invalide'},401);
+    return rep(await presents(b,env));
+   }
    return rep({erreur:'Route inconnue'},404);
   } catch(e){return rep({erreur:String(e.message||e)},500);}
  }
 };
 
-async function etatCorpus(env){
- if(env.CACHE){const x=await env.CACHE.get('corpus:etat');if(x)try{return JSON.parse(x)}catch(e){}}
- let passages=null;try{passages=(await env.VECTORIZE.describe()).vectorCount}catch(e){}
- return {passages,majLe:null,sources:[]};
+async function etatCorpus(env,vrai=false){
+ let e=null;
+ if(env.CACHE){const x=await env.CACHE.get('corpus:etat');if(x)try{e=JSON.parse(x)}catch(err){}}
+ if(!e)e={passages:null,majLe:null,sources:[]};
+ // Le compte réel vient de Vectorize : d'office si le cache ne dit rien, et sur
+ // demande (`vrai`, c'est-à-dire /admin/etat). Le compte du cache peut mentir :
+ // un même passage envoyé deux fois n'est stocké qu'une fois.
+ if(vrai||e.passages===null){const n=await compterVecteurs(env,vrai?3:1);if(n!==null){e.vecteurs=n;if(e.passages===null)e.passages=n;}}
+ return e;
+}
+// Le compte réel de l'index, lu après coup : les écritures Vectorize sont
+// asynchrones, le premier chiffre peut donc être en retard de quelques secondes.
+async function compterVecteurs(env,essais=3,minimum=0){
+ let n=null;
+ for(let i=0;i<essais;i++){
+  try{const d=await env.VECTORIZE.describe();if(typeof d.vectorCount==='number')n=n===null?d.vectorCount:Math.max(n,d.vectorCount);}catch(e){}
+  if(n!==null&&n>=minimum)break; // un chiffre plausible suffit : on ne réessaie que s'il est en retard
+  if(i<essais-1)await new Promise(r=>setTimeout(r,1000));
+ }
+ return n;
 }
 async function sauverEtat(env,e){if(env.CACHE)await env.CACHE.put('corpus:etat',JSON.stringify(e));}
 async function sante(env){return {ok:true,corpus:await etatCorpus(env),branchements:{supabase:!!(env.SUPABASE_URL&&env.SUPABASE_CLE),github:!!env.GITHUB_DEPOT,vectorize:!!env.VECTORIZE,ia:!!env.AI}};}
@@ -95,13 +115,40 @@ function verifier(texte,passages,contexte){
 async function indexer(b,env){
  const chunks=b.chunks||b.morceaux||[];if(!chunks.length)throw Error('Aucun passage à indexer');
  const lot=chunks.slice(0,Math.min(Number(b.limite||chunks.length),200));
- const e=await env.AI.run(env.MODELE_EMBEDDING||EMBEDDING,{text:lot.map(c=>String(c.texte||'').slice(0,1200))});
- const vec=lot.map((c,i)=>({id:c.id,values:e.data[i],metadata:{titre:c.titre||'',source:c.source||'',date:c.date||'',url:c.url||'',type:c.type||'',texte:String(c.texte||'').slice(0,4000)}}));
- for(let i=0;i<vec.length;i+=100)await env.VECTORIZE.insert(vec.slice(i,i+100));
- const ancien=await etatCorpus(env),sources=new Set(ancien.sources||[]);lot.forEach(c=>c.source&&sources.add(c.source));
- const etat={passages:(ancien.passages||0)+vec.length,majLe:new Date().toISOString(),sources:[...sources].slice(0,50)};await sauverEtat(env,etat);
- return {ok:true,inseres:vec.length,restants:chunks.length-vec.length,corpus:etat};
+ // Un identifiant ne doit apparaître qu'une fois dans la requête d'embedding,
+ // sinon le vecteur est calculé deux fois pour rien (les neurons sont comptés).
+ const vus=new Set(),propre=lot.filter(c=>{const id=String(c.id||'');if(!id||vus.has(id))return false;vus.add(id);return true;});
+ if(!propre.length)throw Error('Aucun identifiant exploitable dans ce lot');
+ const e=await env.AI.run(env.MODELE_EMBEDDING||EMBEDDING,{text:propre.map(c=>String(c.texte||'').slice(0,1200))});
+ const vec=propre.map((c,i)=>({id:String(c.id),values:e.data[i],metadata:{titre:c.titre||'',source:c.source||'',date:c.date||'',url:c.url||'',type:c.type||'',texte:String(c.texte||'').slice(0,4000)}}));
+ // upsert et non insert : réenvoyer un passage déjà présent le remplace au lieu
+ // d'être silencieusement ignoré, donc les comptes ne mentent plus.
+ for(let i=0;i<vec.length;i+=100)await env.VECTORIZE.upsert(vec.slice(i,i+100));
+ const ancien=await etatCorpus(env),sources=new Set(ancien.sources||[]);propre.forEach(c=>c.source&&sources.add(c.source));
+ // Le compte vient de l'index lui-même, jamais d'une addition : un passage
+ // réenvoyé ne doit pas gonfler le total affiché dans l'application.
+ const vecteurs=await compterVecteurs(env,3,Number(ancien.passages||ancien.vecteurs||0));
+ const etat={passages:vecteurs===null?(ancien.passages||0)+vec.length:vecteurs,vecteurs,majLe:new Date().toISOString(),sources:[...sources].slice(0,50)};
+ await sauverEtat(env,etat);
+ return {ok:true,inseres:vec.length,ignores:lot.length-propre.length,restants:Math.max(0,chunks.length-vec.length),corpus:etat};
 }
+
+// Quels passages sont déjà dans l'index ? Route gratuite : elle lit l'index et
+// ne fait tourner aucun modèle. Elle permet à l'indexeur de ne jamais dépenser
+// deux fois les mêmes neurons, même si son point de reprise a été perdu.
+async function presents(b,env){
+ const ids=(Array.isArray(b.ids)?b.ids:[]).map(String).filter(Boolean).slice(0,500);
+ if(!ids.length)return {presents:[]};
+ const trouves=[];
+ for(let i=0;i<ids.length;i+=20){
+  try{
+   const r=await env.VECTORIZE.getByIds(ids.slice(i,i+20));
+   (r||[]).forEach(v=>{const id=typeof v==='string'?v:(v&&v.id);if(id)trouves.push(String(id));});
+  }catch(e){}
+ }
+ return {presents:trouves,demandes:ids.length};
+}
+
 
 // La clé Supabase reste secrète dans Cloudflare. Seuls des agrégats quittent le Worker.
 async function lireSupabase(env){

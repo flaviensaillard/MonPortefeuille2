@@ -11,6 +11,21 @@
 
 Pour tout importer : `python3 scripts/importer_corpus_local.py` (sans option).
 
+## Suivre l'indexation
+
+L'indexation se fait par tranches, sur plusieurs jours, à cause du quota gratuit
+de Cloudflare (10 000 neurons par jour, ≈ 2 neurons par passage) :
+
+```bash
+python3 ia/scripts/indexer.py --etat            # ce que l'index contient vraiment
+python3 ia/scripts/indexer.py --tranche 3000    # indexer la tranche du jour
+```
+
+Le point de reprise vit dans `ia/corpus/.indexation.json`. Il est enregistré
+après chaque lot, et le workflow le commite même si l'indexation a échoué ou été
+interrompue. Si ce fichier disparaît, rien n'est perdu : l'indexeur demande au
+service quels passages il connaît déjà et reprend exactement là où il faut.
+
 ## Ce qu'on n'y met pas
 
 - **Un livre entier.** Droit d'auteur. Une citation courte et sourcée, oui ; un

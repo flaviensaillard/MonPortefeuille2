@@ -1,7 +1,28 @@
-name: Indexation initiale — lancer chaque jour jusqu'à 0 restant
+name: Indexation initiale — relancer chaque jour jusqu'à 0 restant
+
+# Ce qu'il faut savoir avant de cliquer :
+#  - le quota gratuit de Cloudflare Workers AI est de 10 000 neurons par jour
+#    (remis à zéro à 00:00 UTC), partagés avec les questions posées à l'application ;
+#  - un passage du corpus coûte ≈ 2 neurons : une tranche de 3 000 passages
+#    coûte ≈ 5 500 neurons, une tranche de 5 000 en coûte ≈ 9 300 (quasi tout le quota) ;
+#  - si le quota tombe en cours de route, le script s'arrête proprement et le point
+#    de reprise est enregistré : relancez simplement le lendemain ;
+#  - ne pas annuler une exécution : même si le point de reprise est perdu, la
+#    reprise est automatique (le script demande au service ce qu'il connaît déjà).
 
 on:
   workflow_dispatch:
+    inputs:
+      tranche:
+        description: "Passages à indexer dans cette exécution (≈2 neurons par passage, quota 10 000/jour)"
+        type: number
+        default: 3000
+
+# Deux clics ne doivent pas lancer deux indexations en parallèle : la seconde
+# attendrait sans rien apporter, et les deux se partageraient le quota.
+concurrency:
+  group: ia-indexation
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -15,15 +36,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Indexer jusqu'à 1 800 nouveaux passages
+      - name: Où en est l'index ?
         env:
           UDE_URL: ${{ secrets.UDE_URL }}
           UDE_CLE_ADMIN: ${{ secrets.UDE_CLE_ADMIN }}
-        run: python ia/scripts/indexer.py --tranche 1800 --taille 50
-      - name: Sauvegarder la liste des passages déjà indexés
+        run: python ia/scripts/indexer.py --etat
+      - name: Indexer une tranche
+        env:
+          UDE_URL: ${{ secrets.UDE_URL }}
+          UDE_CLE_ADMIN: ${{ secrets.UDE_CLE_ADMIN }}
+        run: python ia/scripts/indexer.py --tranche ${{ inputs.tranche || 3000 }} --taille 50
+      - name: Sauvegarder le point de reprise — même si l'indexation a échoué ou été interrompue
+        if: always()
         run: |
           git config user.name "ude-corpus-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -f ia/corpus/.indexation.json
           git diff --cached --quiet || git commit -m "Indexation : point de reprise"
           git push
+      - name: Résumé
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          etat = pathlib.Path("ia/corpus/.indexation.json")
+          total = sum(1 for l in open("ia/corpus/chunks.jsonl", encoding="utf-8") if l.strip())
+          fait = json.loads(etat.read_text())["total"] if etat.exists() else 0
+          print(f"### Corpus indexé : {fait} / {total} passages")
+          print()
+          if fait >= total:
+              print("Tout est indexé. Cette action n'a plus besoin d'être relancée.")
+          else:
+              print(f"Restants : {total - fait}. Relancez cette action **demain** : le quota gratuit plafonne à 10 000 neurons par jour.")
+          PY
