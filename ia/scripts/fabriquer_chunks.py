@@ -121,7 +121,8 @@ def principal():
                 ecrits += 1
 
     print(f"✔ {len(docs)} documents → {ecrits} passages dans {os.path.relpath(SORTIE, RACINE)}")
-    print(f"  Poids estimé en neurones pour l'indexation : environ {ecrits * 2} pour 1 000 passages.")
+    print(f"  Poids estimé pour l'indexation : environ {ecrits * 2} neurons (2 par passage),")
+    print(f"  soit environ {max(1, round(ecrits * 2 / 10000, 1))} jour(s) de quota gratuit (10 000 neurons/jour).")
     return 0
 
 

@@ -22,3 +22,8 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - name: Lancer les tests
         run: python -m pytest tests/ -v
+      # Les règles du service IA (phrase imposée sans passage, citation des
+      # sources, indexation sans doublon) se testent en JavaScript, avec un
+      # faux Cloudflare : aucun appel réseau réel.
+      - name: Vérifier le service IA
+        run: node ia/tests/test_worker.mjs

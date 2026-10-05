@@ -50,6 +50,7 @@ Votre téléphone (APK)          ou          Streamlit
 | `POST /discussion` | l'APK, Streamlit | cherche, puis répond |
 | `GET /sante` | les deux | dit si le service vit et combien de passages il connaît |
 | `POST /admin/indexation` | vos scripts | écrit les passages dans l'index |
+| `POST /admin/presents` | vos scripts | dit lesquels de ces passages sont déjà indexés (aucun neuron dépensé) |
 | `GET /admin/etat` | vous | nombre de vecteurs, date de dernière indexation |
 | `POST /admin/mise-a-jour` | le bouton « ⟳ Corpus » | relance la tâche GitHub |
 
