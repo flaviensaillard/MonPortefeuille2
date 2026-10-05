@@ -53,7 +53,7 @@ MOTS_QUOTA = ("quota", "neuron", "rate limit", "429", "exceeded", "capacity", "t
 def appel(url, route, corps, cle, methode="POST", timeout=300):
     """Un appel HTTP JSON au service, erreurs comprises."""
     donnees = json.dumps(corps).encode() if corps is not None else None
-    entetes = {"content-type": "application/json", "x-cle-admin": cle}
+    entetes = {"content-type": "application/json", "x-cle-admin": cle, "User-Agent": "MonPortefeuille-indexer/1.0"}
     requete = urllib.request.Request(url + route, data=donnees, headers=entetes, method=methode)
     with urllib.request.urlopen(requete, timeout=timeout) as reponse:
         return json.loads(reponse.read() or b"{}")
