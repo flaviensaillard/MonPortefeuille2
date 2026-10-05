@@ -11,7 +11,7 @@ binding = "AI"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "A_REMPLACER_PAR_ID_KV"
+id = "5e261300b9d84f20b8b861b0849d9d00"
 
 [vars]
 MODELE_GENERATION = "@cf/meta/llama-3.1-8b-instruct"
