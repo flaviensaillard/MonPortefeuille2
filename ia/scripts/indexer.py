@@ -69,7 +69,7 @@ def lire_passages():
         print(f"ERREUR : {CHUNKS} est introuvable. Lancez fabriquer_chunks.py d'abord.")
         return None
     vus, passages = set(), []
-    for ligne in CHUNKS.read_text(encoding="utf-8").splitlines():
+    for ligne in CHUNKS.read_text(encoding="utf-8").split("\n"):
         if not ligne.strip():
             continue
         passage = json.loads(ligne)
