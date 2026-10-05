@@ -2,6 +2,9 @@
 
 Le guide complet pour débutant est livré séparément : `GUIDE-DEPLOIEMENT-IA-DEBUTANT.html`.
 
+Pour l'indexation initiale du corpus — clic par clic, jour par jour — voir
+`GUIDE-INDEXATION-PAS-A-PAS.md` à la racine du dépôt.
+
 ## Fonctions
 
 - Recherche dans le corpus Vectorize, réponse Workers AI.

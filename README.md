@@ -10,6 +10,16 @@ la finance de marché.
 
 ---
 
+### Guides pas à pas (aucune connaissance technique requise)
+
+| Guide | Pour quoi |
+|---|---|
+| **`GUIDE-INDEXATION-PAS-A-PAS.md`** | Mettre le corpus dans l'IA et suivre l'avancement, jour par jour |
+| `INSTALLATION-IA-EN-LIGNE.md` | Brancher le service IA (Cloudflare, clés, application) |
+| `QUOI-FAIRE.md` | Ce qui reste à décider ou à vérifier sur les données |
+
+---
+
 ## Ce qui change par rapport à la v1
 
 La v1 fonctionnait, mais six défauts faussaient ses résultats. Ils sont tous

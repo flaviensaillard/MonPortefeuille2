@@ -30,13 +30,17 @@ permissions:
 jobs:
   indexer:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Large : une tranche de 3 000 passages = 60 requêtes. Mieux vaut une marge
+    # qu'un job tué par le délai, car un job tué n'exécute pas l'étape qui
+    # enregistre le point de reprise.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Où en est l'index ?
+      - name: Où en est l'index ? (simple diagnostic, jamais bloquant)
+        continue-on-error: true
         env:
           UDE_URL: ${{ secrets.UDE_URL }}
           UDE_CLE_ADMIN: ${{ secrets.UDE_CLE_ADMIN }}
