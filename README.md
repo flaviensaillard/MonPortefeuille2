@@ -1,6 +1,6 @@
 # MonPortefeuille 2
 
-Application de suivi de portefeuille, construite sur les mêmes bases que la v1 —
+Application de suivi de portefeuille construite sur les mêmes bases que la v1 —
 **Streamlit, Supabase, GitHub Actions** — avec la mécanique de calcul corrigée et
 les tâches répétitives automatisées.
 
