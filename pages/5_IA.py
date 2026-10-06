@@ -67,7 +67,11 @@ def requete(route: str, corps: dict | None = None) -> dict:
     req = urllib.request.Request(
         URL + route,
         data=data,
-        headers={"content-type": "application/json", "x-cle-service": CLE},
+        headers={
+            "content-type": "application/json",
+            "x-cle-service": CLE,
+            "User-Agent": "MonPortefeuille-streamlit/1.0 (+https://github.com/flaviensaillard/MonPortefeuille2)",
+        },
         method="POST",
     )
     try:
