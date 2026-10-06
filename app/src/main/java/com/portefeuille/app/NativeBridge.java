@@ -257,6 +257,13 @@ public class NativeBridge {
                         moyennePrecedente = moyenne;
                     }
                     out.put("ok", annees.length() > 0);
+                    if (annees.length() == 0) {
+                        /* Dire POURQUOI, au lieu du message fourre-tout « source
+                           injoignable » : ici le fichier est bien arrivé, c'est
+                           la lecture qui n'a rien donné. */
+                        out.put("erreur", "fichier reçu (" + zip.length
+                                + " octets) mais aucune année lisible");
+                    }
                 } catch (Exception e) {
                     Log.w(TAG, "INSEE : " + e.getMessage());
                     try {
@@ -330,7 +337,21 @@ public class NativeBridge {
             List<String[]> lignesUtiles = new ArrayList<>();
             while ((ligne = lecteur.readLine()) != null) {
                 String[] c = ligne.split(";", -1);
-                if (c.length < entetes.length) continue;
+                /* Une ligne qui a moins de champs que l'en-tête n'est PAS une
+                   ligne à jeter : certains fichiers INSEE terminent l'en-tête
+                   par un « ; », ce qui lui donne un champ de plus qu'aux lignes
+                   de données. L'ancien test les écartait TOUTES, l'import ne
+                   trouvait aucune année, et l'application annonçait « source
+                   injoignable » alors que le fichier était arrivé entier.
+                   On complète la ligne par des champs vides : chaque colonne
+                   garde ainsi sa position. */
+                if (c.length < entetes.length) {
+                    String[] complet = new String[entetes.length];
+                    for (int k = 0; k < entetes.length; k++) {
+                        complet[k] = k < c.length ? c[k] : "";
+                    }
+                    c = complet;
+                }
                 if (iInd >= 0 && !"IX".equals(nettoyer(c[iInd]))) continue;
                 if (iGeo >= 0 && !"F".equals(nettoyer(c[iGeo]))) continue;
                 if (iProd >= 0 && !"_Z".equals(nettoyer(c[iProd]))) continue;
