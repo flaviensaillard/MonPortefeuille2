@@ -1,10 +1,19 @@
 """Assistant Université de l'Épargne — même service que l'application Android.
 
+Le service ne se contente plus de citer le corpus : il l'ANALYSE, le confronte
+aux agrégats du portefeuille et à des informations extérieures qu'il va chercher
+sur le web, puis replace la réponse dans l'horizon de long terme du porteur
+(départ à la retraite, 2055 par défaut).
+
 Les clés restent dans les secrets Streamlit. Le service reçoit uniquement des
-agrégats du portefeuille, jamais les identifiants Supabase ni les écritures.
+agrégats du portefeuille, jamais les identifiants Supabase ni les écritures. La
+question, elle, part chez le moteur de recherche extérieur : les montants en sont
+retirés par le service avant l'envoi, et la case ci-dessous permet de tout
+couper.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import urllib.error
 import urllib.request
@@ -18,9 +27,9 @@ st.set_page_config(page_title="IA", page_icon="◈", layout="wide")
 ui.styliser_navigation()
 st.title("◈ Université de l’Épargne — IA")
 st.caption(
-    "Assistant documenté par le corpus. S’il ne trouve pas la réponse, il écrit : "
-    "« Le corpus ne le dit pas, mais selon mon interprétation: … ». "
-    "Cette partie donne une idée : ce n’est ni une citation ni une source fiable."
+    "L’assistant répond en trois temps : « Selon le corpus, … », puis « En me basant sur tes "
+    "données, sur le corpus et sur les informations extérieures que j’ai trouvées, … », puis ce "
+    "qui dépend de toi. Chaque réponse est jugée à l’aune de ton horizon de long terme."
 )
 
 
@@ -82,6 +91,38 @@ def requete(route: str, corps: dict | None = None) -> dict:
         raise RuntimeError(f"Service IA : HTTP {e.code} — {detail}") from e
 
 
+def nombre_secret(nom: str, defaut):
+    """Un réglage facultatif dans les secrets Streamlit, sinon la valeur par défaut."""
+    brut = secret(nom)
+    if not brut:
+        return defaut
+    try:
+        return int(float(brut))
+    except ValueError:
+        return defaut
+
+
+# L’horizon part avec chaque question. Il vient des secrets s’ils existent
+# (`IA_HORIZON_ANNEE`), sinon de la configuration de l’application : la même
+# valeur que la page Retraite, pour que les deux écrans ne divergent jamais.
+from core import config as _config
+
+ANNEE_DEPART = nombre_secret("IA_HORIZON_ANNEE", _config.DEFAUTS.annee_depart_retraite)
+OBJECTIF = secret("IA_OBJECTIF") or (
+    f"préparer la retraite : disposer à partir de {ANNEE_DEPART} d’un capital qui verse "
+    "un revenu réel, sans entamer le pouvoir d’achat"
+)
+
+
+def horizon() -> dict:
+    annee_courante = dt.date.today().year
+    return {
+        "anneeDepartRetraite": ANNEE_DEPART,
+        "anneesRestantes": max(0, ANNEE_DEPART - annee_courante),
+        "objectif": OBJECTIF,
+    }
+
+
 def agregats(ctx) -> dict:
     investi = float(ctx.total_investi_eur or 0)
     poches = []
@@ -102,6 +143,7 @@ def agregats(ctx) -> dict:
         except Exception:
             pass
     return {
+        "horizon": horizon(),
         "uniteDeCompte": "EUR",
         "datePremierEnregistrement": premiere,
         "patrimoineTotal": round(float(ctx.patrimoine_total_eur or 0)),
@@ -141,9 +183,23 @@ try:
 except Exception as exc:
     st.error(f"Service IA inaccessible : {exc}")
 
-joindre = st.checkbox(
-    "Joindre mes agrégats de portefeuille", value=True,
-    help="Capital, poids des poches, CAGR et concentrations. Aucun identifiant ni détail fiscal.",
+colonne_gauche, colonne_droite = st.columns(2)
+with colonne_gauche:
+    joindre = st.checkbox(
+        "Joindre mes agrégats de portefeuille", value=True,
+        help="Capital, poids des poches, CAGR et concentrations. Aucun identifiant ni détail fiscal.",
+    )
+with colonne_droite:
+    internet = st.checkbox(
+        "Autoriser la recherche extérieure", value=True,
+        help="L’assistant complète le corpus par des sources trouvées sur le web. "
+             "Les montants sont retirés de la recherche avant l’envoi ; la question, elle, part "
+             "chez le moteur. Décochez pour que rien ne sorte.",
+    )
+
+st.caption(
+    f"Horizon transmis à l’assistant : départ à la retraite en {ANNEE_DEPART} "
+    f"({horizon()['anneesRestantes']} ans)."
 )
 
 if "ude_messages" not in st.session_state:
@@ -158,12 +214,32 @@ for m in st.session_state.ude_messages:
                 titre = source.get("titre") or "Source"
                 url = source.get("url") or ""
                 st.markdown(f"- [{titre}]({url})" if url else f"- {titre}")
+        for source in (m.get("sourcesExternes") or []):
+            titre = source.get("titre") or source.get("domaine") or "Source extérieure"
+            url = source.get("url") or ""
+            numero = source.get("numero") or "E"
+            st.markdown(f"- **[{numero}]** " + (f"[{titre}]({url})" if url else titre))
+        if m.get("internet", {}).get("note"):
+            st.caption("Recherche extérieure — " + str(m["internet"]["note"]))
+        elif m.get("internet", {}).get("utilise"):
+            st.caption(
+                f"Recherche extérieure : {m['internet'].get('resultats', 0)} résultat(s), "
+                f"{m['internet'].get('pagesLues', 0)} page(s) lue(s)"
+                + (f" · moteur : {m['internet']['moteur']}" if m["internet"].get("moteur") else "")
+            )
         if m.get("interpretation"):
-            st.warning("Interprétation du modèle : elle donne une idée, mais ce n’est pas une source fiable.")
-        if m.get("verification", {}).get("note"):
-            st.error("Filet anti-invention — " + m["verification"]["note"])
-        elif m.get("verification", {}).get("verifie"):
-            st.caption("✓ Chiffres retrouvés dans les sources ou dans vos agrégats.")
+            st.warning(
+                "Ni le corpus ni l’extérieur n’ont de passage sur ce point : ce qui précède est "
+                "une interprétation du modèle, pas une source."
+            )
+        note = (m.get("verification") or {}).get("note")
+        if note:
+            if (m.get("verification") or {}).get("gravite") == "info":
+                st.caption("Chiffres extérieurs — " + note)
+            else:
+                st.error("Filet anti-invention — " + note)
+        elif (m.get("verification") or {}).get("verifie"):
+            st.caption("✓ Chiffres retrouvés dans le corpus, dans les sources extérieures ou dans vos agrégats.")
 
 question = st.chat_input("Posez votre question…")
 if question:
@@ -176,22 +252,52 @@ if question:
                 resultat = requete("/discussion", {
                     "question": question,
                     "contexte": agregats(ctx) if joindre else None,
+                    "horizon": horizon(),
+                    "web": bool(internet),
                 })
                 texte = resultat.get("reponse", "Réponse vide.")
                 st.markdown(texte)
                 if resultat.get("interpretation"):
-                    st.warning("Interprétation du modèle : elle donne une idée, mais ce n’est pas une source fiable.")
-                if (resultat.get("verification") or {}).get("note"):
-                    st.error("Filet anti-invention — " + resultat["verification"]["note"])
+                    st.warning(
+                        "Ni le corpus ni l’extérieur n’ont de passage sur ce point : ce qui "
+                        "précède est une interprétation du modèle, pas une source."
+                    )
                 sources = resultat.get("sources") or []
                 if sources:
                     st.markdown("**Sources du corpus :**")
                     for source in sources:
                         titre, url = source.get("titre") or "Source", source.get("url") or ""
                         st.markdown(f"- [{titre}]({url})" if url else f"- {titre}")
+                externes = resultat.get("sourcesExternes") or []
+                if externes:
+                    st.markdown("**Sources extérieures (hors corpus) :**")
+                    for source in externes:
+                        titre = source.get("titre") or source.get("domaine") or "Source extérieure"
+                        url = source.get("url") or ""
+                        numero = source.get("numero") or "E"
+                        date = source.get("date") or ""
+                        libelle = titre + (f" · {date}" if date else "")
+                        st.markdown(f"- **[{numero}]** " + (f"[{libelle}]({url})" if url else libelle))
+                infos = resultat.get("internet") or {}
+                if infos.get("note"):
+                    st.caption("Recherche extérieure — " + str(infos["note"]))
+                elif infos.get("utilise"):
+                    st.caption(
+                        f"Recherche extérieure : {infos.get('resultats', 0)} résultat(s), "
+                        f"{infos.get('pagesLues', 0)} page(s) lue(s)"
+                        + (f" · moteur : {infos['moteur']}" if infos.get("moteur") else "")
+                    )
+                note = (resultat.get("verification") or {}).get("note")
+                if note:
+                    if (resultat.get("verification") or {}).get("gravite") == "info":
+                        st.caption("Chiffres extérieurs — " + note)
+                    else:
+                        st.error("Filet anti-invention — " + note)
                 st.session_state.ude_messages.append({
                     "role": "assistant", "contenu": texte,
                     "sources": sources,
+                    "sourcesExternes": externes,
+                    "internet": infos,
                     "interpretation": resultat.get("interpretation", False),
                     "verification": resultat.get("verification") or {},
                 })
