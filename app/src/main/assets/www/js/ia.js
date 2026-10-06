@@ -1,15 +1,19 @@
 /* Onglet « IA » — Université de l'Épargne.
-   Une fenêtre de discussion posée sur VOTRE corpus, pas sur l'opinion d'un
-   modèle. Trois principes tiennent le code autant que les réponses :
+   Une fenêtre de discussion qui ANALYSE : le corpus, vos données, et les
+   informations extérieures que le service est allé chercher. Trois principes
+   tiennent le code autant que les réponses :
 
-   1. RIEN DE CE QUI EST AFFICHÉ N'EST INVENTÉ ICI. Le texte vient du service,
-      qui ne répond qu'à partir des passages retrouvés dans le corpus. Si le
-      corpus n'a rien, le service le dit, et l'application affiche ce refus
-      tel quel — jamais « aucune réponse » ni un message rassurant.
+   1. RIEN DE CE QUI EST AFFICHÉ N'EST INVENTÉ ICI. Le texte vient du service :
+      ce qui vient du corpus est numéroté [1], [2] et affiché sous la réponse ;
+      ce qui vient du web est numéroté [E1], [E2] et affiché sous la réponse
+      aussi. Le service doit répondre dans la forme imposée — « Selon le
+      corpus, … », puis « En me basant sur tes données, sur le corpus et sur les
+      informations extérieures que j'ai trouvées, … » — et il se corrige tout
+      seul quand le modèle l'oublie.
 
-   2. LES SOURCES SONT AFFICHÉES AVEC LA RÉPONSE. Une affirmation non sourcée
-      n'a pas de valeur ; chaque réponse porte ses passages, et chacun
-      s'ouvre dans le navigateur.
+   2. L'HORIZON EST ENVOYÉ AVEC CHAQUE QUESTION. Départ à la retraite en 2055
+      (le réglage du porteur) : le service juge chaque situation à cette aune,
+      et non au rythme du mois qui passe.
 
    3. AUCUNE CLÉ DANS L'APPLICATION. L'adresse et la clé du service sont
       saisies par vous, une fois, et rangées dans les réglages locaux du
@@ -28,15 +32,31 @@
     var erreur = null;
     var etatService = null;     // réponse de /sante : modèle, nombre de passages
     var contexteActif = true;   // joindre les agrégats du portefeuille
+    var internetActif = true;   // autoriser la recherche extérieure
     var questionEnCours = '';
 
     var SUGGESTIONS = [
-        'Que dit le corpus sur l’or ?',
-        'Explique-moi le TWR.',
-        'Dois-je rééquilibrer ?',
-        'Que ferait Charles Gave avec mon portefeuille ?',
-        'Ma moyenne mobile 7 ans a-t-elle cassé ?'
+        'Ma moyenne mobile 7 ans a-t-elle cassé sur l’or ?',
+        'Dois-je rééquilibrer par rapport aux poids cibles ?',
+        'C’est quoi le TWR ?',
+        'Où en est l’or cette semaine ?',
+        'Mon horizon 2055 change quoi à ma façon d’investir ?'
     ];
+
+    /* L'horizon part avec chaque question : c'est lui qui fait qu'une baisse de
+       10 % n'est pas lue comme une baisse de 10 % à six mois de la retraite. Le
+       réglage vient du même endroit que la page Retraite. */
+    function horizonPourIA() {
+        var r = PF.store.reglages() || {};
+        var annee = Math.round(U.num(r.anneeDepartRetraite, 0)) || 2055;
+        var annees = Math.max(0, annee - new Date().getFullYear());
+        return {
+            anneeDepartRetraite: annee,
+            anneesRestantes: annees,
+            objectif: 'préparer la retraite : disposer à partir de ' + annee
+                + ' d’un capital qui verse un revenu réel, sans entamer le pouvoir d’achat'
+        };
+    }
 
     // ------------------------------------------------------------ configuration
 
@@ -71,6 +91,7 @@
             });
         });
         return {
+            horizon: horizonPourIA(),
             uniteDeCompte: 'USD',
             deviseDeDepense: 'EUR',
             tauxEurUsd: ctx.tauxEurUsd || 0,
@@ -115,7 +136,9 @@
             historique: messages.slice(-7, -1).map(function (m) {
                 return { role: m.role === 'assistant' ? 'assistant' : 'user', contenu: m.contenu };
             }),
-            contexte: contexteActif ? contextePourIA(PF.app.etat.ctx) : null
+            contexte: contexteActif ? contextePourIA(PF.app.etat.ctx) : null,
+            horizon: horizonPourIA(),
+            web: internetActif
         };
 
         appeler('/discussion', corps).then(function (res) {
@@ -125,6 +148,9 @@
                 contenu: (res.reponse || '').trim(),
                 sources: res.sources || [],
                 passages: (res.sources || []).length,
+                sourcesExternes: res.sourcesExternes || [],
+                internet: res.internet || null,
+                horizon: res.horizon || null,
                 interpretation: !!res.interpretation,
                 verification: res.verification || null,
                 corpus: res.corpus || null,
@@ -193,15 +219,30 @@
             });
             out += '</div>';
         }
+        if (m.role === 'assistant' && m.sourcesExternes && m.sourcesExternes.length) {
+            out += '<div class="ia-sources" style="border-left:2px solid rgba(245,196,81,.30);padding-left:6px">';
+            m.sourcesExternes.forEach(function (s) {
+                out += '<a class="ia-source" href="#" data-url="' + UI.h(s.url || '') + '">'
+                    + '[' + UI.h(s.numero || 'E') + '] ↗ '
+                    + UI.h((s.titre || s.domaine || 'source extérieure') + (s.date ? ' · ' + s.date : ''))
+                    + (s.domaine && s.titre ? ' · ' + UI.h(s.domaine) : '') + '</a>';
+            });
+            out += '</div>';
+        }
+        if (m.role === 'assistant' && m.internet && m.internet.note) {
+            out += '<div class="ia-note">Recherche extérieure : ' + UI.h(m.internet.note) + '</div>';
+        }
         if (m.role === 'assistant' && m.interpretation) {
-            out += '<div class="ia-note" style="color:var(--gold)">⚠ Interprétation du modèle — '
-                + 'ce n’est ni une citation, ni une source fiable.</div>';
+            out += '<div class="ia-note" style="color:var(--gold)">⚠ Ni le corpus ni l’extérieur n’ont de passage '
+                + 'sur ce point : ce qui suit est une interprétation du modèle, pas une source.</div>';
         }
         if (m.role === 'assistant' && m.verification && m.verification.note) {
-            out += '<div class="ia-note" style="color:var(--down)">Filet anti-invention : '
+            var couleur = m.verification.gravite === 'info' ? 'var(--txt-3)' : 'var(--down)';
+            var prefixe = m.verification.gravite === 'info' ? 'Chiffres extérieurs — ' : 'Filet anti-invention — ';
+            out += '<div class="ia-note" style="color:' + couleur + '">' + prefixe
                 + UI.h(m.verification.note) + '</div>';
         } else if (m.role === 'assistant' && m.verification && m.verification.verifie) {
-            out += '<div class="ia-note">✓ Les chiffres ont été retrouvés dans les sources ou vos agrégats.</div>';
+            out += '<div class="ia-note">✓ Les chiffres ont été retrouvés dans le corpus, dans les sources extérieures ou dans vos agrégats.</div>';
         }
         return out + '</div>';
     }
@@ -214,10 +255,14 @@
             + '<div style="display:flex;gap:10px;align-items:flex-start">'
             + '<div style="font-size:19px;line-height:1.1">◈</div>'
             + '<div style="flex:1;font-size:12px;color:var(--txt-3);line-height:1.55">'
-            + 'Assistant <b style="color:var(--txt-2)">documenté</b> à partir du corpus public de '
-            + 'l’Institut des Libertés, des vidéos publiques de l’Université de l’Épargne et de la '
-            + 'bibliographie. <b style="color:var(--gold)">Ce n’est pas Charles Gave.</b> '
-            + 'Il cite ses sources. Si le corpus se tait, il donne une interprétation clairement signalée. Un filet vérifie ses chiffres.'
+            + 'Assistant d’analyse. Il part du corpus public de l’Institut des Libertés et des vidéos '
+            + 'publiques de l’Université de l’Épargne, le confronte à <b style="color:var(--txt-2)">tes données</b> '
+            + 'et à des <b style="color:var(--txt-2)">informations extérieures</b> qu’il va chercher, et replace '
+            + 'chaque réponse dans ton horizon de long terme : <b style="color:var(--gold)">départ à la retraite en '
+            + UI.h(String(horizonPourIA().anneeDepartRetraite)) + '</b> ('
+            + UI.h(String(horizonPourIA().anneesRestantes)) + ' ans). '
+            + '<b style="color:var(--gold)">Ce n’est pas Charles Gave.</b> Il cite ses sources, du corpus [1] comme '
+            + 'de l’extérieur [E1]. Un filet vérifie ses chiffres.'
             + '</div></div></div>';
 
         if (!configure()) {
@@ -237,6 +282,7 @@
         // --- Barre d'état
         out += '<div class="chips" style="margin-bottom:10px">'
             + '<button class="chip" id="iaContexte">' + (contexteActif ? '✓' : '✕') + ' Mes agrégats</button>'
+            + '<button class="chip" id="iaInternet">' + (internetActif ? '✓' : '✕') + ' Internet</button>'
             + '<button class="chip" id="iaMaj">⟳ Vérifier le corpus</button>'
             + (messages.length ? '<button class="chip" id="iaVider">Effacer</button>' : '')
             + (etatService && etatService.corpus && etatService.corpus.passages !== null
@@ -334,6 +380,7 @@
             if (cible.closest('#iaMaj')) { mettreAJour(); return; }
             if (cible.closest('#iaVider')) { messages = []; erreur = null; PF.app.rendre(); return; }
             if (cible.closest('#iaContexte')) { contexteActif = !contexteActif; PF.app.rendre(); return; }
+            if (cible.closest('#iaInternet')) { internetActif = !internetActif; PF.app.rendre(); return; }
             if (cible.closest('#iaEnvoyer')) { envoyer(); return; }
             var sug = cible.closest('[data-ia-suggestion]');
             if (sug) { poserQuestion(sug.getAttribute('data-ia-suggestion')); return; }
@@ -362,6 +409,11 @@
         contextePourIA: contextePourIA,
         messages: function () { return messages.slice(); },
         effacer: function () { messages = []; erreur = null; },
+        internet: function (actif) {
+            if (actif === undefined) return internetActif;
+            internetActif = !!actif;
+        },
+        horizonPourIA: horizonPourIA,
         configurer: function (url, cle) {
             PF.store.sauverReglages({ iaUrl: url, iaCle: cle });
             etatService = null;

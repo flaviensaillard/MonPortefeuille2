@@ -14,9 +14,27 @@ la finance de marché.
 
 | Guide | Pour quoi |
 |---|---|
-| **`GUIDE-INDEXATION-PAS-A-PAS.md`** | Mettre le corpus dans l'IA et suivre l'avancement, jour par jour |
+| **`GUIDE-IA-ANALYSE-LONG-TERME.md`** | **Changer la façon dont l'IA répond** : horizon retraite 2055, analyse au lieu de citation, recherche extérieure |
+| `GUIDE-INDEXATION-PAS-A-PAS.md` | Mettre le corpus dans l'IA et suivre l'avancement, jour par jour |
 | `INSTALLATION-IA-EN-LIGNE.md` | Brancher le service IA (Cloudflare, clés, application) |
 | `QUOI-FAIRE.md` | Ce qui reste à décider ou à vérifier sur les données |
+
+---
+
+## L'assistant (dossier `ia/`)
+
+Le service Cloudflare (`ia/worker`) répond en **trois paragraphes imposés** :
+« Selon le corpus, … », puis « En me basant sur tes données, sur le corpus et
+sur les informations extérieures que j'ai trouvées, … », puis « Ce qui dépend de
+toi : … ». Il confronte le corpus du porteur à ses agrégats et à des sources
+trouvées sur le web, et replace chaque réponse dans l'horizon de long terme
+(départ à la retraite en 2055, modifiable).
+
+- les règles en clair : `ia/REGLES.md` ;
+- le trajet d'une question : `ia/ARCHITECTURE.md` ;
+- ce qu'il faut copier chez Cloudflare, étape par étape :
+  `GUIDE-IA-ANALYSE-LONG-TERME.md` ;
+- les tests du service : `node ia/tests/test_worker.mjs`.
 
 ---
 

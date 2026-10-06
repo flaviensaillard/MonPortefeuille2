@@ -17,10 +17,46 @@ id = "5e261300b9d84f20b8b861b0849d9d00"
 MODELE_GENERATION = "@cf/meta/llama-3.1-8b-instruct"
 MODELE_EMBEDDING = "@cf/baai/bge-base-en-v1.5"
 
-# Secrets à saisir avec `npx wrangler secret put NOM` :
+# --- Horizon de long terme -------------------------------------------------
+# Le porteur prépare sa retraite. Ces deux valeurs entrent dans chaque réponse ;
+# les applications les envoient aussi (elles connaissent les réglages), et cette
+# version-ci sert de repli pour les appels directs au service.
+HORIZON_ANNEE = "2055"
+OBJECTIF = "préparer la retraite : disposer à partir de l'année de départ d'un capital qui verse un revenu réel, sans entamer le pouvoir d'achat"
+PORTEUR = "Flavien"
+
+# --- Recherche extérieure --------------------------------------------------
+# WEB = "auto"     : le service cherche sur le web et complète le corpus (défaut)
+# WEB = "toujours" : il cherche ET ouvre les pages à chaque question
+# WEB = "non"      : aucune requête ne sort du service ; le corpus et les
+#                    agrégats suffisent
+WEB = "auto"
+
+# MOTEUR_WEB = "auto" : essaie dans l'ordre Brave (si BRAVE_CLE), DuckDuckGo,
+#                       SearXNG (si SEARXNG_URL), puis Wikipédia — sans clé.
+# MOTEUR_WEB = "brave" | "duckduckgo" | "searxng" | "wikipedia" | "cloudflare"
+#              force un moteur unique (utile pour diagnostiquer).
+MOTEUR_WEB = "auto"
+
+# REPARATION = "non" : désactive la seconde passe qui rétablit la forme imposée
+#                     quand le modèle l'oublie (elle coûte une génération).
+REPARATION = "oui"
+
+# --- Secrets à saisir avec `npx wrangler secret put NOM` -------------------
 # CLE_SERVICE    : Android et Streamlit interrogent l'IA
 # CLE_ADMIN      : GitHub Actions indexe le corpus
 # SUPABASE_URL   : https://xxxxx.supabase.co
 # SUPABASE_CLE   : clé service_role (seulement dans Cloudflare)
+# BRAVE_CLE      : facultatif — clé de l'API Brave Search (meilleure qualité de
+#                  recherche). Sans elle, le service utilise DuckDuckGo puis
+#                  Wikipédia, qui ne demandent aucun compte.
+# SEARXNG_URL    : facultatif — adresse d'une instance SearXNG (format JSON).
 #
 # SUPABASE_CLE ne va JAMAIS dans GitHub, l'APK ni Streamlit.
+#
+# Variables facultatives à poser avec `npx wrangler secret put` ou en var :
+#   CF_WEB = "oui"     autorise l'API Web Search de Cloudflare (facturée à
+#                      l'usage, bêta) dans la cascade. Désactivée par défaut :
+#                      ce service est gratuit par principe.
+#   AI_GATEWAY_ID      passerelle AI Gateway utilisée par cette API
+#                      (défaut : « default »).

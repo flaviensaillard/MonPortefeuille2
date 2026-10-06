@@ -9,7 +9,7 @@ const vm = require('vm');
 
 const RACINE = path.join(__dirname, '..', 'app', 'src', 'main', 'assets', 'www', 'js');
 const FICHIERS = ['util.js', 'models.js', 'net.js', 'store.js', 'metrics.js',
-    'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js'];
+    'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js', 'ia.js'];
 
 // --- Faux navigateur -------------------------------------------------------
 const stockage = {};
@@ -218,6 +218,24 @@ PF.portefeuille.charger().then((ctx) => {
     test('apports convertis en dollars', () => ctx.apports[0].montant_usd > 0);
     test('cession 2026 détectée', () => {
         return PF.fiscal.cessionsAnnee(ctx, 2026).then((r) => r.cessions.length === 1);
+    });
+
+    console.log('\nAssistant IA — horizon et contexte envoyés');
+    test('l’horizon de retraite part avec chaque question', () => {
+        const h = PF.ia.horizonPourIA();
+        return h.anneeDepartRetraite === 2055 && h.anneesRestantes === 2055 - new Date().getFullYear();
+    });
+    test('l’objectif de retraite est transmis au service', () => /retraite/i.test(PF.ia.horizonPourIA().objectif));
+    test('le contexte du portefeuille porte l’horizon', () => {
+        const c = PF.ia.contextePourIA(ctx);
+        return c.horizon.anneeDepartRetraite === 2055 && c.poches.length > 0;
+    });
+    test('la recherche extérieure est active par défaut', () => PF.ia.internet() === true);
+    test('elle se coupe et se remet d’un geste', () => {
+        PF.ia.internet(false);
+        const coupe = PF.ia.internet();
+        PF.ia.internet(true);
+        return coupe === false && PF.ia.internet() === true;
     });
 
     console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');

@@ -1,18 +1,52 @@
-# IA Université de l'Épargne — déploiement 1.6.1
+# IA Université de l'Épargne — déploiement 1.7.0
 
-Le guide complet pour débutant est livré séparément : `GUIDE-DEPLOIEMENT-IA-DEBUTANT.html`.
+Le guide du déploiement initial pour débutant est livré séparément :
+`GUIDE-DEPLOIEMENT-IA-DEBUTANT.html`.
 
 Pour l'indexation initiale du corpus — clic par clic, jour par jour — voir
 `GUIDE-INDEXATION-PAS-A-PAS.md` à la racine du dépôt.
 
+**Pour changer la façon dont l'assistant répond** — horizon 2055, analyse au
+lieu de citation, recherche extérieure — tout est dans
+`GUIDE-IA-ANALYSE-LONG-TERME.md`, à la racine du dépôt.
+
 ## Fonctions
 
-- Recherche dans le corpus Vectorize, réponse Workers AI.
-- Phrase imposée sans source : **« Le corpus ne le dit pas, mais selon mon interprétation: … »**.
-- Filet anti-invention : chaque chiffre est recherché dans les passages cités et les agrégats.
-- `GET /sante` expose la date `corpus.majLe`, affichée dans Android et Streamlit.
-- Lecture Supabase côté Worker : la clé secrète ne quitte jamais Cloudflare ; seuls des agrégats sont transmis au modèle.
+- Recherche dans le corpus Vectorize **et** recherche extérieure sur le web
+  (Brave si une clé est fournie, sinon DuckDuckGo, SearXNG, puis Wikipédia —
+  les trois derniers sans compte).
+- Réponse en trois paragraphes, avec les tournures imposées :
+  **« Selon le corpus, … »**, **« En me basant sur tes données, sur le corpus et
+  sur les informations extérieures que j'ai trouvées, … »**, **« Ce qui dépend
+  de toi : … »**.
+- Horizon de très long terme (départ à la retraite en 2055 par défaut) transmis
+  à chaque question ; chaque réponse est jugée à cette aune.
+- Sources extérieures numérotées `[E1]`, `[E2]`, affichées avec la réponse comme
+  les passages du corpus.
+- Contrôle de la structure imposée (`format.conforme`) et seconde passe de
+  remise en forme quand le modèle l'oublie.
+- Filet anti-invention à trois origines : corpus, pages extérieures lues,
+  agrégats du portefeuille.
+- `GET /sante` expose la version, la date `corpus.majLe` et l'état de la
+  recherche extérieure.
+- Lecture Supabase côté Worker : la clé secrète ne quitte jamais Cloudflare ;
+  seuls des agrégats sont transmis au modèle. Les montants sont retirés des
+  requêtes envoyées aux moteurs de recherche extérieurs.
 - Mise à jour GitHub hebdomadaire des articles et sous-titres publics.
+
+## Réglages utiles (variables Cloudflare)
+
+| Variable | Défaut | Effet |
+|---|---|---|
+| `HORIZON_ANNEE` | `2055` | année de départ à la retraite |
+| `OBJECTIF` | préparer la retraite | objectif rappelé au modèle |
+| `WEB` | `auto` | `auto`, `toujours`, ou `non` pour couper toute recherche extérieure |
+| `MOTEUR_WEB` | `auto` | force `brave`, `duckduckgo`, `searxng`, `wikipedia` ou `cloudflare` |
+| `REPARATION` | `oui` | `non` pour désactiver la seconde passe de mise en forme |
+
+Secrets facultatifs : `BRAVE_CLE` (recherche de meilleure qualité),
+`SEARXNG_URL` (votre instance SearXNG), `CF_WEB="oui"` (API Web Search de
+Cloudflare, facturée à l'usage).
 
 ## Combien de temps prend l'indexation initiale
 
@@ -52,7 +86,8 @@ Deux règles à retenir :
 
 ## Secrets Cloudflare
 
-`CLE_SERVICE`, `CLE_ADMIN`, `SUPABASE_URL`, `SUPABASE_CLE`.
+`CLE_SERVICE`, `CLE_ADMIN`, `SUPABASE_URL`, `SUPABASE_CLE`. Facultatifs :
+`BRAVE_CLE`, `SEARXNG_URL`.
 
 ## Secrets GitHub Actions
 
@@ -60,6 +95,6 @@ Deux règles à retenir :
 
 ## Secrets Streamlit
 
-`UDE_URL`, `UDE_CLE_SERVICE`.
+`UDE_URL`, `UDE_CLE_SERVICE`. Facultatifs : `IA_HORIZON_ANNEE`, `IA_OBJECTIF`.
 
 Aucun identifiant Université de l'Épargne n'est accepté ou nécessaire.
