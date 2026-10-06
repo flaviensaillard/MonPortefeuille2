@@ -71,12 +71,15 @@ function env(avecPassage = false, options = {}) {
     CLE_SERVICE: 'service-test', CLE_ADMIN: 'admin-test',
     MODELE_GENERATION: 'test', MODELE_EMBEDDING: 'test',
     HORIZON_ANNEE: options.horizon,
+    TEMPS_MAX: options.tempsMax,
+    TEMPS_RECHERCHE: options.tempsRecherche,
     AI: {
       run: async (model, input) => {
         if (input.text) return { data: input.text.map(() => [.1, .2]) };
         journal.appelsModele++;
         journal.prompts.push(input.messages[0].content);
         journal.historiques.push(input.messages.slice(1).map(m => m.role + ':' + m.content));
+        if (options.modele === 'pendant') return new Promise(() => { /* ne répond jamais */ });
         const sortie = typeof options.reponse === 'function' ? options.reponse(journal.appelsModele, input) : options.reponse;
         if (sortie) return { response: sortie };
         return { response: avecPassage ? REPONSE_CORPUS : REPONSE_EXTERNE };
@@ -179,7 +182,8 @@ test('l’historique de conversation est transmis au modèle', e7.journal.histor
 // --- 8. État du service ----------------------------------------------------
 const sante = await (await worker.fetch(new Request('https://x/sante'), env(true))).json();
 test('date et compte exposables', sante.corpus.passages === 1 && 'majLe' in sante.corpus);
-test('la version et l’horizon sont exposés', sante.version === '1.7.0' && sante.horizon.anneeDepartRetraite === 2055);
+test('la version et l’horizon sont exposés', sante.version === '1.7.1' && sante.horizon.anneeDepartRetraite === 2055);
+test('les budgets de temps sont exposés', sante.budgets.totalS === 22 && sante.budgets.rechercheS === 8);
 
 // --- 9. L'indexation : reprise, doublons, compte réel ----------------------
 const e2 = env(false);
@@ -202,6 +206,36 @@ test('presents : clé admin exigée', (await admin(e2, '/admin/presents', { ids:
 // Un passage déjà indexé renvoyé volontairement : il remplace, sans doubler le compte.
 const r2 = await (await admin(e2, '/admin/indexation', { morceaux: [{ id: 'c-1', texte: 'Premier passage, corrigé.', source: 'IDL', titre: 'A' }] })).json();
 test('réenvoi d’un passage connu : le compte ne bouge pas', r2.corpus.vecteurs === 2 && r2.inseres === 1);
+
+// --- 10. Le garde-temps : une recherche qui traîne ne vole plus l'écriture ---
+/* Le défaut corrigé en 1.7.1 : la recherche extérieure pouvait consommer 27 s à
+   elle seule (trois moteurs × 9 s), et Cloudflare comme Android coupaient la
+   réponse avant que le modèle n'écrive. Ici le moteur ne répond JAMAIS : le
+   service doit malgré tout rendre une réponse, dans le budget qu'on lui donne. */
+const fetchNormal = globalThis.fetch;
+globalThis.fetch = async () => new Promise(() => { /* ne se résout jamais */ });
+
+const e10 = env(true, { horizon: 2055, reponse: () => REPONSE_CORPUS, tempsMax: 8, tempsRecherche: 2 });
+const debut10 = Date.now();
+const reponseLente = await post(e10, 'Où en est l’or aujourd’hui ?', { web: true, contexte: { capitalInvesti: 80000 } });
+const duree10 = Date.now() - debut10;
+globalThis.fetch = fetchNormal;
+
+test('une recherche qui ne répond pas ne bloque plus la réponse', reponseLente.reponse && reponseLente.reponse.length > 40);
+test('la recherche est bornée par le budget (TEMPS_MAX=8 s ici)', duree10 < 5000);
+test('la note dit que le budget a été atteint', /budget de temps|Aucun résultat extérieur exploitable/.test(String(reponseLente.internet.note || '')));
+test('la réponse porte son temps de calcul', reponseLente.temps && reponseLente.temps.totalMs < reponseLente.temps.budgetTotalMs);
+
+// --- 11. Un modèle muet rend une erreur claire, jamais un abandon ----------
+const e11 = env(true, { horizon: 2055, modele: 'pendant', tempsMax: 3, tempsRecherche: 2 });
+const debut11 = Date.now();
+const muet = await worker.fetch(new Request('https://x/discussion', {
+  method: 'POST', headers: { 'content-type': 'application/json', 'x-cle-service': 'service-test' },
+  body: JSON.stringify({ question: 'Faut-il alléger l’or ?', web: false })
+}), e11);
+const corps11 = await muet.json();
+test('un modèle qui ne répond pas est coupé par le garde-temps', muet.status === 500 && /manqué de temps/.test(corps11.erreur || ''));
+test('l’erreur arrive vite, pas après l’abandon du client', Date.now() - debut11 < 6000);
 
 globalThis.fetch = vraieFetch;
 process.exit(erreurs ? 1 : 0);
