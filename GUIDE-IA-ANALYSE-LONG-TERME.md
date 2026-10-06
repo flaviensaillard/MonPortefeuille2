@@ -43,6 +43,10 @@ Il vous rendait des passages. Vous deviez faire le travail.
 >
 > *Sources :* `[1]`, `[3]` → passages du corpus · `[E1]`, `[E2]` → pages lues sur le web
 
+> *Exemple de forme : les chiffres, les poids et les passages cités sont ceux que
+> le service trouvera le jour où vous posez la question — dans votre corpus, dans
+> vos agrégats et dans les pages qu'il lira.*
+
 Les trois questions de votre message se traitent maintenant de la même façon :
 
 | Votre question | Ce qui change |
@@ -82,7 +86,7 @@ demandent ni compte ni clé.
 
 ---
 
-## 3. Étape 1 —Mettre le nouveau service en ligne (4 minutes)
+## 3. Étape 1 — Mettre le nouveau service en ligne (4 minutes)
 
 ### a) Copier le nouveau code
 
