@@ -1,3 +1,22 @@
+# Construire l'APK Porte-feuille (version 1.7.0) — sur les serveurs de GitHub.
+#
+# COMMENT S'EN SERVIR : copiez ce fichier tel quel dans
+#   https://github.com/flaviensaillard/MonPortefeuille2/new/main/.github/workflows
+# sous le nom « apk.yml », puis cliquez sur « Commit changes ». La construction
+# démarre toute seule. Mode d'emploi détaillé : CONSTRUIRE-APK.md.
+#
+# CE QU'IL FAIT, DANS L'ORDRE :
+#   1. installe Java 17 et les outils du SDK Android (plateforme 35, build-tools 34) ;
+#   2. remet la clé de signature si elle est encore dans le cache de GitHub (pour
+#      que les mises à jour suivantes s'installent PAR-DESSUS l'ancienne, sans
+#      désinstallation) ;
+#   3. lance build.sh, qui produit dist/Porte-feuille.apk ;
+#   4. publie l'APK dans une « release » : le lien de téléchargement devient
+#      https://github.com/flaviensaillard/MonPortefeuille2/releases/latest/download/Porte-feuille-1.7.0.apk
+#
+# Il se déclenche à deux moments : quand ce fichier ou l'application changent, et
+# à la demande (Actions → « Construire l'APK » → Run workflow).
+
 name: Construire l'APK
 
 on:
@@ -9,6 +28,7 @@ on:
       - 'build.sh'
       - 'tools/**'
 
+# Nécessaire pour publier la release et y attacher l'APK.
 permissions:
   contents: write
 
@@ -19,19 +39,36 @@ jobs:
     env:
       VERSION_NAME: '1.7.0'
       VERSION_CODE: '17'
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0"
-      - uses: actions/cache@v4
+
+      - name: Outils du SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Plateforme 35 et build-tools 34
+        run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0"
+
+      # La clé de signature est rangée dans le cache de GitHub, jamais dans le
+      # dépôt : une clé dans un dépôt public permettrait à n'importe qui de
+      # signer une fausse mise à jour de votre application.
+      - name: Remettre la clé de signature
+        id: cle
+        uses: actions/cache@v4
         with:
           path: keystore
           key: apk-keystore-v1
-      - run: bash build.sh
+
+      - name: Construire l'APK
+        run: bash build.sh
+
       - name: Publier l'APK dans une release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,16 +77,28 @@ jobs:
           ETIQUETTE="apk-${VERSION_NAME}"
           cp dist/Porte-feuille.apk "dist/Porte-feuille-${VERSION_NAME}.apk"
           gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
+            || gh release create "$ETIQUETTE" \
+                 --repo "$GITHUB_REPOSITORY" \
                  --title "APK ${VERSION_NAME}" \
-                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions."
+                 --notes "APK Porte-feuille ${VERSION_NAME}, construite automatiquement par GitHub Actions.
+
+          Téléchargement direct : https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/Porte-feuille-${VERSION_NAME}.apk
+
+          Nouveautés de la 1.7.0 : l'assistant analyse le corpus au lieu de le citer (horizon retraite 2055, recherche extérieure), bouton « ✓ Internet », sources extérieures cliquables."
           gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
             --repo "$GITHUB_REPOSITORY" --clobber
-      - uses: actions/upload-artifact@v4
+
+      - name: Conserver l'APK en pièce jointe de l'exécution
+        uses: actions/upload-artifact@v4
         with:
           name: Porte-feuille-1.7.0.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
-      - run: |
+
+      - name: Rappel du lien
+        run: |
           echo "## ✔ APK prêt" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Téléchargement : https://github.com/$GITHUB_REPOSITORY/releases/latest/download/Porte-feuille-${VERSION_NAME}.apk" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Si Android refuse l'installation, désinstallez l'ancienne application (la signature a changé) — voir CONSTRUIRE-APK.md." >> "$GITHUB_STEP_SUMMARY"
