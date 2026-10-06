@@ -1,6 +1,6 @@
 // Université de l'Épargne — Cloudflare Worker 100 % gratuit.
 //
-// Version 1.7.0 « analyse long terme ». Ce que fait ce service, dans l'ordre :
+// Version 1.7.1 « analyse long terme + garde-temps ». Ce que fait ce service, dans l'ordre :
 //   1. cherche dans le corpus (Vectorize) les passages proches de la question ;
 //   2. va chercher sur le web des informations extérieures (DuckDuckGo, Brave,
 //      SearXNG, Wikipédia, ou l'API Web Search de Cloudflare) — c'est ce qui
@@ -17,6 +17,14 @@
 //      anti-invention qui distingue les chiffres du corpus, ceux des sources
 //      extérieures et les chiffres orphelins.
 //
+// 1.7.1 — UN GARDE-TEMPS. Cloudflare interrompt toute réponse HTTP au bout
+// d'environ 30 secondes sur l'offre gratuite, et l'application Android
+// abandonne la sienne à 25 s. Avant, la recherche extérieure pouvait à elle
+// seule consommer 27 s (trois moteurs, 9 s chacun) : le modèle n'avait alors
+// plus le temps d'écrire, et le client recevait un abandon au lieu d'une
+// réponse. Désormais un budget unique couvre toute la réponse, et la part
+// laissée à l'écriture est réservée d'avance.
+//
 // FICHIER UNIQUE, VOLONTAIREMENT : il se copie-colle entier dans le tableau de
 // bord Cloudflare (voir GUIDE-IA-ANALYSE-LONG-TERME.md). Ne pas le découper en
 // modules : la méthode de déploiement la plus simple du guide le casserait.
@@ -32,6 +40,39 @@ const EMBEDDING = '@cf/baai/bge-base-en-v1.5';
 // Horizon de très long terme : le porteur prépare sa retraite.
 const HORIZON_DEFAUT = 2055;
 const OBJECTIF_DEFAUT = "préparer la retraite : disposer à partir de l'année de départ d'un capital qui verse un revenu réel, sans entamer le pouvoir d'achat";
+
+// Budgets de temps. Réglables par variables d'environnement (voir
+// wrangler.toml) : TEMPS_MAX, TEMPS_RECHERCHE, MAX_TOKENS.
+//
+// La contrainte qui commande tout : Cloudflare coupe une réponse HTTP au bout
+// d'environ 30 s (offre gratuite), et l'application Android abandonne la sienne
+// à 25 s (NativeBridge.TIMEOUT_MS). Le total doit donc tenir sous ~22 s. Un
+// budget trop haut ne donne pas plus de temps : il donne un abandon sans
+// réponse, ce qui est le pire des deux cas.
+const TEMPS_MAX_DEFAUT = 22;       // secondes pour la réponse entière
+const TEMPS_RECHERCHE_DEFAUT = 8;  // secondes pour toute la recherche extérieure
+const TEMPS_MIN_REPONSE = 7000;    // ce qui reste toujours pour rédiger
+const TEMPS_REPARATION_MAX = 9000; // seconde passe de mise en forme
+const TEMPS_MOTEUR_MAX = 5000;     // un moteur de recherche, un essai
+const TEMPS_PAGE_MAX = 5000;       // une page ouverte
+const MAX_TOKENS_DEFAUT = 1000;    // longueur maximale de la réponse écrite
+
+function budgets(env) {
+  const nombre = (v, defaut, mini, maxi) => {
+    const x = Number(v);
+    return Number.isFinite(x) && x >= mini && x <= maxi ? x : defaut;
+  };
+  const total = nombre(env.TEMPS_MAX, TEMPS_MAX_DEFAUT, 3, 28) * 1000;
+  const recherche = Math.min(
+    nombre(env.TEMPS_RECHERCHE, TEMPS_RECHERCHE_DEFAUT, 2, 20) * 1000,
+    Math.max(2000, total - TEMPS_MIN_REPONSE)
+  );
+  return {
+    total, recherche,
+    minReponse: TEMPS_MIN_REPONSE,
+    maxTokens: nombre(env.MAX_TOKENS, MAX_TOKENS_DEFAUT, 300, 3000)
+  };
+}
 
 // Budget de la recherche extérieure. Volontairement petit : trois pages lues
 // valent mieux que dix à moitié lues, et le prompt doit rester lisible par un
@@ -226,9 +267,10 @@ function historiqueDe(b) {
 async function sante(env) {
   return {
     ok: true,
-    version: '1.7.0',
+    version: '1.7.1',
     corpus: await etatCorpus(env),
     horizon: horizonDe({}, null, env),
+    budgets: (() => { const b = budgets(env); return { totalS: b.total / 1000, rechercheS: b.recherche / 1000, maxTokens: b.maxTokens }; })(),
     branchements: {
       supabase: !!(env.SUPABASE_URL && env.SUPABASE_CLE),
       github: !!(env.GITHUB_DEPOT),
@@ -246,6 +288,13 @@ function webActif(env) {
 }
 
 async function discuter(b, env) {
+  const debut = Date.now();
+  const budget = budgets(env);
+  /* Temps restant pour l'ensemble de la réponse. Tout ce qui attend quelque
+     chose d'extérieur (moteur, page, modèle) est borné par cette valeur : c'est
+     ce qui garantit qu'on rend une réponse avant que Cloudflare ne coupe. */
+  const restant = () => budget.total - (Date.now() - debut);
+
   const q = String(b.question || '').trim(); if (!q) throw Error('Question vide');
   let contexte = b.contexte || null, origine = contexte ? 'application' : null;
   if (!contexte) { const s = await lireSupabase(env); if (s) { contexte = s.aggregats; origine = 'supabase'; } }
@@ -265,7 +314,7 @@ async function discuter(b, env) {
   // --- Recherche extérieure : c'est elle qui permet d'analyser au lieu de citer.
   // Elle ne doit jamais faire échouer la réponse : une panne de réseau extérieur
   // dégrade la réponse, elle ne la supprime pas.
-  const web = await chercherWeb(env, q, { demande: veutWeb, corpusTrouve: sait }).catch(() => ({
+  const web = await chercherWeb(env, q, { demande: veutWeb, corpusTrouve: sait, fin: debut + budget.recherche }).catch(() => ({
     utilise: false, texte: '', sources: [], resultats: 0, pagesLues: 0, moteur: null,
     requete: null, note: 'Recherche extérieure indisponible.', brut: []
   }));
@@ -300,17 +349,20 @@ async function discuter(b, env) {
   system += `\n\nRAPPEL DE FORME POUR CETTE RÉPONSE : paragraphe 1 = « Selon le corpus, … », paragraphe 2 = ${rappelAnalyse}, paragraphe 3 = « Ce qui dépend de toi : … ». Horizon ${horizon.anneeDepartRetraite} (${horizon.anneesRestantes} ans).`;
 
   const messages = [{ role: 'system', content: system }].concat(historique, [{ role: 'user', content: q }]);
-  let texte = await generer(env, messages, 1200);
+  const tempsEcriture = () => Math.max(1500, restant() - 800);
+  let texte = await avecDelai(generer(env, messages, budget.maxTokens), tempsEcriture());
   // Un modèle qui ne répond rien est une panne, pas une réponse vide : mieux
   // vaut une erreur visible, que la question reste dans le fil et puisse être
-  // renvoyée.
-  if (!texte) texte = await generer(env, messages, 1200);
-  if (!texte) throw Error('Le modèle n’a rien répondu. Relancez la question.');
+  // renvoyée. La seconde tentative n'a lieu que si le temps le permet encore.
+  if (!texte && restant() > 8000) texte = await avecDelai(generer(env, messages, budget.maxTokens), tempsEcriture());
+  if (!texte) {
+    throw Error(`Le service a manqué de temps (${Math.round(budget.total / 1000)} s au total, dont ${Math.round(budget.recherche / 1000)} s de recherche extérieure). Reposez la question, ou baissez TEMPS_RECHERCHE.`);
+  }
 
   // --- Filet déterministe : le corpus muet ne doit jamais être présenté comme
   // une source. On n'ajoute que ce que l'on sait, jamais une citation inventée.
-  const debut = texte.slice(0, 240).toLowerCase();
-  if (!debut.includes('corpus')) {
+  const ouverture = texte.slice(0, 240).toLowerCase();
+  if (!ouverture.includes('corpus')) {
     texte = (sait ? 'Selon le corpus, ' : `Selon le corpus, ce point n'y est pas traité. `) + texte;
   }
 
@@ -319,11 +371,16 @@ async function discuter(b, env) {
   const externeConnu = !!web.texte;
   let forme = conformite(texte, externeConnu);
   let repasse = false;
-  if (!forme.conforme && String(env.REPARATION || 'oui').toLowerCase() !== 'non' && texte.length > 60) {
+  // La seconde passe de mise en forme coûte une génération : elle n'est tentée
+  // que s'il reste vraiment de quoi l'écrire. Sinon la réponse est rendue telle
+  // qu'elle est, avec `format.conforme` à false — un texte imparfait vaut mieux
+  // qu'un abandon.
+  const tempsPourReparer = () => Math.min(TEMPS_REPARATION_MAX, restant() - 1000);
+  if (!forme.conforme && String(env.REPARATION || 'oui').toLowerCase() !== 'non' && texte.length > 60 && tempsPourReparer() > 4000) {
     const corrige = await avecDelai((async () => {
       const m = [{ role: 'system', content: construireReglesCourtes(horizon) }, { role: 'user', content: 'RÉPONSE À RÉÉCRIRE :\n\n' + texte }];
-      return generer(env, m, 1100);
-    })(), 25000);
+      return generer(env, m, 700);
+    })(), tempsPourReparer());
     repasse = true;
     if (corrige && conformite(corrige, externeConnu).conforme && !conformite(texte, externeConnu).conforme) texte = String(corrige).trim();
     else if (corrige) {
@@ -348,7 +405,13 @@ async function discuter(b, env) {
     contexteUtilise: origine,
     corpus: await etatCorpus(env),
     modele: env.MODELE_GENERATION || GENERATION,
-    version: '1.7.0',
+    version: '1.7.1',
+    temps: {
+      totalMs: Date.now() - debut,
+      budgetTotalMs: budget.total,
+      budgetRechercheMs: budget.recherche,
+      maxTokens: budget.maxTokens
+    },
     cache: false
   };
   if (env.CACHE) await env.CACHE.put(cacheKey, JSON.stringify(resultat), { expirationTtl: 86400 });
@@ -384,16 +447,21 @@ function conformite(texte, externe = true) {
 // ---------------------------------------------------------------------------
 function moteurImpose(env) { const m = String(env.MOTEUR_WEB || 'auto').toLowerCase(); return m === 'auto' ? '' : m; }
 
-async function chercherWeb(env, question, { demande, corpusTrouve }) {
+async function chercherWeb(env, question, { demande, corpusTrouve, fin }) {
   const vide = { utilise: false, texte: '', sources: [], resultats: 0, pagesLues: 0, moteur: null, requete: null, note: null, brut: [] };
   if (demande === false || !webActif(env)) { vide.note = 'Recherche extérieure désactivée.'; return vide; }
 
   const requete = requeteRecherche(question);
   if (!requete) { vide.note = 'Question trop courte pour une recherche extérieure.'; return vide; }
-  const resultats = await chercherResultats(env, requete);
+  const borne = Number.isFinite(fin) ? fin : Date.now() + 8000;
+  const resultats = await chercherResultats(env, requete, borne);
 
   if (!resultats.liste.length) {
-    return { ...vide, utilise: true, requete, moteur: resultats.moteur || null, note: 'Aucun résultat extérieur exploitable.' };
+    const epuise = borne - Date.now() < 1200;
+    return {
+      ...vide, utilise: true, requete, moteur: resultats.moteur || null,
+      note: epuise ? 'Recherche extérieure écourtée : le budget de temps a été atteint.' : 'Aucun résultat extérieur exploitable.'
+    };
   }
 
   const lister = resultats.liste.slice(0, BUDGET_RESULTATS);
@@ -407,7 +475,7 @@ async function chercherWeb(env, question, { demande, corpusTrouve }) {
   let pages = [];
   if (lirePages) {
     const candidats = lister.filter(r => r.url && !/\.pdf($|\?)/i.test(r.url)).slice(0, BUDGET_PAGES);
-    pages = (await Promise.all(candidats.map(r => lirePage(r).catch(() => null)))).filter(Boolean);
+    pages = (await Promise.all(candidats.map(r => lirePage(r, borne).catch(() => null)))).filter(Boolean);
   }
 
   const sources = [];
@@ -458,7 +526,7 @@ function requeteRecherche(question) {
     .slice(0, 200);
 }
 
-async function chercherResultats(env, requete) {
+async function chercherResultats(env, requete, fin) {
   const impose = moteurImpose(env);
   const essais = [];
   if (impose) {
@@ -471,8 +539,10 @@ async function chercherResultats(env, requete) {
     essais.push(['wikipedia', () => lancerMoteur(env, 'wikipedia', requete)]);
   }
   for (const [nom, lancer] of essais) {
+    const reste = (fin || 0) - Date.now();
+    if (reste < 1500) break; // plus le temps d'essayer un moteur de plus
     try {
-      const r = await avecDelai(lancer(), 9000);
+      const r = await avecDelai(lancer(), Math.min(TEMPS_MOTEUR_MAX, reste));
       if (r && r.liste && r.liste.length) return { moteur: nom, liste: r.liste };
     } catch (e) { /* l'étage suivant prend la relève */ }
   }
@@ -595,8 +665,10 @@ async function moteurWikipedia(env, requete) {
 /* Ouvrir une page : c'est là que se trouve la matière que les résumés de
    recherche n'ont pas. Deux pages au maximum, avec un agent identifiable, et
    rien d'autre que du HTML. */
-async function lirePage(resultat) {
-  const r = await appeler(resultat.url, { headers: { 'user-agent': AGENT, accept: 'text/html,application/xhtml+xml', 'accept-language': 'fr-FR,fr;q=0.9,en;q=0.6' } }, 8000);
+async function lirePage(resultat, fin) {
+  const reste = (fin || 0) - Date.now();
+  if (reste < 1200) return null; // ouvrir une page maintenant, c'est écrire moins bien
+  const r = await appeler(resultat.url, { headers: { 'user-agent': AGENT, accept: 'text/html,application/xhtml+xml', 'accept-language': 'fr-FR,fr;q=0.9,en;q=0.6' } }, Math.min(TEMPS_PAGE_MAX, reste));
   if (!r || !r.ok) return null;
   const type = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
   if (type && !/text\/html|text\/plain/i.test(type)) return null;
