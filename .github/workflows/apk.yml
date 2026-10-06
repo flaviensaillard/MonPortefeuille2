@@ -1,0 +1,55 @@
+name: Construire l'APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apk.yml'
+      - 'app/**'
+      - 'build.sh'
+      - 'tools/**'
+
+permissions:
+  contents: write
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION_NAME: '1.7.0'
+      VERSION_CODE: '17'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager --install "platforms;android-35" "build-tools;34.0.0"
+      - uses: actions/cache@v4
+        with:
+          path: keystore
+          key: apk-keystore-v1
+      - run: bash build.sh
+      - name: Publier l'APK dans une release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ETIQUETTE="apk-${VERSION_NAME}"
+          cp dist/Porte-feuille.apk "dist/Porte-feuille-${VERSION_NAME}.apk"
+          gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
+                 --title "APK ${VERSION_NAME}" \
+                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions."
+          gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Porte-feuille-1.7.0.apk
+          path: dist/Porte-feuille.apk
+          if-no-files-found: error
+      - run: |
+          echo "## ✔ APK prêt" >> "$GITHUB_STEP_SUMMARY"
+          echo "Téléchargement : https://github.com/$GITHUB_REPOSITORY/releases/latest/download/Porte-feuille-${VERSION_NAME}.apk" >> "$GITHUB_STEP_SUMMARY"
