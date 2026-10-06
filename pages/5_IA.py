@@ -31,7 +31,34 @@ def secret(nom: str) -> str:
         return ""
 
 
-URL = secret("UDE_URL").rstrip("/")
+def reparer_adresse(u: str) -> str:
+    """Rend utilisable une adresse collée en lien markdown, entre guillemets ou sans https.
+
+    Exemple vu : « [a.dev/sante](http://a.dev/sante) » -> « https://a.dev ».
+    """
+    u = u.strip().strip('"').strip("'").strip("<>").strip()
+    if not u:
+        return ""
+    if u.startswith("[") and "](" in u:
+        u = u.split("](", 1)[0]
+        u = u.lstrip("[")
+    u = u.rstrip("/")
+    for route in ("/sante", "/discussion", "/contexte", "/admin"):
+        if route in u:
+            u = u.split(route, 1)[0]
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    elif u.startswith("http://") and not any(h in u for h in ("localhost", "127.0.0.1", "[::1]")):
+        u = "https://" + u[7:]
+    return u
+
+
+URL_BRUT = secret("UDE_URL")
+URL = reparer_adresse(URL_BRUT)
+if URL_BRUT and URL != URL_BRUT.rstrip("/"):
+    st.warning("Adresse du service corrigée automatiquement : " + URL)
+
+
 CLE = secret("UDE_CLE_SERVICE")
 
 
