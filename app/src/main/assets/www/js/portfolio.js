@@ -52,6 +52,7 @@
             var id = valeurLigne(ligne, ['id']);
             out.push({
                 id: (id === null || id === undefined || id === '') ? null : Number(id),
+                cree_le: valeurLigne(ligne, ['cree_le', 'created_at']) || null,
                 ticker: ticker,
                 type: type.indexOf('achat') >= 0 ? 'achat' : 'vente',
                 date: date,
@@ -126,6 +127,10 @@
 
                 var montantEur = t.montantNet * tEur;
                 var montantUsd = t.montantNet * tUsd;
+                // Conservés pour neutraliser les achats/ventes comme flux
+                // internes quand la référence précède l'opération.
+                t.montantNetEur = montantEur;
+                t.montantNetUsd = montantUsd;
 
                 if (t.type === 'achat') {
                     pos.quantite += t.quantite;
@@ -396,7 +401,7 @@
         }).then(function () {
             // --- Historiques en dollars
             enrichirHistoriquesUsd(ctx);
-            ctx.serie = PF.metrics.seriePerformance(ctx.snapshots, ctx.apports);
+            ctx.serie = PF.metrics.seriePerformance(ctx.snapshots, ctx.apports, ctx.fluxTitresFinal);
             var dernier = ctx.snapshots && ctx.snapshots.length ? ctx.snapshots[ctx.snapshots.length - 1] : null;
             ctx.capitalInvestiUsd = dernier ? U.num(dernier.capital_investi_usd, null) : null;
             ctx.capitalInvestiEur = dernier ? U.num(dernier.capital_investi_eur, null) : null;
@@ -647,6 +652,41 @@
         }
 
         ctx.snapshots = lignes;
+        }
+        // --- Achats et ventes de titres enregistrés APRÈS la dernière référence
+        // Payer des titres avec des liquidités ne change pas la richesse : c'est
+        // un transfert du périmètre « courant » vers le périmètre « investi ».
+        // Compté comme un gain, il gonfle la performance du montant de l'achat —
+        // c'est l'artefact du 07/10/2026 (68 FLXC.L, 1 943,91 $ : +2,85 %
+        // affichés au lieu de -0,38 %).
+        //
+        // Le test décisif n'est pas la date de l'opération mais son
+        // ENREGISTREMENT : une opération saisie après le snapshot ne peut pas y
+        // figurer, même si elle porte la même date. L'horodatage `cree_le` le dit
+        // exactement ; à défaut, on retient les opérations postérieures à la date
+        // de la référence (jamais les mêmes, pour ne pas compter deux fois).
+        var derniereRef = null, refTemps = NaN;
+        for (var k = lignes.length - 1; k >= 0; k--) {
+            if (!lignes[k]._live) {
+                derniereRef = lignes[k].date;
+                refTemps = lignes[k].cree_le ? Date.parse(lignes[k].cree_le) : NaN;
+                break;
+            }
+        }
+        ctx.fluxTitresFinal = 0;
+        (ctx.transactions || []).forEach(function (t) {
+            if (!derniereRef || !t.date) return;
+            var m = U.num(t.montantNetUsd, null);
+            if (m === null || !isFinite(m) || m === 0) return;
+            var cree = t.cree_le ? Date.parse(t.cree_le) : NaN;
+            var apres = (isFinite(cree) && isFinite(refTemps))
+                ? cree > refTemps
+                : t.date > derniereRef;
+            if (!apres) return;
+            var signe = t.type === 'achat' ? 1 : -1;
+            ctx.fluxTitresFinal = U.arrondi(ctx.fluxTitresFinal + signe * Math.abs(m), 2);
+        });
+
         propagerCapitalInvesti(ctx, taux);
     }
 
@@ -670,6 +710,7 @@
         }
         return {
             date: d,
+            cree_le: s.cree_le || s.created_at || null,
             patrimoine_investi_usd: U.arrondi(invU, 2),
             patrimoine_total_usd: U.arrondi(totU, 2),
             precaution_usd: U.arrondi(Math.max(totU - invU, 0), 2),
@@ -693,7 +734,9 @@
         var dates = snaps.map(function (s) { return s.date; });
         var fluxJour = {};
         (ctx.apports || []).forEach(function (a) {
-            fluxJour[a.date] = (fluxJour[a.date] || 0) + U.num(a.montant_usd, 0);
+            // Montants stockés positifs : le signe vient de `sens`. Sans cela,
+            // un retrait ferait monter le capital investi.
+            fluxJour[a.date] = (fluxJour[a.date] || 0) + PF.metrics.montantSigne(a, 'montant_usd');
         });
         var flux = PF.metrics.fluxParPeriode(dates, fluxJour, 0);
 
