@@ -184,7 +184,26 @@
 
     /* Série (dates, valeurs, flux) servant à tous les calculs de performance.
        Source : les snapshots, en dollars dès que la colonne existe. */
-    function seriePerformance(snapshots, apports) {
+    /* Dans `pf2_apports`, les montants sont stockés POSITIFS (valeur absolue) :
+       c'est la colonne `sens` qui dit si l'argent entre ou sort. Un montant
+       négatif est accepté par prudence, mais on ne s'en sert pas pour le signe,
+       sinon un retrait deviendrait une entrée et gonflerait la performance.
+       Même convention que `flux_par_date` du moteur Python. */
+    function sensFlux(mouvement) {
+        var m = mouvement || {};
+        var s = String(m.type !== undefined && m.type !== null ? m.type
+            : (m.sens !== undefined && m.sens !== null ? m.sens : ''));
+        return s.toLowerCase().indexOf('retrait') >= 0 ? -1 : 1;
+    }
+
+    function montantSigne(mouvement, colonne) {
+        var m = mouvement || {};
+        var v = U.num(m[colonne], null);
+        if (v === null || v === undefined || !isFinite(v)) v = U.num(m.montant_eur, 0);
+        return sensFlux(m) * Math.abs(U.num(v, 0));
+    }
+
+    function seriePerformance(snapshots, apports, fluxTitresFinal) {
         var snaps = (snapshots || []).slice();
         if (!snaps.length) return { dates: [], valeurs: [], flux: [], useUsd: false, lignes: [] };
 
