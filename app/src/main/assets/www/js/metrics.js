@@ -238,9 +238,7 @@
         (apports || []).forEach(function (a) {
             var d = U.parseDate(a.date || a.Date);
             if (!d) return;
-            var m = U.num(a[colAp], useUsd ? null : U.num(a.montant_eur, 0));
-            if (m === null || m === undefined || !isFinite(m)) m = U.num(a.montant_eur, 0);
-            fluxJour[d] = (fluxJour[d] || 0) + m;
+            fluxJour[d] = (fluxJour[d] || 0) + montantSigne(a, colAp);
         });
         var fluxAp = fluxParPeriode(dates, fluxJour, 0);
 
@@ -267,7 +265,23 @@
             flux = fluxAp;
         }
 
-        return { dates: dates, valeurs: valeurs, flux: flux, useUsd: useUsd, lignes: lignes, colVal: colVal };
+        return {
+            dates: dates, valeurs: valeurs, flux: flux,
+            fluxTitresFinal: U.num(fluxTitresFinal, 0),
+            useUsd: useUsd, lignes: lignes, colVal: colVal
+        };
+    }
+
+    /* Les achats/ventes de titres sont des transferts INTERNES : ils comptent
+       dans le périmètre investi, jamais dans le patrimoine total (déplacer de
+       l'argent du compte courant vers les titres ne rend pas plus riche). */
+    function fluxPerimetre(serie, perimetre) {
+        var flux = ((serie && serie.flux) || []).slice();
+        if (perimetre === 'total' || !serie || !flux.length) return flux;
+        var ajout = U.num(serie.fluxTitresFinal, 0);
+        if (ajout) flux[flux.length - 1] = U.arrondi(U.num(flux[flux.length - 1], 0) + ajout, 2);
+        return flux;
+    }
     }
 
     /* Progression sur une période : graphique + indicateurs. */
@@ -493,6 +507,8 @@
     PF.metrics = {
         rendementsPeriode: rendementsPeriode,
         fluxParPeriode: fluxParPeriode,
+        fluxPerimetre: fluxPerimetre,
+        sensFlux: sensFlux, montantSigne: montantSigne,
         twr: twr,
         twrDepuis: twrDepuis,
         annualiser: annualiser,
