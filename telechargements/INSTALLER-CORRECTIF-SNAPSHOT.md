@@ -240,3 +240,45 @@ comparaison avec le courtier (voir `POURQUOI-LES-ECARTS.md`) :
 L'archive contient du **code source**, pas une APK déjà compilée. Le lien de
 téléchargement direct (forme « raw ») est donné dans la conversation ; le fichier
 est aussi dans le dépôt, dossier `telechargements/`.
+
+## Version 1.7.4 — le même correctif, côté site web (Streamlit)
+
+La version 2 du correctif est arrivée par morceaux. Sa partie **Android** (moteur
+`app/src/main/assets/www/js/`) est déjà publiée : elle est entrée dans `main` avec
+la fusion de la proposition n° 5, et elle est même plus complète que prévu — les
+tuiles web affichent en plus l'**heure** du repère. Les 81 tests JavaScript du
+dépôt la valident, dont le scénario réel du 07/10/2026 :
+
+```
+référence du 06/10 : 78 708,86 $   (snapshot 70 115,82 EUR x 1,125)
+référence du 07/10 : 81 267,52 $   (snapshot 72 226,63 EUR x 1,125)
+portefeuille du moment : 80 955 $  ->  gain de marché  -312,52 $  (-0,38 %)
+                                      et non +2 246 $ (+2,85 %)
+```
+
+Ce qui **manquait**, c'est la partie **web** (`core/session.py`,
+`core/portfolio.py`). La 1.7.4 l'apporte :
+
+1. **Les retraits ne comptent plus comme des entrées.** Dans `pf2_apports`, le
+   signe est porté par la colonne `sens`, pas par le montant. Le moteur web
+   utilisait le montant tel quel : un retrait enregistré en négatif devenait un
+   apport, donc un **faux gain**. Le montant est maintenant pris en valeur
+   absolue et le signe vient de `sens`, comme le fait déjà l'application.
+2. **Un achat (ou une vente) de titres enregistré après le repère du soir est un
+   transfert interne**, pas un gain. C'est l'artefact du 07/10/2026 : l'achat de
+   68 FLXC.L pour 1 943,91 $, saisi après le snapshot, gonflait la performance.
+   La règle utilise l'horodatage `cree_le` (colonne déjà présente en base,
+   aucune migration) et retombe sur la date de l'opération quand il manque.
+3. Le montant en dollars de chaque opération est conservé (`montant_usd`), ce
+   dont la règle ci-dessus a besoin.
+
+**Ce que la 1.7.4 ne contient pas** : le garde-fou des cotations aberrantes
+(refus d'un cours à plus de 25 % de la dernière clôture). Ce travail n'a jamais
+quitté la session précédente ; il n'existe ni dans le dépôt ni dans le correctif
+reçu. Il reste à écrire.
+
+Contrôles de la 1.7.4 : `node tests/test_js.js` → 81 réussis, 0 échec ;
+`python -m pytest tests/ -q` → **561 réussis, 2 ignorés, 14 échecs réseau** —
+exactement le même compte qu'avant, les 14 échecs étant les tests qui interrogent
+Yahoo ou qui exigent l'écriture d'un snapshot. Aucune donnée Supabase n'a été lue
+ni écrite, aucun robot n'a été lancé.
