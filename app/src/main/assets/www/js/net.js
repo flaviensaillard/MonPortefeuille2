@@ -18,6 +18,7 @@
     var cache_serie = {};      // symbole|range -> {timestamps, closes, currency, ok}
     var cache_cours = {};      // ticker|date -> prix
     var cache_variation = {};  // ticker -> fraction
+    var cache_seance = {};     // ticker -> date de la séance comparée (ISO)
     var cache_devise = {};     // ticker -> devise
     var cache_fx = {};         // DEV-CONTRE|date -> taux
     var transport = null;      // pour les tests (renvoie un objet ou une promesse)
@@ -111,6 +112,21 @@
                 if (res && res.length) {
                     var meta = res[0].meta || {};
                     out.currency = (meta.currency || '').toUpperCase() || null;
+                    /* Le « méta » porte la cotation du moment et la clôture
+                       précédente : c'est exactement la référence du courtier
+                       (« variation journalière »). La série, elle, peut s'arrêter
+                       à la séance précédente — cas connu de Yahoo sur IGLN.L,
+                       XDW0.L et FLXC.L, où la dernière ligne arrive sans cours.
+                       S'en remettre aux deux dernières clôtures de la série
+                       affichait donc la variation de la veille. */
+                    var prixMeta = Number(meta.regularMarketPrice);
+                    var veilleMeta = Number(
+                        meta.chartPreviousClose !== undefined && meta.chartPreviousClose !== null
+                            ? meta.chartPreviousClose : meta.previousClose);
+                    out.cours = (isFinite(prixMeta) && prixMeta > 0) ? prixMeta : null;
+                    out.veille = (isFinite(veilleMeta) && veilleMeta > 0) ? veilleMeta : null;
+                    out.seance = meta.regularMarketTime
+                        ? U.iso(new Date(meta.regularMarketTime * 1000)) : null;
                     var ts = res[0].timestamp || [];
                     var q = (res[0].indicators && res[0].indicators.quote && res[0].indicators.quote[0]) || {};
                     var cl = q.close || [];
@@ -152,9 +168,17 @@
                     var idx = dernierAvant(s, dateISO);
                     if (idx >= 0) prix = s.closes[idx];
                 } else {
-                    prix = s.closes[s.closes.length - 1];
-                    if (s.closes.length >= 2 && s.closes[s.closes.length - 2] > 0) {
-                        cache_variation[tk] = prix / s.closes[s.closes.length - 2] - 1;
+                    // Cotation du moment d'abord (méta Yahoo) : la série peut
+                    // être en retard d'une séance sur certains tickers.
+                    prix = (s.cours !== null && s.cours !== undefined)
+                        ? s.cours : s.closes[s.closes.length - 1];
+                    var base = (s.veille !== null && s.veille !== undefined)
+                        ? s.veille
+                        : (s.closes.length >= 2 ? s.closes[s.closes.length - 2] : null);
+                    if (base !== null && base !== undefined && base > 0 && prix > 0) {
+                        cache_variation[tk] = prix / base - 1;
+                        cache_seance[tk] = s.seance
+                            || (s.timestamps.length ? s.timestamps[s.timestamps.length - 1] : null);
                     }
                 }
             }
@@ -178,6 +202,14 @@
 
     function variationRecente(ticker) {
         var v = cache_variation[String(ticker || '').toUpperCase().trim()];
+        return v === undefined ? null : v;
+    }
+
+    /* Séance (date ISO) sur laquelle porte `variationRecente`. Permet d'afficher
+       « clôture du 06/10 » quand le cours du jour n'est pas encore connu : sans
+       cela, on croit que la ligne n'a pas bougé. */
+    function variationSeance(ticker) {
+        var v = cache_seance[String(ticker || '').toUpperCase().trim()];
         return v === undefined ? null : v;
     }
 
@@ -218,7 +250,7 @@
 
     function viderCache() {
         U.vider(cache_serie); U.vider(cache_cours); U.vider(cache_variation);
-        U.vider(cache_devise); U.vider(cache_fx);
+        U.vider(cache_seance); U.vider(cache_devise); U.vider(cache_fx);
     }
 
     // ------------------------------------------------------------- Supabase
@@ -298,7 +330,8 @@
 
     PF.net = {
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
-        variationRecente: variationRecente, deviseDe: deviseDe, coursOr: coursOr,
+        variationRecente: variationRecente, variationSeance: variationSeance,
+        deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, viderCache: viderCache, supabase: supabase,
         setTransport: function (fn) { transport = fn; viderCache(); },
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,

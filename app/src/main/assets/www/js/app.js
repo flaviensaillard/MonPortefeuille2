@@ -1285,7 +1285,8 @@
             + '<div class="card tight" style="margin-bottom:12px">'
             + '<div class="lbl">Valeur</div>'
             + UI.montant(a.valeurUsd, a.valeurEur)
-            + '<div style="margin-top:7px">' + UI.fleche(a.variationPct) + ' <span class="dim" style="font-size:12px">depuis le dernier enregistrement</span></div>'
+            + '<div style="margin-top:7px">' + UI.fleche(a.variationPct) + ' <span class="dim" style="font-size:12px">'
+            + UI.h('variation du jour' + (PF.vues && PF.vues.mentionSeance ? PF.vues.mentionSeance(a) : '')) + '</span></div>'
             + '</div>'
             + '<div class="grille g2">'
             + mini('Quantité', U.quantite(a.quantite), 'titres')

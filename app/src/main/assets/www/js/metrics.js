@@ -218,7 +218,7 @@
             var d = U.parseDate(s.Date || s.date);
             return { ligne: s, date: d, valeur: U.num(s[colVal], 0) };
         }).filter(function (l) { return l.date && l.valeur > 0; })
-            .sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+            .sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : ((a.ligne._live ? 1 : 0) - (b.ligne._live ? 1 : 0))); });
 
         if (lignes.length < 2) {
             return {
@@ -257,7 +257,7 @@
                 } else {
                     var f = fluxAp[i] || 0;
                     flux.push(f);
-                    reconstruit.push(prev !== null && prev !== undefined ? U.arrondi(prev + f, 2) : null);
+                    reconstruit.push(cap[i] !== null ? cap[i] : (prev !== null && prev !== undefined ? U.arrondi(prev + f, 2) : null));
                 }
             }
             lignes.forEach(function (l, idx) { l.ligne.capital_investi_usd = reconstruit[idx]; });
@@ -282,7 +282,6 @@
         if (ajout) flux[flux.length - 1] = U.arrondi(U.num(flux[flux.length - 1], 0) + ajout, 2);
         return flux;
     }
-    }
 
     /* Progression sur une période : graphique + indicateurs. */
     var PERIODES = ['Progression journalière', 'Progression mensuelle', 'Depuis le début du mois',
@@ -293,8 +292,16 @@
         var dates = serie.dates, valeurs = serie.valeurs.slice(), flux = serie.flux.slice();
         if (dates.length < 1) return { vide: true };
 
-        // Le dernier point porte la valorisation en direct du jour.
-        if (valeurLiveUsd > 0) valeurs[valeurs.length - 1] = U.arrondi(valeurLiveUsd, 2);
+        // Le direct est un point distinct. Accepte aussi une série brute de
+        // snapshots : le dernier enregistrement ne doit jamais être écrasé.
+        dates = dates.slice();
+        var dernierLive = serie.lignes && serie.lignes.length
+            && serie.lignes[serie.lignes.length - 1].ligne._live;
+        if (valeurLiveUsd > 0 && !dernierLive && dates[dates.length - 1] <= U.todayISO()) {
+            dates.push(U.todayISO());
+            valeurs.push(U.arrondi(valeurLiveUsd, 2));
+            flux.push(U.num(options.fluxLiveUsd, 0));
+        }
 
         var idxGraphe = [], idxCalc = [];
         var n = dates.length;

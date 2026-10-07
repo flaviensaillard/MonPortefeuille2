@@ -278,8 +278,10 @@ def test_twr_usd_projections_reproduit_swissquote():
         S._enrichir_historiques_usd(ctx)
 
     snaps, valeurs, flux = S.serie_performance(ctx)
-    assert valeurs == [29534.0, 34039.0, 57986.0, 73229.0, 79007.0]
-    assert [round(f, 2) for f in flux] == [0.0, 1988.0, 20365.0, 6585.0, 2922.92]
+    assert valeurs == [29534.0, 34039.0, 57986.0, 73229.0, 79007.0, 79007.0]
+    assert snaps["Date"].iloc[-1].date() == dt.date.today()
+    assert snaps["_live"].iloc[-1]
+    assert [round(f, 2) for f in flux] == [0.0, 1988.0, 20365.0, 6585.0, 2922.92, 0.0]
     rends = [0.0] + metrics.rendements_periode(valeurs, flux)
     par_an = metrics.twr_par_annee([d.date() for d in snaps["Date"]], rends)
     # Aucun faux trou dû à la ligne 29/04/2024 d'Historique ni au taux EUR/USD
@@ -319,7 +321,7 @@ def test_capital_investi_zero_dans_projections_n_invente_pas_de_retrait():
         S._enrichir_historiques_usd(ctx)
 
     snaps, valeurs, flux = S.serie_performance(ctx)
-    assert [round(f, 2) for f in flux] == [0.0, 2922.92, 0.0]
+    assert [round(f, 2) for f in flux] == [0.0, 2922.92, 0.0, 0.0]
     assert float(snaps["capital_investi_usd"].iloc[-1]) == 59629.92
     sauts = metrics.sauts_non_expliques([d.date() for d in snaps["Date"]], valeurs, flux)
     fantomes = metrics.fluxs_sans_effet([d.date() for d in snaps["Date"]], valeurs, flux)

@@ -23,9 +23,41 @@
     /* La référence du jour : on affiche AUSSI la date, pour qu'on ne confonde
        pas « depuis le dernier enregistrement » avec la variation du jour du
        courtier (qui part de la clôture précédente). */
-    function dernierEnregistrement(p) {
+    /* L'enregistrement qui sert de repère : le dernier snapshot, jamais la
+       valorisation en direct (elle changerait à chaque actualisation). */
+    function referenceEnregistrement(ctx) {
+        var lignes = (ctx && ctx.serie && ctx.serie.lignes) || [];
+        for (var i = lignes.length - 1; i >= 0; i--) {
+            if (!lignes[i].ligne._live) return lignes[i].ligne;
+        }
+        return null;
+    }
+
+    /* Heure locale de l'enregistrement (« à 2h58 »), quand elle est connue :
+       deux repères pris à des heures différentes ne sont pas comparables. */
+    function heureEnregistrement(ref) {
+        var quand = ref && ref.cree_le ? new Date(ref.cree_le) : null;
+        if (!quand || isNaN(quand.getTime())) return '';
+        var mn = quand.getMinutes();
+        return ' à ' + quand.getHours() + 'h' + (mn < 10 ? '0' : '') + mn;
+    }
+
+    function dernierEnregistrement(ctx, p) {
         return 'depuis le dernier enregistrement'
-            + (p && p.d0 ? ' du ' + U.jourMoisAnneeISO(p.d0) : '');
+            + (p && p.d0 ? ' du ' + U.jourMoisAnneeISO(p.d0) : '')
+            + heureEnregistrement(referenceEnregistrement(ctx));
+    }
+
+    /* D'où vient le pourcentage d'une fiche : la séance du jour (Yahoo) ou une
+       clôture plus ancienne. On le dit plutôt que de laisser croire que le
+       cours du jour n'a pas bougé. */
+    function mentionSeance(a) {
+        if (!a) return '';
+        if (a.variationOrigine === 'enregistrement') return ' · depuis l’enregistrement';
+        if (a.seanceVariation && a.seanceVariation !== U.todayISO()) {
+            return ' · clôture du ' + U.jourMoisAnneeISO(a.seanceVariation);
+        }
+        return '';
     }
 
     // =========================================================== TABLEAU DE BORD
@@ -52,7 +84,7 @@
             + UI.montant(ctx.patrimoineTotalUsd, ctx.patrimoineTotalEur)
             + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
             + UI.fleche(progTot.twr_per)
-            + '<span class="dim" style="font-size:12px">' + dernierEnregistrement(progTot) + '</span>
+            + '<span class="dim" style="font-size:12px">' + dernierEnregistrement(ctx, progTot) + '</span>'
             + (progTot.twr_per === null ? '' : '<span style="font-size:12.5px;font-weight:650">'
                 + U.usd(gainJourUsd, { dec: 0, signe: true }) + '</span>')
             + '</div></div>';
@@ -61,7 +93,7 @@
             + miniCarte('Portefeuille investi', ctx.totalInvestiUsd, ctx.totalInvestiEur,
                 progInv.twr_per === null ? null : UI.fleche(progInv.twr_per), null, null,
                 progInv.twr_per === null ? null : {
-                    usd: gainJourInvUsd, eur: gainJourInvUsd / fx0, legende: dernierEnregistrement(progInv)
+                    usd: gainJourInvUsd, eur: gainJourInvUsd / fx0, legende: dernierEnregistrement(ctx, progInv)
                 })
             + miniCarte('Performance depuis le début', null, null, null, perfDebut,
                 'TWR, apports neutralisés', {
@@ -73,10 +105,10 @@
         out += '<div class="astuce">Touchez une tuile : le pourcentage se lit en dollars, '
             + 'l’euro en dessous. Touchez à nouveau pour revenir au pourcentage.</div>';
 
-        // --- Vos actifs depuis le dernier enregistrement
+        // --- Vos actifs : variation du jour (même repère que le courtier)
         var investis = ctx.actifs.filter(function (a) { return estInvesti(a); });
         if (investis.length) {
-            out += '<div class="titre">Vos actifs <span class="n">' + dernierEnregistrement(progInv) + '</span></div>';
+            out += '<div class="titre">Vos actifs <span class="n">variation du jour</span></div>';
             out += '<div class="hscroll">';
             investis.forEach(function (a) {
                 var f = U.fleche(a.variationPct);
@@ -84,7 +116,7 @@
                 out += '<div class="actif-carte" data-alt="'
                     + ((a.variationPct || h) ? '1' : '') + '">'
                     + '<div class="tk">' + UI.h(a.ticker) + '</div>'
-                    + '<div class="pc">' + UI.h(nomPoche(a.poche)) + '</div>'
+                    + '<div class="pc">' + UI.h(nomPoche(a.poche) + mentionSeance(a)) + '</div>'
                     + '<div class="pct">'
                     + '<div class="fl ' + f.classe + '">' + UI.h(f.texte) + '</div>'
                     + '<div class="vl">' + U.usd(a.valeurUsd, { dec: 0 }) + '</div>'
@@ -398,7 +430,7 @@
             out += '<div class="ligne" data-pos="' + UI.h(a.ticker) + '">'
                 + '<div class="pastille" style="background:' + couleurPoche(a.poche) + '22">' + icone(a.classe) + '</div>'
                 + '<div class="gr"><div class="tt">' + UI.h(a.ticker) + '</div>'
-                + '<div class="st">' + UI.h(nomPoche(a.poche)) + ' · ' + U.quantite(a.quantite) + ' × '
+                + '<div class="st">' + UI.h(nomPoche(a.poche) + mentionSeance(a)) + ' · ' + U.quantite(a.quantite) + ' × '
                 + U.nombre(a.prix, 2) + ' ' + UI.h(a.deviseCotation) + '</div></div>'
                 + '<div class="dr"><div class="a">' + U.usd(a.valeurUsd, { dec: 0 }) + '</div>'
                 + '<div class="b">' + U.eur(a.valeurEur, { dec: 0 }) + '</div>'
@@ -628,6 +660,17 @@
         var fx = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125;
         var affiches = 0;
 
+        /* Sur la progression journalière, on écrit noir sur blanc la valeur de
+           départ : c'est elle qu'on compare à la « variation journalière » du
+           courtier, et deux repères pris à des heures différentes ne sont pas
+           comparables. */
+        function ligneRepere(contexte, cle, p) {
+            if (cle !== 'Progression journalière') return '';
+            var ref = referenceEnregistrement(contexte);
+            return ' \u00b7 repère de départ ' + U.usd(p.v_debut_usd, { dec: 0 })
+                + (ref ? ' enregistré le ' + U.jourMoisAnneeISO(ref.date) + heureEnregistrement(ref) : '');
+        }
+
         BLOCS_PERF.forEach(function (b) {
             var p = progression(ctx, b.cle, perimetre);
             if (p.vide) return;
@@ -653,7 +696,8 @@
                 + U.jourMoisAnneeISO(courbe.dates[courbe.dates.length - 1])
                 + ' \u00b7 ' + courbe.valeurs.length + ' points \u00b7 valeur fin de p\u00e9riode '
                 + U.usd(p.v_fin_usd, { dec: 0 })
-                + ' <span style="color:var(--euro)">(' + U.eur(p.v_fin_usd / fx, { dec: 0 }) + ')</span></div>'
+                + ' <span style="color:var(--euro)">(' + U.eur(p.v_fin_usd / fx, { dec: 0 }) + ')</span>'
+                + ligneRepere(ctx, b.cle, p) + '</div>'
                 + UI.graphique([{
                     nom: nomPerimetre,
                     valeurs: courbe.valeurs,
@@ -1135,6 +1179,8 @@
 
     PF.vues = {
         bord: vueBord,
+        mentionSeance: mentionSeance,
+        dernierEnregistrement: dernierEnregistrement,
         portefeuille: vuePortefeuille,
         performance: vuePerformance,
         definirPerimetre: function (v) { perimetrePerf = v; PF.store.sauverReglages({ perimetrePerf: v }); },
