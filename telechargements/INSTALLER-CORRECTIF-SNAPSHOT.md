@@ -133,10 +133,11 @@ git commit -m "Correctif : repère d'enregistrement et transferts internes"
 git push
 ```
 
-Le workflow inclus prépare l'APK **1.7.2**, code Android **19**, afin de ne pas
-écraser la release 1.7.0. Si votre APK installé porte déjà un code supérieur à
-19, augmentez `VERSION_CODE` et changez `VERSION_NAME` dans
-`.github/workflows/apk.yml` avant de lancer la compilation.
+Le workflow inclus prépare l'APK **1.7.3**, code Android **20**. La 1.7.2 a été
+publiée le 07/10 en fin d'après-midi ; la 1.7.3 ajoute les deux corrections
+d'affichage décrites plus bas (§ « Version 1.7.3 »). Si votre APK installé porte
+déjà un code supérieur à 20, augmentez `VERSION_CODE` et changez `VERSION_NAME`
+dans `.github/workflows/apk.yml` avant de lancer la compilation.
 
 ---
 
@@ -189,6 +190,8 @@ USD et EUR, taux EUR/USD, et les opérations saisies depuis l'enregistrement.
   (`git apply --check correctif.patch`, puis `git apply correctif.patch`).
 - `A-COPIER-DANS-GITHUB.md` — les 8 blocs de remplacement pour les fichiers
   JavaScript, vérifiés par programme.
+- `POURQUOI-LES-ECARTS.md` — la comparaison chiffrée avec votre courtier
+  (périmètres, repères, sources de cours), établie sur vos captures du 07/10.
 - `EXPLICATION-SIMPLE.md` — le même correctif raconté avec l'image des deux
   tiroirs (compte courant / titres), sans jargon.
 - Ce guide.
@@ -200,9 +203,11 @@ Si votre code a changé depuis la base du patch, ne forcez pas un patch qui
 
 ## Ce qui a été vérifié ici
 
-- **74 tests JavaScript** du moteur (`node tests/test_js.js`) : 74 réussis, 0 échec.
-  Les 8 nouveaux tests rejouent le cas du 07/10 (bon repère, achat avant/après la
-  référence, retraits signés, transfert interne invisible pour le patrimoine total).
+- **81 tests JavaScript** du moteur (`node tests/test_js.js`) : 81 réussis, 0 échec.
+  Les 15 nouveaux tests rejouent le cas du 07/10 (bon repère, achat avant/après la
+  référence, retraits signés, transfert interne invisible pour le patrimoine total)
+  et verrouillent la cotation du moment (la série Yahoo peut s'arrêter à la séance
+  précédente) ainsi que les mentions affichées sur les fiches.
 - **19 tests Python** de la progression (`pytest tests/test_progression_snapshot.py`) :
   réussis, dont 7 nouveaux sur les transferts internes.
 - **Suite Python complète** : 561 réussis, 2 ignorés. Les 14 échecs qui restent
@@ -212,6 +217,25 @@ Si votre code a changé depuis la base du patch, ne forcez pas un patch qui
 - `node --check` sur les trois fichiers JavaScript : OK (plus aucune erreur de
   syntaxe), et le patch a été appliqué à blanc sur la base `d11a953` avec succès.
 - Aucune donnée Supabase n'a été lue ni écrite. Aucun robot n'a été lancé.
+
+## Version 1.7.3 — les deux écarts restants, corrigés
+
+Après l'installation de la 1.7.2, deux différences subsistaient dans la
+comparaison avec le courtier (voir `POURQUOI-LES-ECARTS.md`) :
+
+1. **La ligne d'un actif affichait la variation de la veille.** Pour IGLN.L,
+   XDW0.L et FLXC.L, Yahoo renvoie une dernière ligne de cotation sans cours ;
+   le programme la retirait et comparait donc les deux clôtures précédentes.
+   D'où « IGLN.L −0,70 % » là où le courtier affichait −1,35 % (et une
+   valorisation de la ligne en retard d'un jour). L'application lit maintenant la
+   **cotation du moment** et la **clôture précédente** publiées par Yahoo à côté
+   de la série — les deux chiffres du courtier — avec l'ancien calcul en repli.
+2. **Les fiches et les repères ne disaient pas tout.** La mention « clôture du
+   06/10 » apparaît quand le cours du jour n'est pas encore connu ; les tuiles de
+   patrimoine affichent la **date et l'heure** du repère (« du 07/10/2026 à
+   2h58 ») et la page Performance affiche sa **valeur** (« repère de départ
+   81 268 $ »). Deux repères pris à des heures différentes ne sont plus
+   comparables par erreur.
 
 L'archive contient du **code source**, pas une APK déjà compilée. Le lien de
 téléchargement direct (forme « raw ») est donné dans la conversation ; le fichier

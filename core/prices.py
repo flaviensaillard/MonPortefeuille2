@@ -144,6 +144,31 @@ def serie(ticker: str):
 
 
 
+def cotation_du_moment(ticker: str) -> tuple[float, float] | None:
+    """Dernier cours et clôture précédente, tels que Yahoo les donne au moment T.
+
+    C'est exactement la référence du courtier (« variation journalière ») : le
+    cours du moment comparé à la clôture précédente. La série historique, elle,
+    peut s'arrêter à la séance d'avant — Yahoo renvoie une ligne de queue sans
+    cours pour IGLN.L, XDW0.L et FLXC.L — et une ligne semblait alors n'avoir
+    pas bougé.
+
+    Retourne `None` si Yahoo ne répond rien d'exploitable : l'appelant garde
+    alors le comportement historique (dernières clôtures de la série).
+    """
+    symbole = ALIAS_YAHOO.get(str(ticker).upper().strip(), str(ticker).upper().strip())
+    try:
+        fi = yf.Ticker(symbole).fast_info
+        dernier = float(getattr(fi, "last_price", None) or 0.0)
+        veille = float(getattr(fi, "previous_close", None) or 0.0)
+    except Exception as exc:
+        log.info("Cotation du moment indisponible pour %s : %s", ticker, exc)
+        return None
+    if dernier <= 0 or veille <= 0 or dernier != dernier or veille != veille:
+        return None
+    return dernier, veille
+
+
 def cours(ticker: str, date: str | None = None) -> float:
     """Cours de clôture d'un titre.
 
@@ -185,6 +210,16 @@ def cours(ticker: str, date: str | None = None) -> float:
                 raise CoursIndisponible(ticker, cle_date, "aucun cours anterieur")
             valeur = float(filtrees.iloc[-1])
         else:
+            # Cotation du moment d'abord : elle porte AUSSI la clôture
+            # précédente, donc la variation du jour telle que le courtier
+            # l'affiche. Repli sur la série si Yahoo ne la donne pas.
+            marche = cotation_du_moment(ticker)
+            if marche is not None:
+                valeur, veille = marche
+                _cache_var[ticker] = (valeur / veille) - 1.0
+                _cache[cle] = valeur
+                return float(valeur)
+
             tk = yf.Ticker(symbole)
             h = tk.history(period="5d")
             if h.empty:

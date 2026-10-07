@@ -90,6 +90,19 @@ fichiers-là. C'est la raison pour laquelle l'archive contient les trois fichier
 **complets et réparés** — et pour laquelle il faut les remettre tels quels, sans
 essayer de les retoucher.
 
+## Et pourquoi les chiffres ne tombent pas pile sur ceux du courtier ?
+
+Parce que les deux ne mesurent pas exactement la même chose : le courtier compte
+**un seul compte** (titres, crypto, espèces), l'application compte **tout** ce que
+vous possédez (en ajoutant votre épargne de précaution et votre cash). Et les
+cours ne viennent pas de la même source : l'application utilise Yahoo Finance
+(gratuit, différé d'environ 15 minutes), le courtier son flux en temps réel.
+
+Le détail chiffré, écran par écran, est dans `POURQUOI-LES-ECARTS.md`. La version
+1.7.3 corrige en plus la variation des fiches d'actifs (elle affichait celle de la
+veille pour l'or, l'énergie et la Chine) et écrit la date **et l'heure** du
+repère, ainsi que sa valeur.
+
 ## Comment faire, en résumé
 
 1. Téléchargez l'archive et décompressez-la.

@@ -410,8 +410,57 @@ PF.portefeuille.charger().then((ctx) => {
         return coupe === false && PF.ia.internet() === true;
     });
 
-    console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
-    process.exit(echecs === 0 ? 0 : 1);
+
+    // --- Écarts avec le courtier : cotation du moment, séance affichée
+    console.log('\nÉcarts avec le courtier : cotation du moment et séance affichée');
+    test('une clôture plus ancienne est annoncée sur la fiche', () => {
+        const m = PF.vues.mentionSeance({ variationPct: -0.0135, variationOrigine: 'jour',
+            seanceVariation: '2026-10-06' });
+        return m.indexOf('clôture du 06/10/2026') >= 0;
+    });
+    test('la séance du jour n’est pas répétée sur la fiche', () =>
+        PF.vues.mentionSeance({ variationPct: -0.008, variationOrigine: 'jour',
+            seanceVariation: '2026-10-07' }) === '');
+    test('un chiffre venu de l’enregistrement le dit', () =>
+        PF.vues.mentionSeance({ variationOrigine: 'enregistrement' }).indexOf('enregistrement') >= 0);
+    test('le repère affiche sa date et son heure', () => {
+        const contexteRef = { serie: { lignes: [
+            { ligne: { date: '2026-10-06', cree_le: '2026-10-06T00:58:00Z' } },
+            { ligne: { date: '2026-10-07', cree_le: '2026-10-07T00:58:00Z' } },
+            { ligne: { date: '2026-10-07', _live: true } }
+        ] } };
+        const txt = PF.vues.dernierEnregistrement(contexteRef, { d0: '2026-10-07' });
+        // L'heure est affichée en heure locale : on vérifie la date et la forme.
+        return txt.indexOf('07/10/2026') >= 0 && /\d+h\d\d/.test(txt);
+    });
+
+    // La cotation du moment (méta Yahoo) doit primer sur la dernière clôture de
+    // la série : celle-ci peut s'arrêter à la séance précédente (IGLN.L, XDW0.L,
+    // FLXC.L), et la ligne semblait alors n'avoir pas bougé.
+    const T_META = Date.UTC(2026, 9, 7, 14, 30) / 1000;
+    PF.net.setTransport((method, url, entetes, corps) => {
+        if (url.indexOf('/v8/finance/chart/') >= 0) {
+            return { ok: true, status: 200, body: JSON.stringify({ chart: { result: [{
+                meta: { currency: 'USD', regularMarketPrice: 99, chartPreviousClose: 100,
+                    regularMarketTime: T_META },
+                timestamp: [T_META - 3 * 86400, T_META - 2 * 86400],
+                indicators: { quote: [{ close: [80.5, 80.6] }] } }], error: null } }) };
+        }
+        return fauxTransport(method, url, entetes, corps);
+    });
+    PF.net.cours('META.TEST').then((prix) => {
+        test('la cotation du moment prime sur la dernière clôture', () => proche(prix, 99));
+        test('la variation du jour est calculée sur cette cotation', () =>
+            proche(PF.net.variationRecente('META.TEST'), -0.01));
+        test('la séance comparée vient du méta', () =>
+            PF.net.variationSeance('META.TEST') === U.iso(new Date(T_META * 1000)));
+        PF.net.setTransport(fauxTransport);
+        console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
+        process.exit(echecs === 0 ? 0 : 1);
+    }).catch((e) => {
+        console.log('  ✗ méta Yahoo : ' + (e && e.stack ? e.stack : e));
+        process.exit(1);
+    });
 }).catch((e) => {
     console.log('  ✗ chargement : ' + (e && e.stack ? e.stack : e));
     process.exit(1);

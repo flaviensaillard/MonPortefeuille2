@@ -152,12 +152,16 @@ ui.metric_usd_eur(
 )
 
 # ---------------------------------------------------------------------------
-# Variation des actifs depuis le dernier enregistrement (flèche ↗ / ↘ + %)
+# Variation des actifs : celle du jour, comme le courtier (flèche ↗ / ↘ + %)
 # ---------------------------------------------------------------------------
+# Le pourcentage d'une ligne est le cours du moment comparé à la clôture
+# précédente — exactement la « variation journalière » du courtier. Ce n'est pas
+# la variation depuis le dernier enregistrement : celle-ci ne concerne que les
+# tuiles de patrimoine, plus haut, et son repère y est écrit en toutes lettres.
 actifs_investis_tb = [a for a in ctx.actifs if a.est_investi]
 if actifs_investis_tb:
     st.divider()
-    st.subheader("📌 Vos actifs depuis le dernier enregistrement")
+    st.subheader("📌 Vos actifs — variation du jour (comme votre courtier)")
     cols_actifs = st.columns(len(actifs_investis_tb))
     for idx_ac, a in enumerate(actifs_investis_tb):
         var_a = a.variation_pct if a.variation_pct is not None else ctx.variations_actifs.get(a.ticker, 0.0)

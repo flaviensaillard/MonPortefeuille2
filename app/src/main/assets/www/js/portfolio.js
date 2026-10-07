@@ -470,8 +470,10 @@
         })).then(function () { return null; });
     }
 
-    /* Variation depuis le dernier enregistrement : le cours Yahoo d'abord, la
-       table `Donnees` de la v1 ensuite. */
+    /* Variation du jour (cotation du moment comparée à la clôture précédente,
+       comme le courtier) : le cours Yahoo d'abord, la table `Donnees` de la v1
+       ensuite — cette dernière dit « depuis l'enregistrement », et l'écran
+       l'affiche ainsi. */
     function variationsActifs(ctx) {
         var varsV1 = variationsDonneesV1(ctx.donneesV1 || []);
         return Promise.all(ctx.actifs.map(function (a) {
@@ -483,16 +485,25 @@
         })).then(function () {
             ctx.actifs.forEach(function (a) {
                 var v = a.variationPct;
+                // La séance que Yahoo a réellement comparée (« 2026-10-07 »).
+                // Affichée quand ce n'est pas le jour même : l'utilisateur voit
+                // alors que la ligne est une clôture, pas un cours manquant.
+                var seance = PF.net.variationSeance(a.ticker);
+                var origine = seance ? 'jour' : null;
                 var info = varsV1[a.ticker.toUpperCase()] || {};
                 if ((v === null || v === undefined || Math.abs(v) <= 1e-6) && info) {
                     if (info.cours_usd && info.cours_usd > 0 && a.deviseCotation === 'USD' && a.prix > 0
                         && Math.abs(a.prix - info.cours_usd) > 1e-4) {
                         v = a.prix / info.cours_usd - 1;
+                        origine = 'enregistrement';
                     } else if (info.var_fraction !== null && info.var_fraction !== undefined) {
                         v = info.var_fraction;
+                        origine = 'enregistrement';
                     }
                 }
                 a.variationPct = (v === null || v === undefined) ? 0 : v;
+                a.variationOrigine = origine;
+                a.seanceVariation = seance;
                 ctx.variationsActifs[a.ticker] = a.variationPct;
             });
         });
