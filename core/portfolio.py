@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from dataclasses import dataclass, field
+from math import isfinite
 
 import pandas as pd
 from . import dates
@@ -155,6 +156,10 @@ class Transaction:
     id: int | None = None
     source: str | None = None
     reference: str | None = None
+    # Horodatage d'ENREGISTREMENT en base (`cree_le`), pas la date de
+    # l'opération. Il décide si l'opération peut figurer dans un snapshot écrit
+    # avant elle — c'est ce qui distingue un apport d'un transfert interne.
+    cree_le: dt.datetime | None = None
 
     @property
     def est_achat(self) -> bool:
@@ -227,11 +232,16 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
                     tx_id = None
             src_val = str(row.get("Source") or "manuel").strip() if pd.notna(row.get("Source")) else "manuel"
             ref_val = str(row.get("Référence") or "").strip() if pd.notna(row.get("Référence")) else None
+            cree_val = None
+            for cle in ("cree_le", "Cree_le", "created_at", "Created_at"):
+                if cle in getattr(row, "index", []) and _horodatage(row[cle]) is not None:
+                    cree_val = _horodatage(row[cle])
+                    break
 
             sortie.append(Transaction(
                 ticker=ticker, type=typ, date=d.date(), quantite=quantite,
                 cours=cours, frais=frais, devise=devise, montant_net=round(net, 6),
-                id=tx_id, source=src_val, reference=ref_val,
+                id=tx_id, source=src_val, reference=ref_val, cree_le=cree_val,
             ))
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError(f"Transaction ligne {i} illisible : {exc}") from exc
@@ -250,6 +260,83 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
     # désordre. Traiter les achats d'abord est la convention usuelle, et c'est
     # la seule qui rende l'arithmétique du PRU possible.
     return sorted(sortie, key=lambda t: (t.date, 0 if t.est_achat else 1, t.ticker))
+
+
+def _horodatage(brut) -> dt.datetime | None:
+    """Horodatage d'enregistrement, tolerant : `None` si absent ou illisible.
+
+    La table peut rendre un texte ISO, un `datetime` deja converti ou `NULL`.
+    Aucune de ces formes ne doit faire echouer la lecture des transactions :
+    au pire, on retombe sur la comparaison des dates.
+    """
+    if brut is None:
+        return None
+    if not isinstance(brut, (dt.datetime, dt.date)) and pd.isna(brut):
+        return None
+    quand = pd.to_datetime(brut, errors="coerce", utc=True)
+    if pd.isna(quand):
+        return None
+    return quand.tz_localize(None).to_pydatetime()
+
+
+def montant_net_usd(t: Transaction) -> float | None:
+    """Montant net de la transaction en dollars, frais inclus.
+
+    Un taux de change indisponible rend `None` : mieux vaut ignorer une
+    transaction que la compter dans la mauvaise devise. Le dollar lui-meme ne
+    passe jamais par le reseau.
+    """
+    devise = (getattr(t, "devise", "") or "USD").upper()
+    if devise == "USD":
+        return float(t.montant_net)
+    jour = t.date.isoformat() if isinstance(t.date, dt.date) else str(t.date)
+    try:
+        taux = float(fx.taux(devise, jour, "USD"))
+    except Exception:
+        return None
+    if not isfinite(taux) or taux <= 0:
+        return None
+    return float(t.montant_net) * taux
+
+
+def flux_titres_internes(
+    transactions: list[Transaction] | None,
+    ref_date: dt.date | None,
+    ref_cree_le=None,
+) -> float:
+    """Achats (+) et ventes (-) de titres enregistres APRES la reference, en USD.
+
+    Payer des titres avec les liquidites ne change pas la richesse : c'est un
+    transfert du perimetre « courant » vers le perimetre « investi ». Compte
+    comme un gain, il gonfle la progression du montant de l'achat — c'est
+    l'artefact du 07/10/2026 (68 FLXC.L, 1 943,91 $ : +2,85 % affiches au lieu
+    de -0,38 %).
+
+    Le test decisif n'est pas la date de l'operation mais son ENREGISTREMENT :
+    une operation saisie apres le snapshot ne peut pas y figurer, meme si elle
+    porte la meme date. L'horodatage `cree_le` le dit exactement ; a defaut, on
+    retient les operations STRICTEMENT posterieures a la date de la reference.
+
+    Ne s'applique qu'au perimetre investi : le patrimoine total, lui, ne bouge
+    pas (le transfert reste a l'interieur).
+    """
+    if not transactions or ref_date is None:
+        return 0.0
+
+    ref_temps = _horodatage(ref_cree_le)
+    total = 0.0
+    for t in transactions:
+        montant = montant_net_usd(t)
+        if montant is None or montant == 0:
+            continue
+        if t.cree_le is not None and ref_temps is not None:
+            apres = t.cree_le > ref_temps
+        else:
+            apres = str(t.date) > str(ref_date)
+        if not apres:
+            continue
+        total += (1.0 if t.est_achat else -1.0) * abs(montant)
+    return round(total, 2)
 
 
 # ---------------------------------------------------------------------------

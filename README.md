@@ -201,6 +201,37 @@ Ces points sont marqués « À VÉRIFIER » dans `core/fiscal_bars.py` et `core/
 
 ---
 
+## Variation depuis le dernier enregistrement
+
+La progression journalière compare le **dernier snapshot enregistré** à la
+valorisation en direct. Le snapshot nocturne reste présent même s'il est daté
+d'aujourd'hui ; le direct est un point distinct, uniquement en mémoire, et ne
+réécrit pas `pf2_snapshots`. Le dernier snapshot v2 prime sur une valorisation
+`Projections` portant la même date.
+
+Les pourcentages sont calculés **en USD**, apports/retraits neutralisés selon les
+flux datés disponibles. Le gain affiché en euros est l'équivalent du gain USD au
+taux actuel, pas nécessairement la différence des deux valorisations en euros.
+Exemple du 07/10/2026 : 72 226,23 € → 72 529 € correspond à +302,77 € et +0,4192 %
+bruts en EUR ; le rendement USD peut différer si le change a bougé. Le montant
+USD du snapshot est reconstitué depuis `equivalent_or_oz × cours_or_usd` lorsque
+ces données sont présentes, avec le repli existant au taux actuel sinon.
+
+**Ordre dans la journée :** il est établi par l'horodatage d'enregistrement
+(`cree_le`). Une opération saisie *après* un snapshot ne peut pas y figurer, même
+si elle porte la même date ; à défaut d'horodatage, on retient les opérations
+strictement postérieures à la date de la référence. Un flux du jour, lui, est
+rattaché au snapshot de ce jour et n'est pas compté une seconde fois entre ce
+snapshot et le direct.
+
+**Achats et ventes de titres (transferts internes) :** payer des titres avec les
+liquidités ne change pas la richesse — l'argent passe du compte courant aux
+titres. Un achat enregistré après la référence s'ajoute donc aux apports du
+périmètre **investi** (une vente s'en déduit) et ne touche **jamais** le
+patrimoine total. Sans cela, un achat était compté comme un gain de marché.
+Exemple du 07/10/2026 : 68 FLXC.L (1 943,91 $) saisis après le snapshot du 06/10
+faisaient afficher +2 246 $ / +2,85 % ; la journée vaut −312,52 $ (−0,38 %).
+
 ## Tests
 
 ```bash

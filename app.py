@@ -133,7 +133,7 @@ ui.metric_usd_eur(
 ui.metric_usd_eur(
     c2, "Portefeuille investi", ctx.total_investi_usd, ctx.total_investi_eur,
     delta=delta_dernier_inv,
-    help="Actifs stratégiques soumis à l'allocation cible.",
+    help="Actifs stratégiques soumis à l'allocation cible. Variation en dollars depuis le dernier snapshot, change inclus ; elle peut différer de la variation en euros.",
 )
 ui.metric_pct(
     c3,

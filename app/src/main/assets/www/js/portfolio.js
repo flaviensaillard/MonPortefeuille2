@@ -552,8 +552,8 @@
         ctx.etats = agregerParPoche(ctx.actifs, ctx.totalInvestiEur, ctx.totalInvestiUsd);
     }
 
-    /* Attache les colonnes en dollars aux apports et aux snapshots, puis met le
-       dernier point à la valorisation en direct du jour. */
+    /* Attache les colonnes en dollars aux apports et aux snapshots, puis ajoute
+       un point distinct pour la valorisation en direct du jour. */
     function enrichirHistoriquesUsd(ctx) {
         var taux = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125;
 
@@ -636,23 +636,36 @@
 
         lignes.sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
 
-        // Le dernier point reflète la valorisation en direct.
-        if (lignes.length && ctx.totalInvestiUsd > 0) {
-            var last = lignes[lignes.length - 1];
-            last.patrimoine_investi_usd = U.arrondi(ctx.totalInvestiUsd, 2);
-            last.patrimoine_investi_eur = U.arrondi(ctx.totalInvestiEur, 2);
-            if (ctx.patrimoineTotalUsd >= ctx.totalInvestiUsd) {
-                last.patrimoine_total_usd = U.arrondi(ctx.patrimoineTotalUsd, 2);
-                last.patrimoine_total_eur = U.arrondi(ctx.patrimoineTotalEur, 2);
-                last.precaution_usd = U.arrondi(ctx.totalPrecautionUsd, 2);
-                last.precaution_eur = U.arrondi(ctx.totalPrecautionEur, 2);
+        // La dernière référence pf2 fait foi même si Projections porte la
+        // même date. Garder le capital v1, pas une autre valorisation USD.
+        if (lignes.length) {
+            var idxDernier = lignes.length - 1;
+            var ref = parDate[lignes[idxDernier].date];
+            if (ref) {
+                var capDernier = lignes[idxDernier].capital_investi_usd;
+                lignes[idxDernier] = snapshotVersUsd(ref, lignes[idxDernier].date, taux, ctx);
+                lignes[idxDernier].capital_investi_usd = capDernier;
             }
-            if (ctx.equivalentOrOz) last.equivalent_or_oz = U.arrondi(ctx.equivalentOrOz, 4);
-            if (ctx.coursOr) last.cours_or_usd = U.arrondi(ctx.coursOr, 2);
         }
 
         ctx.snapshots = lignes;
+        // Ne jamais remplacer le snapshot nocturne par le direct.
+        var jourLive = U.todayISO();
+        if (lignes.length && ctx.totalInvestiUsd > 0 && lignes[lignes.length - 1].date <= jourLive) {
+            lignes.push({
+                date: jourLive, _live: true,
+                patrimoine_investi_usd: U.arrondi(ctx.totalInvestiUsd, 2),
+                patrimoine_investi_eur: U.arrondi(ctx.totalInvestiEur, 2),
+                patrimoine_total_usd: U.arrondi(ctx.patrimoineTotalUsd, 2),
+                patrimoine_total_eur: U.arrondi(ctx.patrimoineTotalEur, 2),
+                precaution_usd: U.arrondi(ctx.totalPrecautionUsd, 2),
+                precaution_eur: U.arrondi(ctx.totalPrecautionEur, 2),
+                courant_usd: U.arrondi(ctx.totalCourantUsd, 2),
+                courant_eur: U.arrondi(ctx.totalCourantEur, 2),
+                equivalent_or_oz: ctx.equivalentOrOz, cours_or_usd: ctx.coursOr
+            });
         }
+
         // --- Achats et ventes de titres enregistrés APRÈS la dernière référence
         // Payer des titres avec des liquidités ne change pas la richesse : c'est
         // un transfert du périmètre « courant » vers le périmètre « investi ».
@@ -760,6 +773,7 @@
         if (!premierConnu) {
             var cumul = 0, aDates = Object.keys(fluxJour).sort();
             snaps.forEach(function (s) {
+                cumul = 0;
                 aDates.forEach(function (d) { if (d <= s.date) cumul += fluxJour[d]; });
                 s.capital_investi_usd = cumul > 0 ? U.arrondi(cumul, 2) : null;
                 if (s.capital_investi_usd) {

@@ -32,6 +32,7 @@ from .portfolio import (
     agreger_par_poche,
     calculer_positions,
     charger_transactions,
+    flux_titres_internes,
     valoriser,
 )
 from .rebalance import diagnostiquer
@@ -234,9 +235,10 @@ def serie_performance(
     df["Date"] = _parser_dates(df["Date"])
     df[col_val] = pd.to_numeric(df[col_val], errors="coerce")
     df = df.dropna(subset=["Date", col_val])
-    df = df[df[col_val] > 0].sort_values("Date").reset_index(drop=True)
+    df["_live"] = df.get("_live", pd.Series(False, index=df.index)).eq(True)
+    df = df[df[col_val] > 0].sort_values(["Date", "_live"], kind="stable").reset_index(drop=True)
     if len(df) < 2:
-        return df, [], []
+        return df, df[col_val].astype(float).tolist(), [0.0] * len(df)
 
     dates_l = [d.date() for d in df["Date"]]
     valeurs = df[col_val].astype(float).tolist()
@@ -519,8 +521,7 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
        dans la v1) alimentent `patrimoine_investi_usd`, `patrimoine_total_usd`,
        `precaution_usd` et `capital_investi_usd`. Et si le portefeuille est
        valorisé en direct aujourd'hui (`ctx.total_investi_usd > 0`), le dernier
-       point reflète la valeur en direct (comme `df_p_live` dans `app.py` l. 461
-       de la v1), ce qui donne la performance 2026 en temps réel.
+       point en direct est ajouté séparément, sans écraser le snapshot nocturne.
     """
     from . import dates as _dates
 
@@ -565,6 +566,9 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         df_proj = pd.DataFrame()
 
     snaps = ctx.snapshots.copy() if (ctx.snapshots is not None and not ctx.snapshots.empty) else pd.DataFrame()
+    if "_live" in snaps.columns:
+        snaps = snaps[~snaps["_live"].eq(True)].drop(columns="_live")
+    ctx.snapshots = snaps
 
     if df_proj is not None and not df_proj.empty and "Date" in df_proj.columns:
         p = df_proj.copy()
@@ -659,23 +663,6 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
                 })
 
         df_out = pd.DataFrame(lignes_u)
-        # Mise à jour du point du jour avec la valorisation en direct (comme
-        # `df_p_live` dans `app.py` l. 461 de la v1) pour que 2026 affiche la
-        # performance en direct (ex. +4,1 % à 79 007 $).
-        if not df_out.empty and ctx.total_investi_usd > 0:
-            idx_last = df_out.index[-1]
-            df_out.at[idx_last, "patrimoine_investi_usd"] = round(ctx.total_investi_usd, 2)
-            df_out.at[idx_last, "patrimoine_investi_eur"] = round(ctx.total_investi_eur, 2)
-            if ctx.patrimoine_total_usd >= ctx.total_investi_usd:
-                df_out.at[idx_last, "patrimoine_total_usd"] = round(ctx.patrimoine_total_usd, 2)
-                df_out.at[idx_last, "patrimoine_total_eur"] = round(ctx.patrimoine_total_eur, 2)
-                df_out.at[idx_last, "precaution_usd"] = round(ctx.total_precaution_usd, 2)
-                df_out.at[idx_last, "precaution_eur"] = round(ctx.total_precaution_eur, 2)
-            if ctx.equivalent_or_oz:
-                df_out.at[idx_last, "equivalent_or_oz"] = round(ctx.equivalent_or_oz, 4)
-            if ctx.cours_or:
-                df_out.at[idx_last, "cours_or_usd"] = round(ctx.cours_or, 2)
-
         ctx.snapshots = df_out
     elif not snaps.empty:
         # Repli si `Projections` n'est pas accessible : on déduit l'USD depuis
@@ -702,6 +689,57 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         snaps["patrimoine_total_usd"] = tot_u_list
         snaps["precaution_usd"] = prec_u_list
         ctx.snapshots = snaps
+
+    # Pour la référence la plus récente, pf2_snapshots fait foi : ne pas
+    # associer ses euros aux dollars d'une autre valorisation de Projections.
+    # L'historique v1 et son capital investi restent inchangés.
+    if not snaps.empty and not ctx.snapshots.empty:
+        dates_brutes = _parser_dates(snaps["Date"])
+        dernier = dates_brutes.max()
+        if pd.notna(dernier) and dernier == _parser_dates(ctx.snapshots["Date"]).max():
+            sr = snaps.loc[dates_brutes == dernier].iloc[-1]
+            inv_e = float(sr.get("patrimoine_investi_eur") or 0.0)
+            tot_e = float(sr.get("patrimoine_total_eur") or inv_e)
+            oz, co = sr.get("equivalent_or_oz"), sr.get("cours_or_usd")
+            inv_u = float(oz) * float(co) if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0 else inv_e * taux
+            ratio = inv_u / inv_e if inv_e > 0 else taux
+            idx = ctx.snapshots.index[_parser_dates(ctx.snapshots["Date"]) == dernier][-1]
+            for cle, valeur in {
+                "patrimoine_investi_eur": inv_e, "patrimoine_total_eur": tot_e,
+                "patrimoine_investi_usd": inv_u, "patrimoine_total_usd": tot_e * ratio,
+                "precaution_eur": float(sr.get("precaution_eur") or 0.0),
+                "courant_eur": float(sr.get("courant_eur") or 0.0),
+                "precaution_usd": float(sr.get("precaution_eur") or 0.0) * ratio,
+                "courant_usd": float(sr.get("courant_eur") or 0.0) * ratio,
+                "equivalent_or_oz": oz, "cours_or_usd": co,
+            }.items():
+                ctx.snapshots.at[idx, cle] = round(valeur, 2) if pd.notna(valeur) and cle.endswith(("_eur", "_usd")) else valeur
+
+    if not ctx.snapshots.empty:
+        ctx.snapshots = ctx.snapshots.sort_values("Date", kind="stable").reset_index(drop=True)
+
+    # Un snapshot daté d'aujourd'hui reste la référence de la nuit. Le point
+    # live est distinct, daté du jour réel (pas de la dernière date historique).
+    # La table ne porte pas d'heure : aucun flux intrajournalier n'est imputé
+    # une seconde fois quand le snapshot et le live ont la même date.
+    if not ctx.snapshots.empty and ctx.total_investi_usd > 0:
+        jour = pd.Timestamp(dt.date.today())
+        if pd.to_datetime(ctx.snapshots["Date"]).max() <= jour:
+            live = {
+                "Date": jour, "date": jour.date().isoformat(), "_live": True,
+                "patrimoine_investi_usd": round(ctx.total_investi_usd, 2),
+                "patrimoine_investi_eur": round(ctx.total_investi_eur, 2),
+                "patrimoine_total_usd": round(ctx.patrimoine_total_usd, 2),
+                "patrimoine_total_eur": round(ctx.patrimoine_total_eur, 2),
+                "precaution_usd": round(ctx.total_precaution_usd, 2),
+                "precaution_eur": round(ctx.total_precaution_eur, 2),
+                "courant_usd": round(ctx.total_courant_usd, 2),
+                "courant_eur": round(ctx.total_courant_eur, 2),
+                "equivalent_or_oz": ctx.equivalent_or_oz,
+                "cours_or_usd": ctx.cours_or,
+            }
+            live = {k: v for k, v in live.items() if v is not None}
+            ctx.snapshots = pd.concat([ctx.snapshots, pd.DataFrame([live])], ignore_index=True)
 
     # --- 3. Propagation complète de `capital_investi_usd` et `capital_investi_eur` ---
     # Garantit qu'aucune date (ni le 02/10/2026 où la v1 a écrit 0, ni les
@@ -756,6 +794,32 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         ctx.snapshots = df_s
 
 
+def _derniere_reference(ctx: "Contexte") -> tuple[dt.date | None, object]:
+    """Date et horodatage d'enregistrement du dernier snapshot (hors direct).
+
+    Le point `_live` est la valorisation du moment : il ne peut pas servir de
+    reference, sinon la progression comparerait le direct a lui-meme.
+    """
+    snaps = getattr(ctx, "snapshots", None)
+    if snaps is None or getattr(snaps, "empty", True):
+        return None, None
+    vus = snaps
+    if "_live" in getattr(vus, "columns", []):
+        vus = vus[~vus["_live"].eq(True)]
+    if vus.empty:
+        return None, None
+
+    ligne = vus.iloc[-1]
+    date_ref = None
+    brut = ligne.get("Date", ligne.get("date"))
+    if brut is not None:
+        quand = pd.to_datetime(brut, errors="coerce")
+        if pd.notna(quand):
+            date_ref = quand.date()
+    cree = ligne.get("cree_le") if "cree_le" in vus.columns else None
+    if cree is not None and pd.isna(cree):
+        cree = None
+    return date_ref, cree
 
 
 def progression_periode(
@@ -777,7 +841,7 @@ def progression_periode(
     df_p = df_base.copy()
     df_p["date_dt"] = pd.to_datetime(df_p["Date"], errors="coerce")
     df_p["_flux_usd"] = flux_base
-    df_p = df_p.dropna(subset=["date_dt"]).sort_values("date_dt").reset_index(drop=True)
+    df_p = df_p.dropna(subset=["date_dt"]).sort_values("date_dt", kind="stable").reset_index(drop=True)
 
     col_val_usd = (
         "patrimoine_investi_usd"
@@ -787,28 +851,18 @@ def progression_periode(
     if col_val_usd not in df_p.columns:
         col_val_usd = "patrimoine_investi_eur"
 
-    # Le dernier point de `df_p` porte la valorisation en direct d'aujourd'hui
-    # (et `df_p.iloc[-2]` est la clôture de la veille) : on ne duplique jamais
-    # la dernière ligne afin que `df_p.tail(2)` mesure exactement la variation
-    # depuis la veille (`iloc[-2]` -> `iloc[-1]`).
-    val_live_usd = (
-        ctx.total_investi_usd if perimetre == "Portefeuille investi" else ctx.patrimoine_total_usd
-    )
-    if val_live_usd > 0 and not df_p.empty:
-        df_p.loc[df_p.index[-1], col_val_usd] = round(val_live_usd, 2)
-
     d_min = df_p["date_dt"].min().date()
     d_max = df_p["date_dt"].max().date()
     label_periode = mode_periode
 
     if mode_periode == "Progression journalière":
-        # Progression journalière = progression depuis la veille (dernier snapshot antérieur au dernier point -> point actuel)
+        # Dernier snapshot conservé -> point en direct, même si les dates sont identiques.
         df_graphe = df_p.tail(min(len(df_p), 90)).copy()
         df_calc = df_p.tail(min(len(df_p), 2)).copy()
     elif mode_periode == "Progression mensuelle":
         df_p["_ym"] = df_p["date_dt"].dt.to_period("M")
         flux_mensuel = df_p.groupby("_ym")["_flux_usd"].sum()
-        df_graphe = df_p.groupby("_ym", as_index=False).last().sort_values("date_dt").reset_index(drop=True)
+        df_graphe = df_p.groupby("_ym", as_index=False).last().sort_values("date_dt", kind="stable").reset_index(drop=True)
         df_graphe["_flux_usd"] = [float(flux_mensuel.get(ym, 0.0)) for ym in df_graphe["_ym"]]
         df_calc = df_graphe.tail(min(len(df_graphe), 2)).copy()
     elif mode_periode == "Depuis le début du mois":
@@ -845,11 +899,25 @@ def progression_periode(
     if len(df_calc) >= 2:
         d0_str = df_calc["date_dt"].iloc[0].strftime("%d/%m/%Y")
         d1_str = df_calc["date_dt"].iloc[-1].strftime("%d/%m/%Y")
-        prefixe_lbl = "Progression depuis la veille" if mode_periode == "Progression journalière" else mode_periode
+        prefixe_lbl = "Depuis le dernier enregistrement" if mode_periode == "Progression journalière" else mode_periode
         label_periode = f"{prefixe_lbl} ({d0_str} → {d1_str})"
 
         valeurs_c = [float(v) for v in df_calc[col_val_usd].tolist()]
         flux_c = [0.0] + [float(f) for f in df_calc["_flux_usd"].iloc[1:].tolist()]
+
+        # Achats et ventes de titres enregistres apres la derniere reference :
+        # transferts internes. Ils comptent dans le perimetre investi, jamais
+        # dans le patrimoine total — deplacer de l'argent du compte courant vers
+        # les titres ne rend pas plus riche. Sans cela, un achat enregistre
+        # apres le snapshot etait compte comme un gain de marche (artefact du
+        # 07/10/2026 : +2,85 % au lieu de -0,38 %).
+        if perimetre == "Portefeuille investi":
+            date_ref, cree_ref = _derniere_reference(ctx)
+            transfert = flux_titres_internes(
+                getattr(ctx, "transactions", None), date_ref, cree_ref
+            )
+            if transfert:
+                flux_c[-1] = flux_c[-1] + transfert
 
         v_debut_usd = valeurs_c[0]
         v_fin_usd = valeurs_c[-1]

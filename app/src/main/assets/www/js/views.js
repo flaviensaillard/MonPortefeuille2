@@ -52,7 +52,7 @@
             + UI.montant(ctx.patrimoineTotalUsd, ctx.patrimoineTotalEur)
             + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
             + UI.fleche(progTot.twr_per)
-            + '<span class="dim" style="font-size:12px">' + dernierEnregistrement(progTot) + '</span>
+            + '<span class="dim" style="font-size:12px">' + dernierEnregistrement(progTot) + '</span>'
             + (progTot.twr_per === null ? '' : '<span style="font-size:12.5px;font-weight:650">'
                 + U.usd(gainJourUsd, { dec: 0, signe: true }) + '</span>')
             + '</div></div>';

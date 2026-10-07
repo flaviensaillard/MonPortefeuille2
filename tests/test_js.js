@@ -196,6 +196,178 @@ test('ordres générés dans le bon sens', () => {
     return achats.length > 0 && ventes.length > 0;
 });
 
+console.log('\nProgression depuis le snapshot nocturne');
+const todayAvantTests = PF.util.todayISO;
+PF.util.todayISO = () => '2026-10-07';
+function contexteSnapshot(projections, dateSnapshot) {
+    const c = PF.portefeuille.contexteVide();
+    c.tauxEurUsd = 1.125;
+    c.totalInvestiEur = 72529; c.totalInvestiUsd = 72529 * 1.125;
+    c.patrimoineTotalEur = 82529; c.patrimoineTotalUsd = 82529 * 1.125;
+    c.totalPrecautionEur = 10000; c.totalPrecautionUsd = 11250;
+    c.snapshotsBruts = [{ date: dateSnapshot || '2026-10-07', patrimoine_investi_eur: 72226.23,
+        patrimoine_total_eur: 82226.23, precaution_eur: 10000,
+        cours_or_usd: 4000, equivalent_or_oz: 72226.23 * 1.125 / 4000 }];
+    c.projections = projections || [];
+    return c;
+}
+test('snapshot de la nuit conservé + direct séparé le même jour', () => {
+    const c = contexteSnapshot();
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.snapshots[0].patrimoine_investi_eur, 72226.23);
+    if (c.snapshots.length !== 2 || !c.snapshots[1]._live) return false;
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports);
+    const p = PF.metrics.progressionPeriode(serie, 'Progression journalière', c.totalInvestiUsd);
+    proche(p.gain_marche_usd / c.tauxEurUsd, 302.77, 0.01);
+    proche(p.twr_per, 302.77 / 72226.23, 1e-7);
+    return p.valeurs.length === 2 && p.d0 === '2026-10-07' && p.d1 === '2026-10-07';
+});
+test('dernière référence pf2 prioritaire sur Projections', () => {
+    const c = contexteSnapshot([{ Date: '07/10/2026', 'Actifs Stratégiques': 70000 * 1.125, 'Capital investi': 60000 }]);
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.snapshots[0].patrimoine_investi_usd, 72226.23 * 1.125, 0.01);
+    return c.snapshots.every(s => s.capital_investi_usd === 60000);
+});
+test('snapshot ancien : apport entre snapshot et direct neutralisé', () => {
+    const c = contexteSnapshot([], '2026-10-05');
+    c.apports = [{ date: '2026-10-06', montant_eur: 100, montant_usd: 112.5 }];
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports);
+    const p = PF.metrics.progressionPeriode(serie, 'Progression journalière', c.totalInvestiUsd);
+    proche(p.gain_marche_usd / 1.125, 202.77, 0.01);
+    proche(p.apports_periode_usd, 112.5);
+    proche(c.snapshots[1].capital_investi_usd, 112.5);
+    return p.d1 === '2026-10-07';
+});
+test('série brute : ne pas remplacer le dernier snapshot', () => {
+    const serie = { dates: ['2026-10-06', '2026-10-07'], valeurs: [70084 * 1.125, 72226.23 * 1.125], flux: [0, 0] };
+    const p = PF.metrics.progressionPeriode(serie, 'Progression journalière', 72529 * 1.125);
+    proche(p.gain_marche_usd / 1.125, 302.77, 0.01);
+    return serie.dates.length === 2 && serie.valeurs[1] === 72226.23 * 1.125;
+});
+test('apport du jour déjà dans le snapshot : pas de double comptage', () => {
+    const c = contexteSnapshot();
+    c.snapshotsBruts.unshift({ date: '2026-10-06', patrimoine_investi_eur: 70084, patrimoine_total_eur: 80084 });
+    c.apports = [{ date: '2026-10-07', montant_eur: 100 }];
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports);
+    return JSON.stringify(serie.flux) === JSON.stringify([0, 112.5, 0]);
+});
+test('pas de cumul répété des apports sur le nouveau point live', () => {
+    const c = contexteSnapshot();
+    c.apports = [{ date: '2026-10-01', montant_eur: 100 }];
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    return c.snapshots.every(s => s.capital_investi_usd === 112.5);
+});
+test('direct absent : valeur historique intacte', () => {
+    const c = contexteSnapshot();
+    c.totalInvestiUsd = 0;
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    return c.snapshots.length === 1 && c.snapshots[0].patrimoine_investi_eur === 72226.23;
+});
+test('taux historique USD conservé distinct du taux en direct', () => {
+    const c = contexteSnapshot();
+    c.snapshotsBruts[0].equivalent_or_oz = 72226.23 * 1.12 / 4000;
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports);
+    const p = PF.metrics.progressionPeriode(serie, 'Progression journalière', c.totalInvestiUsd);
+    proche(p.twr_per, (72529 * 1.125) / (72226.23 * 1.12) - 1, 1e-7);
+});
+
+console.log('\nCorrectif du 07/10 — transferts internes et sens des flux');
+/* Contexte réel du 07/10/2026 : les snapshots portent l'once d'or et le cours,
+   la valeur en dollars en découle (19,418299 oz x 4 185,10 $ = 81 267,52 $). */
+function contexteOr(avecAchat) {
+    const c = PF.portefeuille.contexteVide();
+    c.tauxEurUsd = 1.125;
+    c.totalInvestiEur = 72462; c.totalInvestiUsd = 80955;
+    c.patrimoineTotalEur = 83310; c.patrimoineTotalUsd = 93110.52;
+    c.totalPrecautionEur = 10000; c.totalPrecautionUsd = 11250;
+    c.snapshotsBruts = [
+        { date: '2026-10-06', patrimoine_investi_eur: 70115.82, patrimoine_total_eur: 80115.82,
+          precaution_eur: 10000, cours_or_usd: 4158.9, equivalent_or_oz: 18.925403,
+          cree_le: '2026-10-06T18:05:00Z' },
+        { date: '2026-10-07', patrimoine_investi_eur: 72226.63, patrimoine_total_eur: 82226.63,
+          precaution_eur: 10000, cours_or_usd: 4185.1, equivalent_or_oz: 19.418299,
+          cree_le: '2026-10-07T18:05:00Z' }
+    ];
+    c.transactions = avecAchat ? [avecAchat] : [];
+    return c;
+}
+const ACHAT_06 = { ticker: 'FLXC.L', type: 'achat', date: '2026-10-06',
+    cree_le: '2026-10-06T21:30:00Z', montantNetUsd: 1943.91, montantNetEur: 1727.92 };
+const ACHAT_07 = { ticker: 'FLXC.L', type: 'achat', date: '2026-10-07',
+    cree_le: '2026-10-07T20:30:00Z', montantNetUsd: 1943.91, montantNetEur: 1727.92 };
+
+test('snapshots du 06 et du 07 : la bonne référence est le 07/10', () => {
+    const c = contexteOr(ACHAT_06);
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.snapshots[0].patrimoine_investi_usd, 78708.86, 0.02);
+    proche(c.snapshots[1].patrimoine_investi_usd, 81267.52, 0.02);
+    return c.snapshots[2]._live === true && c.snapshots.length === 3;
+});
+test('journée du 07/10 : -0,38 % et non +2,85 %', () => {
+    const c = contexteOr(ACHAT_06);
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports, c.fluxTitresFinal);
+    const p = PF.metrics.progressionPeriode(serie, 'Progression journalière', c.totalInvestiUsd);
+    proche(p.gain_marche_usd, -312.52, 0.02);
+    proche(p.twr_per, -312.52 / 81267.52, 1e-6);
+    return p.d0 === '2026-10-07' && p.d1 === '2026-10-07';
+});
+test('achat enregistré AVANT la référence : aucun double comptage', () => {
+    const c = contexteOr(ACHAT_06);
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.fluxTitresFinal, 0);
+    return true;
+});
+test('achat enregistré APRÈS la référence : apport interne, gain marché seul', () => {
+    const c = contexteOr(ACHAT_07);
+    c.totalInvestiUsd = 80955 + 1943.91; c.totalInvestiEur = 72462 + 1727.92;
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.fluxTitresFinal, 1943.91, 0.02);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports, c.fluxTitresFinal);
+    // Comme la vue : le périmètre « investi » reçoit le flux des titres, le total non.
+    const serieInv = { dates: serie.dates, valeurs: serie.valeurs,
+        flux: PF.metrics.fluxPerimetre(serie, 'investi'), lignes: serie.lignes };
+    const p = PF.metrics.progressionPeriode(serieInv, 'Progression journalière', c.totalInvestiUsd);
+    proche(p.apports_periode_usd, 1943.91, 0.02);
+    proche(p.gain_marche_usd, -312.52, 0.05);
+    return true;
+});
+test('le patrimoine total ignore le transfert interne', () => {
+    const c = contexteOr(ACHAT_07);
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports, c.fluxTitresFinal);
+    const fluxTotal = PF.metrics.fluxPerimetre(serie, 'total');
+    const fluxInvesti = PF.metrics.fluxPerimetre(serie, 'investi');
+    proche(fluxInvesti[fluxInvesti.length - 1] - fluxTotal[fluxTotal.length - 1], 1943.91, 0.02);
+    return fluxTotal[fluxTotal.length - 1] === serie.flux[serie.flux.length - 1];
+});
+test('vente après la référence : le flux se déduit', () => {
+    const c = contexteOr({ ticker: 'FLXC.L', type: 'vente', date: '2026-10-07',
+        cree_le: '2026-10-07T20:30:00Z', montantNetUsd: 500, montantNetEur: 444.44 });
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    proche(c.fluxTitresFinal, -500, 0.02);
+    return true;
+});
+test('retrait : montant stocké positif, déduit du capital', () => {
+    const c = contexteOr(null);
+    c.apports = [{ date: '2026-10-07', sens: 'retrait', montant_eur: 1000, montant_usd: 1125 }];
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports, 0);
+    return JSON.stringify(serie.flux) === JSON.stringify([0, -1125, 0]);
+});
+test('apport : montant stocké positif, ajouté au capital', () => {
+    const c = contexteOr(null);
+    c.apports = [{ date: '2026-10-07', sens: 'apport', montant_eur: 1000, montant_usd: 1125 }];
+    PF.portefeuille.enrichirHistoriquesUsd(c);
+    const serie = PF.metrics.seriePerformance(c.snapshots, c.apports, 0);
+    return JSON.stringify(serie.flux) === JSON.stringify([0, 1125, 0]);
+});
+
+PF.util.todayISO = todayAvantTests;
+
 console.log('\nChargement complet (faux réseau)');
 PF.store.sauverReglages({ supabaseUrl: 'https://test.supabase.co', supabaseKey: 'cle-test' });
 
