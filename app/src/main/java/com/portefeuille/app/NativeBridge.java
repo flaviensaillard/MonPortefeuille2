@@ -262,7 +262,8 @@ public class NativeBridge {
                            injoignable » : ici le fichier est bien arrivé, c'est
                            la lecture qui n'a rien donné. */
                         out.put("erreur", "fichier reçu (" + zip.length
-                                + " octets) mais aucune année lisible");
+                                + " octets, série " + parMois.size()
+                                + " mois) mais aucune année lisible");
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "INSEE : " + e.getMessage());
@@ -362,7 +363,17 @@ public class NativeBridge {
             }
             int iBase = index(entetes, "BASE_PER");
             for (String[] c : lignesUtiles) {
-                if (iBase >= 0 && c[iBase].trim().compareTo(baseMax) > 0) baseMax = c[iBase].trim();
+                /* PIEGE QUI A TOUT BLOQUE (6 octobre 2026) : les valeurs du
+                   fichier INSEE sont entre guillemets ("2025"). Cette ligne
+                   gardait les guillemets, alors que le filtre trois lignes
+                   plus bas compare la valeur NETTOYEE. « 2025 » n'est pas
+                   égal à 2025 : aucune ligne n'était retenue, la série
+                   sortait vide, et l'application annonçait « aucune année
+                   lisible » alors que le fichier était parfaitement lisible.
+                   On nettoie donc ici aussi. */
+                if (iBase >= 0 && nettoyer(c[iBase]).compareTo(baseMax) > 0) {
+                    baseMax = nettoyer(c[iBase]);
+                }
             }
             for (String[] c : lignesUtiles) {
                 if (iBase >= 0 && !nettoyer(c[iBase]).equals(baseMax)) continue;
