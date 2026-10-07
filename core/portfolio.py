@@ -153,6 +153,7 @@ class Transaction:
     frais: float
     devise: str                # devise de cotation du titre
     montant_net: float         # dans la devise de cotation, frais inclus
+    montant_usd: float = 0.0   # montant net converti à la date de l'opération
     id: int | None = None
     source: str | None = None
     reference: str | None = None
@@ -416,6 +417,8 @@ def calculer_positions(
                 montant_usd = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "USD")
             except Exception:
                 montant_usd = montant_eur
+
+        t.montant_usd = montant_usd   # utile aux flux internes (achats/ventes)
 
         if t.est_achat:
             pos.quantite += t.quantite

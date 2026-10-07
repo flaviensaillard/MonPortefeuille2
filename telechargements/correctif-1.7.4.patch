@@ -1,0 +1,150 @@
+diff --git a/core/portfolio.py b/core/portfolio.py
+index c9c3dca..7febb64 100644
+--- a/core/portfolio.py
++++ b/core/portfolio.py
+@@ -153,6 +153,7 @@ class Transaction:
+     frais: float
+     devise: str                # devise de cotation du titre
+     montant_net: float         # dans la devise de cotation, frais inclus
++    montant_usd: float = 0.0   # montant net converti à la date de l'opération
+     id: int | None = None
+     source: str | None = None
+     reference: str | None = None
+@@ -417,6 +418,8 @@ def calculer_positions(
+             except Exception:
+                 montant_usd = montant_eur
+ 
++        t.montant_usd = montant_usd   # utile aux flux internes (achats/ventes)
++
+         if t.est_achat:
+             pos.quantite += t.quantite
+             pos.cout_total_eur += montant_eur
+diff --git a/core/session.py b/core/session.py
+index b159449..c6174b5 100644
+--- a/core/session.py
++++ b/core/session.py
+@@ -181,6 +181,11 @@ def flux_par_date(apports: pd.DataFrame, colonne: str = "montant_eur") -> dict:
+     `apports` doit avoir les colonnes `date`, `sens`, et `colonne`
+     (`montant_usd` ou `montant_eur`). Retourne `{date: montant signe}`, un
+     apport etant positif.
++
++    Le montant est pris en VALEUR ABSOLUE (comme la table `pf2_apports`, qui
++    stocke des montants positifs) : le signe vient uniquement de `sens`. Un
++    montant deja signe negativement reste donc un retrait, au lieu de devenir
++    un apport et de gonfler la performance.
+     """
+     if apports is None or apports.empty:
+         return {}
+@@ -197,10 +202,71 @@ def flux_par_date(apports: pd.DataFrame, colonne: str = "montant_eur") -> dict:
+         if pd.isna(d) or s is None or pd.isna(m):
+             continue
+         jour = d.date()
+-        sortie[jour] = sortie.get(jour, 0.0) + s * float(m)
++        sortie[jour] = sortie.get(jour, 0.0) + s * abs(float(m))
+     return sortie
+ 
+ 
++def flux_instruments_final_usd(ctx: "Contexte") -> float:
++    """Achats et ventes de titres à imputer à la dernière période.
++
++    Payer des titres avec des liquidités ne change pas la richesse : c'est un
++    transfert du périmètre « courant » vers le périmètre « investi ». Compté
++    comme un gain de marché, il gonfle la performance du montant de l'opération
++    — l'artefact constaté le 07/10/2026 (68 FLXC.L, 1 943,91 $, saisis après le
++    snapshot du soir : +2,85 % affichés au lieu de -0,38 %).
++
++    Le test décisif n'est pas la date de l'opération mais son ENREGISTREMENT :
++    une opération saisie après le snapshot ne peut pas y figurer, même si elle
++    porte la même date. L'horodatage `cree_le` le dit exactement ; à défaut
++    (lignes importées de la v1), on retient les opérations postérieures à la
++    date de la référence — jamais celles du même jour, pour ne pas compter deux
++    fois un achat déjà présent dans le snapshot.
++
++    Retourne un montant signé en dollars : un achat est positif (il entre dans
++    le périmètre investi), une vente négative.
++    """
++    transactions = getattr(ctx, "transactions", None) or []
++    snaps = getattr(ctx, "snapshots", None)
++    if not transactions or snaps is None or getattr(snaps, "empty", True):
++        return 0.0
++    if "Date" not in getattr(snaps, "columns", []):
++        return 0.0
++
++    reference = snaps[~snaps["_live"].eq(True)] if "_live" in snaps.columns else snaps
++    if reference is None or reference.empty:
++        return 0.0
++    dates_ref = _parser_dates(reference["Date"]).dropna()
++    if dates_ref.empty:
++        return 0.0
++    derniere = dates_ref.max().date()
++    dernieres = reference.loc[dates_ref == dates_ref.max()]
++    cree_ref = None
++    if "cree_le" in dernieres.columns and not dernieres.empty:
++        brut = dernieres.iloc[-1].get("cree_le")
++        if pd.notna(brut):
++            cree_ref = pd.to_datetime(brut, errors="coerce", utc=True)
++
++    total = 0.0
++    for t in transactions:
++        montant = abs(float(getattr(t, "montant_usd", 0.0) or 0.0))
++        if montant <= 0:
++            continue
++        cree = None
++        brut_t = getattr(t, "cree_le", None)
++        if brut_t:
++            cree = pd.to_datetime(brut_t, errors="coerce", utc=True)
++        if cree is not None and pd.notna(cree) and cree_ref is not None and pd.notna(cree_ref):
++            apres = cree > cree_ref
++        else:
++            jour = getattr(t, "date", None)
++            apres = bool(jour and jour > derniere)
++        if not apres:
++            continue
++        signe = 1.0 if getattr(t, "est_achat", False) else -1.0
++        total += signe * montant
++    return round(total, 2)
++
++
+ def serie_performance(
+     ctx: "Contexte",
+ ) -> tuple[pd.DataFrame, list[float], list[float]]:
+@@ -276,11 +342,26 @@ def serie_performance(
+     return df, valeurs, flux
+ 
+ 
++def _ajouter_flux_instruments(flux: list[float], montant_final: float) -> list[float]:
++    """Impute les achats/ventes de titres à la DERNIÈRE période comparée.
++
++    Le calcul journalier compare la référence et la valeur du moment, qui
++    portent souvent la même date : aucun fenêtrage par date ne peut y placer
++    l'opération. On l'ajoute donc explicitement au dernier flux.
++    """
++    if not flux or not montant_final:
++        return flux
++    sortie = [float(f) for f in flux]
++    sortie[-1] = round(sortie[-1] + float(montant_final), 2)
++    return sortie
++
++
+ def twr_portefeuille(ctx: "Contexte") -> float | None:
+     """TWR depuis le premier snapshot, corrigé des apports et retraits (en $)."""
+     df, valeurs, flux = serie_performance(ctx)
+     if len(valeurs) < 2:
+         return None
++    flux = _ajouter_flux_instruments(flux, flux_instruments_final_usd(ctx))
+     return metrics.twr_depuis(valeurs, flux)
+ 
+ 
+@@ -842,6 +923,12 @@ def progression_periode(
+     df_p["date_dt"] = pd.to_datetime(df_p["Date"], errors="coerce")
+     df_p["_flux_usd"] = flux_base
+     df_p = df_p.dropna(subset=["date_dt"]).sort_values("date_dt", kind="stable").reset_index(drop=True)
++    # Les achats/ventes de titres sont des transferts internes : ils comptent
++    # dans le périmètre investi, jamais dans le patrimoine total.
++    if perimetre != "Patrimoine total" and not df_p.empty:
++        df_p["_flux_usd"] = _ajouter_flux_instruments(
++            [float(f) for f in df_p["_flux_usd"]], flux_instruments_final_usd(ctx)
++        )
+ 
+     col_val_usd = (
+         "patrimoine_investi_usd"

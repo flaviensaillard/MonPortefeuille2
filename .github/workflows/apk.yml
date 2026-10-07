@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '1.7.3'
-      VERSION_CODE: '20'
+      VERSION_NAME: '1.7.4'
+      VERSION_CODE: '21'
     steps:
       - uses: actions/checkout@v4
 
@@ -56,13 +56,13 @@ jobs:
           gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
                  --title "APK ${VERSION_NAME}" \
-                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions."
+                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions. Moteur Android inchangé depuis la 1.7.3 : cette version accompagne le correctif web (Streamlit)."
           gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-1.7.3.apk
+          name: Porte-feuille-1.7.4.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 
