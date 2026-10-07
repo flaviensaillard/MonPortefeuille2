@@ -20,6 +20,14 @@
 
     function couleurPoche(cle) { return M.couleurDe(cle); }
 
+    /* La référence du jour : on affiche AUSSI la date, pour qu'on ne confonde
+       pas « depuis le dernier enregistrement » avec la variation du jour du
+       courtier (qui part de la clôture précédente). */
+    function dernierEnregistrement(p) {
+        return 'depuis le dernier enregistrement'
+            + (p && p.d0 ? ' du ' + U.jourMoisAnneeISO(p.d0) : '');
+    }
+
     // =========================================================== TABLEAU DE BORD
 
     function vueBord(ctx) {
@@ -44,7 +52,7 @@
             + UI.montant(ctx.patrimoineTotalUsd, ctx.patrimoineTotalEur)
             + '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
             + UI.fleche(progTot.twr_per)
-            + '<span class="dim" style="font-size:12px">depuis le dernier enregistrement</span>'
+            + '<span class="dim" style="font-size:12px">' + dernierEnregistrement(progTot) + '</span>
             + (progTot.twr_per === null ? '' : '<span style="font-size:12.5px;font-weight:650">'
                 + U.usd(gainJourUsd, { dec: 0, signe: true }) + '</span>')
             + '</div></div>';
@@ -53,7 +61,7 @@
             + miniCarte('Portefeuille investi', ctx.totalInvestiUsd, ctx.totalInvestiEur,
                 progInv.twr_per === null ? null : UI.fleche(progInv.twr_per), null, null,
                 progInv.twr_per === null ? null : {
-                    usd: gainJourInvUsd, eur: gainJourInvUsd / fx0, legende: 'depuis hier'
+                    usd: gainJourInvUsd, eur: gainJourInvUsd / fx0, legende: dernierEnregistrement(progInv)
                 })
             + miniCarte('Performance depuis le début', null, null, null, perfDebut,
                 'TWR, apports neutralisés', {
@@ -68,7 +76,7 @@
         // --- Vos actifs depuis le dernier enregistrement
         var investis = ctx.actifs.filter(function (a) { return estInvesti(a); });
         if (investis.length) {
-            out += '<div class="titre">Vos actifs <span class="n">depuis le dernier enregistrement</span></div>';
+            out += '<div class="titre">Vos actifs <span class="n">' + dernierEnregistrement(progInv) + '</span></div>';
             out += '<div class="hscroll">';
             investis.forEach(function (a) {
                 var f = U.fleche(a.variationPct);
@@ -341,7 +349,7 @@
         var dates = ctx.serie.dates, valeurs = ctx.serie.lignes.map(function (l) {
             return U.num(l.ligne[col], U.num(l.ligne.patrimoine_investi_usd, 0));
         });
-        var serie = { dates: dates, valeurs: valeurs, flux: ctx.serie.flux, lignes: ctx.serie.lignes };
+        var serie = { dates: dates, valeurs: valeurs, flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre), lignes: ctx.serie.lignes };
         return PF.metrics.progressionPeriode(serie, periode, valLive);
     }
 
@@ -696,8 +704,10 @@
         var dates = ctx.serie.dates, valeurs = ctx.serie.lignes.map(function (l) {
             return U.num(l.ligne[col], U.num(l.ligne.patrimoine_investi_usd, 0));
         });
-        var p = PF.metrics.progressionPeriode({ dates: dates, valeurs: valeurs, flux: ctx.serie.flux, lignes: ctx.serie.lignes },
-            periode, valLive);
+        var p = PF.metrics.progressionPeriode({
+            dates: dates, valeurs: valeurs,
+            flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre), lignes: ctx.serie.lignes
+        }, periode, valLive);
         var idx = p.idxGraphe || [];
         var v = idx.map(function (i) { return valeurs[i]; });
         if (valLive > 0 && v.length) v[v.length - 1] = valLive;
