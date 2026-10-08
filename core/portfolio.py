@@ -29,6 +29,7 @@ from .models import (
     Classe,
     Perimetre,
     Poche,
+    agreger_perimetres,
     poche_de,
 )
 
@@ -404,7 +405,7 @@ def calculer_positions(
             pos = Position(
                 ticker=t.ticker,
                 classe=classe_de(t.ticker),
-                poche=(poche_de(t.ticker).cle if poche_de(t.ticker) else "inconnu"),
+                poche=(poche_de(t.ticker).cle if poche_de(t.ticker) else "hors"),
                 devise_cotation=t.devise,
             )
             positions[t.ticker] = pos
@@ -565,9 +566,11 @@ def agreger_par_poche(
             )
             etat = etats.setdefault("rv", EtatPoche(poche=p_rv, poids_cible=0.20))
         elif etat is None:
-            etat = etats.setdefault("inconnu", EtatPoche(poche=Poche(
-                cle="inconnu", nom="Non classé", cible=0.0, bande=0.0,
-                perimetre=Perimetre.INVESTI,
+            # Ticker sans poche connue : hors périmètre. Suivi, jamais compté
+            # (le poids reste à 0 : il n'entre dans aucune assiette).
+            etat = etats.setdefault("hors", EtatPoche(poche=Poche(
+                cle="hors", nom="Hors périmètre", cible=0.0, bande=0.0,
+                perimetre=Perimetre.HORS,
             )))
         etat.actifs.append(a)
         etat.valeur_eur += a.valeur_eur
@@ -592,10 +595,10 @@ def agreger_par_poche(
 
 
 def patrimoine_total(actifs: list[Actif]) -> dict[str, float]:
-    """Ventilation du patrimoine : investi, précaution, courant."""
-    totaux = {p.value: 0.0 for p in Perimetre}
-    for a in actifs:
-        p = POCHES_PAR_CLE.get(a.poche)
-        cle = p.perimetre.value if p else Perimetre.INVESTI.value
-        totaux[cle] += a.valeur_eur
-    return totaux
+    """Ventilation du patrimoine : investi, précaution, courant, hors.
+
+    Un actif dont la poche est inconnue est HORS PÉRIMÈTRE : il ne gonfle
+    aucun total. Sinon la page affiche un montant que l'utilisateur ne
+    retrouve dans aucune ligne (cas Pernod Ricard, 3 409 $).
+    """
+    return agreger_perimetres(actifs)[0]

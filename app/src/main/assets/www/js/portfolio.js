@@ -109,7 +109,7 @@
                     pos = positions[t.ticker] = {
                         ticker: t.ticker,
                         classe: M.classeDe(t.ticker),
-                        poche: (M.pocheDe(t.ticker) || { cle: 'inconnu' }).cle,
+                        poche: (M.pocheDe(t.ticker) || { cle: 'hors' }).cle,
                         deviseCotation: t.devise,
                         quantite: 0, coutTotalEur: 0, coutTotalUsd: 0,
                         pruEur: 0, pruUsd: 0, prix: 0,
@@ -229,8 +229,8 @@
         actifs.forEach(function (a) {
             var etat = etats[a.poche];
             if (!etat) {
-                etat = etats.inconnu = etats.inconnu || {
-                    poche: { cle: 'inconnu', nom: 'Non classé', cible: 0, bande: 0, membres: [], perimetre: 'investi', couleur: '#6B7789' },
+                etat = etats.hors = etats.hors || {
+                    poche: M.etat.parCle.hors || { cle: 'hors', nom: 'Hors périmètre', cible: 0, bande: 0, membres: [], perimetre: 'hors', couleur: '#6B7789' },
                     valeurEur: 0, valeurUsd: 0, poidsReel: 0, poidsCible: 0, actifs: []
                 };
             }
@@ -298,6 +298,7 @@
             snapshots: [], apports: [], inflation: {},
             totalInvestiEur: 0, totalPrecautionEur: 0, totalCourantEur: 0, patrimoineTotalEur: 0,
             totalInvestiUsd: 0, totalPrecautionUsd: 0, totalCourantUsd: 0, patrimoineTotalUsd: 0,
+            totalHorsUsd: 0, totalHorsEur: 0, actifsHors: [],
             tauxEurUsd: 1.125, coursOr: null, equivalentOrOz: null,
             echecsCours: [], echecsFx: [], erreurs: [], anomaliesTransactions: [],
             allocationCfg: M.allocationDefaut(), etatAllocation: M.verifier(null),
@@ -543,15 +544,26 @@
         return res;
     }
 
+    /* Agrégation par périmètre.
+       Un titre qui n'appartient à AUCUNE poche (acheté chez un autre courtier,
+       ou absent de l'allocation) est HORS PÉRIMÈTRE : il n'entre dans aucun
+       total, ni investi, ni précaution, ni courant, ni patrimoine. Sans cette
+       règle, un titre détenu ailleurs pesait dans « Portefeuille investi » tout
+       en étant absent de la liste des actifs : la somme des cartes ne tombait
+       plus sur le total (cas Pernod Ricard, 3 409 $). */
     function agreger(ctx) {
-        var perEur = { investi: 0, precaution: 0, courant: 0 };
-        var perUsd = { investi: 0, precaution: 0, courant: 0 };
+        var perEur = { investi: 0, precaution: 0, courant: 0, hors: 0 };
+        var perUsd = { investi: 0, precaution: 0, courant: 0, hors: 0 };
+        ctx.actifsHors = [];
         ctx.actifs.forEach(function (a) {
             var p = M.etat.parCle[a.poche];
-            var cle = p ? p.perimetre : 'investi';
+            var cle = p ? p.perimetre : 'hors';
+            if (cle === 'hors') ctx.actifsHors.push(a);
             perEur[cle] = (perEur[cle] || 0) + a.valeurEur;
             perUsd[cle] = (perUsd[cle] || 0) + a.valeurUsd;
         });
+        ctx.totalHorsEur = perEur.hors || 0;
+        ctx.totalHorsUsd = perUsd.hors || 0;
         ctx.totalInvestiEur = perEur.investi || 0;
         ctx.totalPrecautionEur = perEur.precaution || 0;
         ctx.totalCourantEur = perEur.courant || 0;

@@ -13,6 +13,7 @@ from __future__ import annotations
 from core.models import (
     Classe,
     POCHES,
+    Perimetre,
     POCHES_PAR_CLE,
     allocation_par_defaut,
     appliquer_allocation_personnalisee,
@@ -24,6 +25,24 @@ from core.models import (
     verifier_allocation_cible,
 )
 from core.portfolio import classe_de, devise_cotation_de
+
+
+def test_ri_pa_est_hors_perimetre():
+    """RI.PA (Pernod Ricard) est détenu chez un AUTRE courtier que Swissquote.
+
+    Il doit donc rester hors périmètre : suivi, affiché à part, et jamais
+    compté dans les totaux. Sans poche « hors », il retombait dans le
+    patrimoine investi — d'où l'écart de 3 409 $ entre la tuile et la somme
+    des cartes.
+    """
+    p = poche_de("RI.PA")
+    assert p is not None
+    assert p.cle == "hors"
+    assert p.perimetre == Perimetre.HORS
+    assert "RI.PA" not in {
+        t for poche in POCHES if poche.perimetre == Perimetre.INVESTI
+        for t in poche.membres
+    }
 
 
 def test_flxc_est_dans_la_poche_asie():

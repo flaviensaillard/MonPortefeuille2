@@ -1638,7 +1638,7 @@
             var valeurUsd = p.qte * p.cours * p.tauxUsd;
             return {
                 ticker: p.ticker, classe: M.classeDe(p.ticker), deviseCotation: p.devise,
-                poche: (M.pocheDe(p.ticker) || { cle: 'inconnu' }).cle, quantite: p.qte, prix: p.cours,
+                poche: (M.pocheDe(p.ticker) || { cle: 'hors' }).cle, quantite: p.qte, prix: p.cours,
                 valeurUsd: valeurUsd, valeurEur: valeurUsd / 1.125,
                 dernierTaux: p.devise === 'JPY' ? 0.006 : 1, dernierTauxUsd: p.tauxUsd,
                 pruUsd: p.cours * 0.88, pruEur: p.cours * 0.88 / 1.125,

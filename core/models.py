@@ -47,6 +47,7 @@ class Perimetre(str, Enum):
     INVESTI = "investi"
     PRECAUTION = "precaution"   # Livret CHF — disponible en 5 minutes
     COURANT = "courant"         # Compte courant Revolut
+    HORS = "hors"               # suivi seulement : jamais compté dans un total
 
 
 @dataclass
@@ -142,6 +143,19 @@ POCHES: list[Poche] = [
         perimetre=Perimetre.COURANT,
         description="Revolut. Hors portefeuille d'investissement.",
     ),
+    Poche(
+        cle="hors",
+        nom="Hors périmètre",
+        cible=0.0,
+        bande=0.0,
+        membres=["RI.PA"],
+        perimetre=Perimetre.HORS,
+        description=(
+            "Titres détenus sur un autre courtier, ou non classés : suivis mais "
+            "exclus des totaux et de l'allocation. Pour les compter, ajoutez-les "
+            "à votre allocation."
+        ),
+    ),
 ]
 
 POCHES_PAR_CLE: dict[str, Poche] = {p.cle: p for p in POCHES}
@@ -157,6 +171,36 @@ def poche_de(ticker: str) -> Poche | None:
     """Retourne la poche d'un ticker, ou None s'il est inconnu."""
     cle = ACTIF_VERS_POCHE.get(str(ticker).upper().strip())
     return POCHES_PAR_CLE.get(cle) if cle else None
+
+
+def agreger_perimetres(actifs) -> tuple[dict[str, float], dict[str, float]]:
+    """Somme les actifs par périmètre, en euros et en dollars.
+
+    Un actif dont la poche ne correspond à aucune poche connue est HORS
+    PÉRIMÈTRE : il n'entre dans aucun total. C'est le cas typique d'un titre
+    détenu chez un autre courtier (Pernod Ricard chez un second broker, par
+    exemple) : il est suivi à part, mais ne doit pas peser dans le suivi
+    Swissquote — sinon la page affiche un montant que l'utilisateur ne
+    retrouve dans aucune ligne.
+    """
+    eur = {p.value: 0.0 for p in Perimetre}
+    usd = {p.value: 0.0 for p in Perimetre}
+    for a in actifs or []:
+        poche = POCHES_PAR_CLE.get(getattr(a, "poche", None))
+        cle = poche.perimetre.value if poche else Perimetre.HORS.value
+        v_eur = float(getattr(a, "valeur_eur", 0.0) or 0.0)
+        v_usd = float(getattr(a, "valeur_usd", None) or v_eur)
+        eur[cle] += v_eur
+        usd[cle] += v_usd
+    return eur, usd
+
+
+def total_patrimoine(perimetres: dict[str, float]) -> float:
+    """Investi + précaution + courant. Le hors périmètre n'y entre jamais."""
+    return sum(
+        perimetres.get(p.value, 0.0)
+        for p in (Perimetre.INVESTI, Perimetre.PRECAUTION, Perimetre.COURANT)
+    )
 
 
 @dataclass
@@ -507,7 +551,7 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
             description=str(p_info.get("description") or ""),
         ))
 
-    # Conserver les 2 poches hors portefeuille (precaution & courant)
+    # Conserver les poches hors portefeuille (precaution, courant, hors périmètre)
     nouvelles_poches.append(Poche(
         cle="precaution",
         nom="Épargne de précaution",
@@ -525,6 +569,19 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
         membres=["EUR", "USD"],
         perimetre=Perimetre.COURANT,
         description="Revolut. Hors portefeuille d'investissement.",
+    ))
+    nouvelles_poches.append(Poche(
+        cle="hors",
+        nom="Hors périmètre",
+        cible=0.0,
+        bande=0.0,
+        membres=["RI.PA"],
+        perimetre=Perimetre.HORS,
+        description=(
+            "Titres détenus sur un autre courtier, ou non classés : suivis mais "
+            "exclus des totaux et de l'allocation. Pour les compter, ajoutez-les "
+            "à votre allocation."
+        ),
     ))
 
     POCHES[:] = nouvelles_poches

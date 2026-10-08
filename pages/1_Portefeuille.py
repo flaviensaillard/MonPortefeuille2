@@ -119,6 +119,7 @@ with tab_actifs:
                 "investi": "Portefeuille investi",
                 "precaution": "Épargne de précaution (hors allocation)",
                 "courant": "Compte courant (inclus dans l'assiette de rééquilibrage)",
+                "hors": "Hors périmètre (autre courtier — non compté)",
             }.get(p.perimetre.value, p.perimetre.value)
 
             with st.expander(
@@ -150,12 +151,15 @@ with tab_actifs:
                         f"Actif(s) cible(s) rattaché(s) : {membres_txt}."
                     )
 
-        non_classes = [a for a in ctx.actifs if a.poche == "inconnu"]
-        if non_classes:
+        hors = [a for a in ctx.actifs if a.poche == "hors"]
+        if hors:
             st.divider()
-            st.error(
-                "**Actifs non classés** : " + ", ".join(f"`{a.ticker}`" for a in non_classes)
-                + ". Ils sont exclus de l'allocation car aucune poche ne les revendique."
+            st.warning(
+                "**Hors périmètre — non comptés** : "
+                + ", ".join(f"`{a.ticker}`" for a in hors)
+                + ". Titres détenus chez un autre courtier, ou absents de "
+                "l'allocation : suivis, mais exclus des totaux et de l'allocation. "
+                "Pour les compter, ajoutez-les à votre allocation."
             )
 
 # ===========================================================================

@@ -15,7 +15,7 @@
 
     function nomPoche(cle) {
         var p = M.etat.parCle[cle];
-        return p ? p.nom : cle;
+        return p ? p.nom : 'Hors périmètre';
     }
 
     function couleurPoche(cle) { return M.couleurDe(cle); }
@@ -106,7 +106,7 @@
             + 'l’euro en dessous. Touchez à nouveau pour revenir au pourcentage.</div>';
 
         // --- Vos actifs : variation du jour (même repère que le courtier)
-        var investis = ctx.actifs.filter(function (a) { return estInvesti(a); });
+        var investis = actifsInvestis(ctx);
         if (investis.length) {
             out += '<div class="titre">Vos actifs <span class="n">variation du jour</span></div>';
             out += '<div class="hscroll">';
@@ -130,6 +130,9 @@
             });
             out += '</div>';
         }
+
+        // --- Hors périmètre : jamais compté, toujours montré
+        out += carteHorsPerimetre(ctx);
 
         // --- Allocation par poche
         var diag = PF.rebalance.diagnostiquer(ctx);
@@ -338,9 +341,48 @@
             + '</div>';
     }
 
+    /* Un titre sans poche (autre courtier, ou absent de l'allocation) est hors
+       périmètre : il n'est compté nulle part, et il est montré à part — jamais
+       masqué, sinon son montant serait introuvable. */
+    function estHorsPerimetre(a) {
+        var p = M.etat.parCle[a.poche];
+        return !p || p.perimetre === 'hors';
+    }
+
     function estInvesti(a) {
         var p = M.etat.parCle[a.poche];
         return !!p && p.perimetre === 'investi';
+    }
+
+    /* Les actifs du périmètre investi : exactement ceux que `agreger` compte
+       dans « Portefeuille investi ». La somme des cartes tombe donc sur le total. */
+    function actifsInvestis(ctx) {
+        return (ctx.actifs || []).filter(function (a) { return estInvesti(a); });
+    }
+
+    function actifsHorsPerimetre(ctx) {
+        return (ctx.actifs || []).filter(function (a) { return estHorsPerimetre(a); });
+    }
+
+    /* Le bloc « Hors périmètre » : visible, chiffré, jamais additionné. */
+    function carteHorsPerimetre(ctx) {
+        var hors = actifsHorsPerimetre(ctx);
+        if (!hors.length) return '';
+        var out = '<div class="titre">Hors périmètre <span class="n">non compté</span></div>'
+            + '<div class="card">';
+        hors.forEach(function (a) {
+            out += '<div class="ligne">'
+                + '<div class="pastille" style="background:' + couleurPoche(a.poche) + '22">' + icone(a.classe) + '</div>'
+                + '<div class="gr"><div class="tt">' + UI.h(a.ticker) + '</div>'
+                + '<div class="st">' + UI.h(nomPoche(a.poche)) + ' · ' + U.quantite(a.quantite)
+                + ' × ' + U.nombre(a.prix, 2) + ' ' + UI.h(a.deviseCotation) + '</div></div>'
+                + '<div class="dr"><div class="a">' + U.usd(a.valeurUsd, { dec: 0 }) + '</div>'
+                + '<div class="b">' + U.eur(a.valeurEur, { dec: 0 }) + '</div></div></div>';
+        });
+        out += '</div><div class="astuce">Ces titres sont suivis mais exclus des totaux et de '
+            + 'l’allocation : par exemple des actions détenues chez un autre courtier. '
+            + 'Pour les compter, ajoutez-les à votre allocation (Portefeuille › Allocation).</div>';
+        return out;
     }
 
     /* Deux définitions de la plus-value, et l'erreur serait de les confondre :

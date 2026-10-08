@@ -36,6 +36,12 @@
             cle: 'courant', nom: 'Compte courant', cible: 0, bande: 0,
             membres: ['EUR', 'USD'], perimetre: 'courant',
             description: 'Liquidités courantes. Hors portefeuille d’investissement.'
+        },
+        {
+            cle: 'hors', nom: 'Hors périmètre', cible: 0, bande: 0,
+            membres: ['RI.PA'], perimetre: 'hors',
+            description: 'Titres détenus sur un autre courtier, ou non classés : suivis mais '
+                + 'exclus des totaux et de l’allocation. Pour les compter, ajoutez-les à votre allocation.'
         }
     ];
 
@@ -58,6 +64,7 @@
     var POCHES_COULEURS = {
         rv_physique: '#F5C451', rv_numerique: '#F2994A', energie: '#2ECC71',
         asie: '#38BDF8', jgb: '#9B8CFF', precaution: '#5AA9FF', courant: '#7C8AA0',
+        hors: '#6B7789',
         inconnu: '#6B7789', rv: '#F5C451'
     };
 
@@ -320,9 +327,18 @@
         return p ? p.bande : 0.05;
     }
 
+    /* Une poche « hors périmètre » (autre courtier) l'emporte toujours : si un
+       actif est listé à la fois dans l'allocation et dans le hors périmètre,
+       c'est l'exclusion qui gagne. Sinon la règle dépendrait de l'ordre des
+       poches et un titre exclu se remettrait à compter sans prévenir. */
     function pocheDe(ticker) {
         var tk = String(ticker || '').toUpperCase().trim();
-        for (var i = 0; i < etat.poches.length; i++) {
+        var i, p;
+        for (i = 0; i < etat.poches.length; i++) {
+            p = etat.poches[i];
+            if (p.perimetre === 'hors' && p.membres.indexOf(tk) >= 0) return p;
+        }
+        for (i = 0; i < etat.poches.length; i++) {
             if (etat.poches[i].membres.indexOf(tk) >= 0) return etat.poches[i];
         }
         return null;

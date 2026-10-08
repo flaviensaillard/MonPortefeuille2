@@ -28,7 +28,9 @@ from core import db, fx, prices  # noqa: E402
 from core.models import (  # noqa: E402
     POCHES_PAR_CLE,
     Perimetre,
+    agreger_perimetres,
     appliquer_allocation_personnalisee,
+    total_patrimoine,
 )
 from core.portfolio import calculer_positions, charger_transactions, valoriser  # noqa: E402
 
@@ -92,16 +94,20 @@ def main() -> int:
         # On continue avec les positions valorisables, mais on le signale.
 
     # --- Agrégation ---
-    totaux = {p.value: 0.0 for p in Perimetre}
-    totaux_usd = {p.value: 0.0 for p in Perimetre}
+    totaux, totaux_usd = agreger_perimetres(actifs)
     poches = {cle: 0.0 for cle in POCHES_PAR_CLE}
     tickers_deja = {a.ticker.upper() for a in actifs}
     for a in actifs:
-        p = POCHES_PAR_CLE.get(a.poche)
-        cle = p.perimetre.value if p else Perimetre.INVESTI.value
-        totaux[cle] += a.valeur_eur
-        totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
+
+    # Un titre sans poche connue est hors périmètre : on le signale, mais il
+    # n'entre dans aucun total (il est suivi à part dans l'application).
+    hors = sorted({a.ticker for a in actifs if POCHES_PAR_CLE.get(a.poche) is None})
+    if hors:
+        log.info(
+            "Hors périmètre (non compté) : %s — %.2f € au total.",
+            ", ".join(hors), totaux[Perimetre.HORS.value],
+        )
 
     # --- Complément des liquidités (épargne de précaution CHF/CNY et compte courant USD/EUR) depuis Donnees ---
     try:
@@ -138,7 +144,9 @@ def main() -> int:
 
     ligne = {
         "date": aujourdhui.isoformat(),
-        "patrimoine_total_eur": round(sum(totaux.values()), 2),
+        # Somme investi + précaution + courant : le hors périmètre (titres
+        # détenus ailleurs) n'y entre jamais.
+        "patrimoine_total_eur": round(total_patrimoine(totaux), 2),
         "patrimoine_investi_eur": round(totaux[Perimetre.INVESTI.value], 2),
         "precaution_eur": round(totaux[Perimetre.PRECAUTION.value], 2),
         "courant_eur": round(totaux[Perimetre.COURANT.value], 2),

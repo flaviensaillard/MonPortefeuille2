@@ -41,10 +41,19 @@ class TestAssiette:
         assert etats["precaution"].valeur_eur == pytest.approx(12000.0)
         assert etats["precaution"].poids_reel == pytest.approx(0.0)
 
-    def test_actif_inconnu_est_signale(self):
-        actifs = [_actif("ZZZZ", 5000, "inconnu")]
-        etats = agreger_par_poche(actifs, total_investi_eur=5000.0)
-        assert "inconnu" in etats
+    def test_actif_inconnu_est_hors_perimetre(self):
+        """Un ticker sans poche connue n'entre dans AUCUN total.
+
+        Il est suivi (etat « hors ») mais son poids reste à 0 : sinon la page
+        affiche un montant que l'utilisateur ne retrouve dans aucune ligne.
+        Cas réel : Pernod Ricard, détenu chez un autre courtier (3 409 $).
+        """
+        actifs = [_actif("ZZZZ", 5000, "hors")]
+        etats = agreger_par_poche(actifs, total_investi_eur=0.0)
+        assert "hors" in etats
+        assert etats["hors"].poche.perimetre == Perimetre.HORS
+        assert etats["hors"].valeur_eur == pytest.approx(5000.0)
+        assert etats["hors"].poids_reel == pytest.approx(0.0)
 
 
 class TestBandes:

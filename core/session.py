@@ -23,6 +23,8 @@ from . import db, fx, metrics, prices
 from .models import (
     Perimetre,
     POCHES_PAR_CLE,
+    agreger_perimetres,
+    total_patrimoine,
     allocation_par_defaut,
     appliquer_allocation_personnalisee,
     verifier_allocation_cible,
@@ -56,11 +58,15 @@ class Contexte:
     total_precaution_eur: float = 0.0
     total_courant_eur: float = 0.0
     patrimoine_total_eur: float = 0.0
+    # Titres suivis mais hors périmètre (autre courtier, ou absents de
+    # l'allocation) : jamais additionnés au patrimoine.
+    total_hors_eur: float = 0.0
 
     total_investi_usd: float = 0.0
     total_precaution_usd: float = 0.0
     total_courant_usd: float = 0.0
     patrimoine_total_usd: float = 0.0
+    total_hors_usd: float = 0.0
     taux_eur_usd: float = 1.125
 
     cours_or: float | None = None
@@ -489,24 +495,21 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
         a.variation_pct = v_rec if v_rec is not None else 0.0
         ctx.variations_actifs[a.ticker] = a.variation_pct
 
-    # --- Agrégation par poche, sur le patrimoine INVESTI seulement ---
-    perimetres_eur: dict[str, float] = {p.value: 0.0 for p in Perimetre}
-    perimetres_usd: dict[str, float] = {p.value: 0.0 for p in Perimetre}
-    for a in ctx.actifs:
-        p = POCHES_PAR_CLE.get(a.poche)
-        cle = p.perimetre.value if p else Perimetre.INVESTI.value
-        perimetres_eur[cle] += a.valeur_eur
-        perimetres_usd[cle] += getattr(a, "valeur_usd", a.valeur_eur)
+    # --- Agrégation par poche. Un actif dont la poche est inconnue est HORS
+    #     périmètre : il n'entre dans aucun total (voir `agreger_perimetres`).
+    perimetres_eur, perimetres_usd = agreger_perimetres(ctx.actifs)
 
     ctx.total_investi_eur = perimetres_eur[Perimetre.INVESTI.value]
     ctx.total_precaution_eur = perimetres_eur[Perimetre.PRECAUTION.value]
     ctx.total_courant_eur = perimetres_eur[Perimetre.COURANT.value]
-    ctx.patrimoine_total_eur = sum(perimetres_eur.values())
+    ctx.total_hors_eur = perimetres_eur[Perimetre.HORS.value]
+    ctx.patrimoine_total_eur = total_patrimoine(perimetres_eur)
 
     ctx.total_investi_usd = perimetres_usd[Perimetre.INVESTI.value]
     ctx.total_precaution_usd = perimetres_usd[Perimetre.PRECAUTION.value]
     ctx.total_courant_usd = perimetres_usd[Perimetre.COURANT.value]
-    ctx.patrimoine_total_usd = sum(perimetres_usd.values())
+    ctx.total_hors_usd = perimetres_usd[Perimetre.HORS.value]
+    ctx.patrimoine_total_usd = total_patrimoine(perimetres_usd)
 
     ctx.etats = agreger_par_poche(ctx.actifs, ctx.total_investi_eur, ctx.total_investi_usd)
 

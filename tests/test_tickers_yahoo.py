@@ -70,11 +70,11 @@ class TestRobotsQuotidiensNeCotentPasLesDevises:
 
     def test_tous_les_vrais_titres_sont_cotes(self):
         from jobs.update_market_data import tickers_a_coter
-        # RI.PA n'y figure plus : il n'appartient a aucune poche depuis que
-        # FLXC.L (Franklin FTSE China) a rejoint « Asie / Chine ». Le coter
-        # serait une requete Yahoo inutile chaque nuit.
+        # RI.PA y figure : il est hors périmètre (détenu chez un autre
+        # courtier), donc jamais compté — mais il faut quand même son cours
+        # pour l'afficher, chiffré, dans le bloc « Hors périmètre ».
         assert set(tickers_a_coter()) == {
-            "IGLN.L", "BTCUSDT", "XDW0.L", "FLXC.L", "XJSE.SW",
+            "IGLN.L", "BTCUSDT", "XDW0.L", "FLXC.L", "XJSE.SW", "RI.PA",
         }
 
     def test_les_titres_sont_tries(self):

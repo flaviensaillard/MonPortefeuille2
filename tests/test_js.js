@@ -388,6 +388,12 @@ PF.portefeuille.charger().then((ctx) => {
     test('capital investi propagé', () => ctx.snapshots.every((s) => s.capital_investi_usd > 0));
     test('série de performance construite', () => ctx.serie.dates.length >= 2);
     test('apports convertis en dollars', () => ctx.apports[0].montant_usd > 0);
+    test('montants USD des transactions mémorisés', () => {
+        const achat = ctx.transactions.filter((t) => t.ticker === 'IGLN.L' && t.type === 'achat')[0];
+        proche(achat.montantNetUsd, 100 * 34.2 + 9.9, 0.01);   // devise USD : montant inchangé
+        const jpy = ctx.transactions.filter((t) => t.ticker === 'XJSE.SW')[0];
+        return jpy.montantNetUsd > 0 && Math.abs(jpy.montantNetUsd - jpy.montantNet) > 1;
+    });
     test('cession 2026 détectée', () => {
         return PF.fiscal.cessionsAnnee(ctx, 2026).then((r) => r.cessions.length === 1);
     });

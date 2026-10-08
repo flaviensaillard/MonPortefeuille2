@@ -37,7 +37,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import db, fx, prices  # noqa: E402
-from core.models import POCHES_PAR_CLE, Perimetre  # noqa: E402
+from core.models import (  # noqa: E402
+    POCHES_PAR_CLE,
+    Perimetre,
+    agreger_perimetres,
+    total_patrimoine,
+)
 from core.portfolio import calculer_positions, charger_transactions, valoriser  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -81,12 +86,10 @@ def _snapshot_au(transactions, jour: dt.date) -> dict | None:
     if echecs:
         log.info("%s : cours manquants pour %s", iso, ", ".join(echecs))
 
-    totaux = {p.value: 0.0 for p in Perimetre}
+    # Un actif sans poche connue est hors périmètre : jamais compté.
+    totaux, _totaux_usd = agreger_perimetres(actifs)
     poches = {cle: 0.0 for cle in POCHES_PAR_CLE}
     for a in actifs:
-        p = POCHES_PAR_CLE.get(a.poche)
-        cle = p.perimetre.value if p else Perimetre.INVESTI.value
-        totaux[cle] += a.valeur_eur
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
 
     try:
@@ -100,7 +103,7 @@ def _snapshot_au(transactions, jour: dt.date) -> dict | None:
 
     return {
         "date": iso,
-        "patrimoine_total_eur": round(sum(totaux.values()), 2),
+        "patrimoine_total_eur": round(total_patrimoine(totaux), 2),
         "patrimoine_investi_eur": round(totaux[Perimetre.INVESTI.value], 2),
         "precaution_eur": round(totaux[Perimetre.PRECAUTION.value], 2),
         "courant_eur": round(totaux[Perimetre.COURANT.value], 2),
