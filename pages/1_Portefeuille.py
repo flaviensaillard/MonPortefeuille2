@@ -385,6 +385,7 @@ with tab_reeq:
                             "source": source,
                         }
                         try:
+                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                             db.ecrire(db.T_TRANSACTIONS, [ligne])
                             montant_devise = quantite * cours + (frais if sens == "Achat" else -frais)
                             signe_cash = -1.0 if sens == "Achat" else 1.0
@@ -669,6 +670,7 @@ with tab_fonds:
                         )
                     else:
                         try:
+                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                             if type_op.startswith("↔"):
                                 dev_src, typ_src, _ = OPTIONS_COMPTES[compte_source_lbl]
                                 dev_dst, typ_dst, _ = OPTIONS_COMPTES[compte_cible_lbl]

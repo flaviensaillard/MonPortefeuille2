@@ -569,3 +569,36 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
 
     return {"poches": poches_cfg, "actifs": actifs_cfg}
 
+
+
+class TypeCompte(str, Enum):
+    """Type d'un compte de liquidités (cahier 2.0). Il décide de la poche du compte."""
+
+    RESERVE = "reserve"          # épargne de précaution : jamais investie, hors rééquilibrage
+    DISPONIBLE = "disponible"    # compte courant : seul compte des achats et des ventes
+
+
+POCHE_DE_TYPE_COMPTE = {
+    TypeCompte.RESERVE: Perimetre.PRECAUTION,
+    TypeCompte.DISPONIBLE: Perimetre.COURANT,
+}
+
+
+@dataclass(frozen=True)
+class CompteCash:
+    """Un compte de liquidités. Son solde n'est pas stocké : il se calcule à partir de
+    ses opérations (`core.portfolio.soldes_par_compte`). Un compte archivé reste compté
+    dans le patrimoine, mais sort des listes et des propositions d'achat."""
+
+    id: str
+    nom: str
+    devise: str
+    type: TypeCompte
+    banque: str | None = None
+    motif: str | None = None
+    archive: bool = False
+    note: str | None = None
+
+    @property
+    def perimetre(self) -> Perimetre:
+        return POCHE_DE_TYPE_COMPTE[self.type]

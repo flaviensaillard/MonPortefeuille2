@@ -599,3 +599,58 @@ def patrimoine_total(actifs: list[Actif]) -> dict[str, float]:
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
         totaux[cle] += a.valeur_eur
     return totaux
+
+
+# ---------------------------------------------------------------------------
+# Comptes de liquidités (cahier 2.0)
+#
+# Le solde d'un compte est la somme signée de ses opérations : jamais stocké.
+# Ces fonctions sont pures (ni réseau, ni base) : le robot, la page et les
+# tests lisent les mêmes règles. Miroir de app/.../js/comptes.js.
+# ---------------------------------------------------------------------------
+
+def soldes_par_compte(comptes: list[dict], operations: list[dict]) -> dict[str, float]:
+    """Somme signée des opérations de chaque compte, dans sa devise.
+
+    Une opération orpheline (compte inconnu) est ignorée ici, pas comptée ailleurs :
+    `pf2_operations_compte.compte_id` est une clé étrangère, un orphelin n'existe pas.
+    """
+    soldes = {str(c["id"]): 0.0 for c in comptes}
+    for o in operations:
+        cid = str(o.get("compte_id"))
+        if cid in soldes:
+            soldes[cid] += float(o.get("montant") or 0.0)
+    return {k: round(v, 6) for k, v in soldes.items()}
+
+
+def _compte_depuis_ligne(c: dict):
+    from .models import CompteCash, TypeCompte
+    return CompteCash(
+        id=str(c["id"]),
+        nom=str(c.get("nom") or ""),
+        devise=str(c.get("devise") or "").upper(),
+        type=TypeCompte(str(c.get("type") or "")),
+        banque=c.get("banque") or None,
+        motif=c.get("motif") or None,
+        archive=bool(c.get("archive")),
+        note=c.get("note") or None,
+    )
+
+
+def grouper_liquidites(comptes: list[dict], operations: list[dict]) -> list[dict]:
+    """Liquidités regroupées par (devise, poche) : une ligne par couple.
+
+    Les comptes archivés restent comptés : leur solde est du patrimoine. Un groupe
+    dont le solde est nul n'est pas listé.
+    """
+    soldes = soldes_par_compte(comptes, operations)
+    groupes: dict[tuple[str, str], float] = {}
+    for c in comptes:
+        cc = _compte_depuis_ligne(c)
+        cle = (cc.devise, cc.perimetre.value)
+        groupes[cle] = groupes.get(cle, 0.0) + soldes[str(c["id"])]
+    return [
+        {"devise": d, "perimetre": p, "quantite": round(q, 6)}
+        for (d, p), q in sorted(groupes.items())
+        if abs(q) > 1e-9
+    ]

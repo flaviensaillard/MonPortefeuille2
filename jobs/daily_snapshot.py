@@ -40,7 +40,7 @@ def main() -> int:
     aujourdhui = dt.date.today()
 
     # --- Vérifier que le schéma existe ---
-    manquantes = [t for t, ok in db.tables_presentes().items() if not ok]
+    manquantes = db.tables_requises_manquantes()
     if manquantes:
         log.error("Tables absentes : %s. Exécutez migrations/001_init.sql.", manquantes)
         return 1
@@ -103,7 +103,8 @@ def main() -> int:
         totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
 
-    # --- Complément des liquidités (épargne de précaution CHF/CNY et compte courant USD/EUR) depuis Donnees ---
+    # --- Liquidités : comptes (2.0) si pf2_comptes est renseignée, sinon Donnees (v1).
+    #     `soldes_comptes_liquidites` choisit la source ; même forme dans les deux cas. ---
     try:
         comptes_liq = db.soldes_comptes_liquidites()
         if isinstance(comptes_liq, dict):

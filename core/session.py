@@ -411,7 +411,14 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     # --- Tables ---
     try:
         etat_tables = db.tables_presentes()
-        ctx.tables_absentes = [t for t, present in etat_tables.items() if not present]
+        # Seules les tables REQUISES arrêtent l'application. Les comptes sont optionnels
+        # tant que la migration 003 n'est pas passée : on le dit, on lit Donnees.
+        ctx.tables_absentes = [t for t in db.TABLES_REQUISES if not etat_tables.get(t, False)]
+        if not etat_tables.get(db.T_COMPTES, False):
+            ctx.erreurs.append(
+                "Table pf2_comptes absente : exécutez migrations/003_comptes.sql. "
+                "Les liquidités sont lues, pour l’instant, dans Donnees."
+            )
     except db.SecretsManquants as exc:
         ctx.erreurs.append(str(exc))
         return ctx
@@ -467,7 +474,7 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     from . import ui as _ui
     _ui.definir_taux_eur_usd(ctx.taux_eur_usd)
 
-    # --- Liquidités hors transactions (CHF, CNY, USD de la table Donnees v1) ---
+    # --- Liquidités hors transactions : comptes (2.0) ou, à défaut, Donnees (v1) ---
     _completer_liquidites_v1(ctx, aujourdhui_iso)
 
     # --- Variations de chaque actif depuis le dernier enregistrement ---
@@ -545,6 +552,15 @@ def _completer_liquidites_v1(ctx: Contexte, jour_iso: str) -> None:
     from .models import Classe
     from .portfolio import poche_de
 
+    try:
+        par_comptes = db.cash_gere_par_comptes()
+    except Exception as exc:
+        ctx.erreurs.append(f"Comptes de liquidités illisibles : {exc}")
+        return
+    if par_comptes:
+        _completer_liquidites_depuis_comptes(ctx, jour_iso)
+        return
+
     deja = {a.ticker for a in ctx.actifs if a.quantite > 0}
     if any(t in deja for t in ("CHF", "CNY")):
         return
@@ -585,6 +601,39 @@ def _completer_liquidites_v1(ctx: Contexte, jour_iso: str) -> None:
             prix=1.0,
             valeur_eur=qte * t_eur,
             valeur_usd=qte * t_usd,
+            dernier_taux=t_eur,
+            dernier_taux_usd=t_usd,
+        ))
+
+
+def _completer_liquidites_depuis_comptes(ctx: Contexte, jour_iso: str) -> None:
+    """Liquidités tirées des comptes (2.0) : une ligne par (devise, poche).
+
+    La poche vient du TYPE du compte (réserve → précaution, disponible → courant),
+    pas du nom de la devise. Un compte archivé reste compté : son solde est du
+    patrimoine. Un taux manquant est signalé dans `echecs_fx`, jamais remplacé.
+    """
+    from .models import Classe
+    from .portfolio import grouper_liquidites
+
+    comptes = db.comptes_liquidites() or []
+    for g in grouper_liquidites(comptes, db.operations_compte()):
+        t = g["devise"]
+        try:
+            t_eur = 1.0 if t == "EUR" else float(fx.taux(t, jour_iso, "EUR"))
+            t_usd = 1.0 if t == "USD" else float(fx.taux(t, jour_iso, "USD"))
+        except Exception:
+            ctx.echecs_fx.append(f"{t}/EUR ou USD")
+            continue
+        ctx.actifs.append(Actif(
+            ticker=t,
+            classe=Classe.ESPECE,
+            devise_cotation=t,
+            poche=g["perimetre"] if g["perimetre"] == "precaution" else "courant",
+            quantite=g["quantite"],
+            prix=1.0,
+            valeur_eur=g["quantite"] * t_eur,
+            valeur_usd=g["quantite"] * t_usd,
             dernier_taux=t_eur,
             dernier_taux_usd=t_usd,
         ))
