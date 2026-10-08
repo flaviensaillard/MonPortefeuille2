@@ -291,7 +291,7 @@ with tab_reeq:
     st.subheader("Enregistrer une transaction (Achat / Vente)")
 
     if gerees:
-        st.info("Les achats et ventes se saisissent dans l’application : le compte débité ou crédité y est écrit avec eux.")
+        st.info("L'achat et la vente de titres se saisissent dans l'application, pour que chaque mouvement débite le bon compte.")
     if not gerees:
         with st.expander("➕ Nouvelle transaction", expanded=False):
             st.caption(
@@ -565,17 +565,21 @@ with tab_fonds:
             if str(v.get("ticker", "")).upper() == code_dev
             and v.get("perimetre") == PERIMETRE_CARTE[code_dev]
         )
+        # Taux indisponible : la contre-valeur n'est PAS calculée. Affichée « — », avec la
+        # mention. Jamais un taux de remplacement (1,0 surestimerait un CNY d'environ 8 fois).
         try:
-            t_usd = 1.0 if code_dev == "USD" else fx.taux(code_dev, jour_iso, "USD")
-            t_eur = 1.0 if code_dev == "EUR" else fx.taux(code_dev, jour_iso, "EUR")
+            t_usd = 1.0 if code_dev == "USD" else float(fx.taux(code_dev, jour_iso, "USD"))
+            t_eur = 1.0 if code_dev == "EUR" else float(fx.taux(code_dev, jour_iso, "EUR"))
         except Exception:
-            t_usd = 1.0
-            t_eur = 1.0 / ctx.taux_eur_usd if ctx.taux_eur_usd else 1.0
-        val_u = q_natif * t_usd
-        val_e = q_natif * t_eur
+            t_usd = t_eur = None
+        taux_ok = t_usd is not None and t_eur is not None
+        val_u = q_natif * t_usd if taux_ok else None
+        val_e = q_natif * t_eur if taux_ok else None
         with cols_c[idx]:
             ui.metric_usd_eur(cols_c[idx], libelle, val_u, val_e, help=desc_c)
             st.caption(f"Solde en devise : **{q_natif:,.2f} {code_dev}**".replace(",", " "))
+            if not taux_ok:
+                st.caption(f"⚠️ taux indisponible : contre-valeur {code_dev} non calculée.")
 
     st.divider()
     st.subheader("📒 Vos comptes de liquidités")

@@ -375,13 +375,17 @@ OPERATIONS_PAGE = OPERATIONS + [
 ]
 
 
-def _page_avec(monkeypatch, comptes_lus, operations_lues):
+def _taux_standard(devise, jour, cible):
+    return 1.0 if devise == cible else 1.2
+
+
+def _page_avec(monkeypatch, comptes_lus, operations_lues, taux=_taux_standard):
     from core import session as S, fx as _fx
     monkeypatch.setattr(db, "comptes_liquidites", lambda: comptes_lus)
     monkeypatch.setattr(db, "operations_compte", lambda: operations_lues)
     monkeypatch.setattr(db, "lire_allocation_personnalisee", lambda: None)
     monkeypatch.setattr(db, "lire", lambda table: pd.DataFrame())
-    monkeypatch.setattr(_fx, "taux", lambda devise, jour, cible: 1.0 if devise == cible else 1.2)
+    monkeypatch.setattr(_fx, "taux", taux)
     ctx = S.Contexte()
     ctx.taux_eur_usd = 1.125
     monkeypatch.setattr(S, "charger", lambda: ctx)
@@ -396,6 +400,8 @@ def test_page_2_0_lecture_seule_et_affichage(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     infos = [i.value for i in at.info]
     assert any("se gèrent dans l’application" in t for t in infos)
+    assert any(t == "L'achat et la vente de titres se saisissent dans l'application, "
+                    "pour que chaque mouvement débite le bon compte." for t in infos)
     libelles = [b.label for b in at.button]
     assert not any(l.startswith("✅ Enregistrer le mouvement") or l == "🔨 Enregistrer" for l in libelles)
     legendes = " | ".join(c.value for c in at.caption)
@@ -414,3 +420,59 @@ def test_page_sans_comptes_garde_la_saisie_v1(monkeypatch):
     assert not any("lecture seule" in t for t in infos)
     assert any("Pas encore de comptes" in t for t in infos)
     assert any("Enregistrer" in b.label for b in at.button)
+
+
+# --- Taux indisponible : « — » et la mention, jamais 1,0 -----------------------------
+
+def _taux_cny_absent(devise, jour, cible):
+    if devise == "CNY":
+        raise RuntimeError("taux CNY non publié")
+    return _taux_standard(devise, jour, cible)
+
+
+def test_page_taux_indisponible_affiche_tiret_et_mention(monkeypatch):
+    """Régression : un taux manquant était remplacé par 1,0 (un CNY valait alors 1 $ au lieu
+    de ~0,14 $ : une valeur surestimée d'environ 8 fois). Il faut « — » et la mention."""
+    at = _page_avec(monkeypatch, COMPTES, OPERATIONS_PAGE, taux=_taux_cny_absent)
+    assert not at.exception, [e.value for e in at.exception]
+    legendes = " | ".join(c.value for c in at.caption)
+    assert "taux indisponible : contre-valeur CNY non calculée" in legendes
+    # La carte « Réserve CNY » ne montre aucun montant : ni 300 CNY converti, ni 1,0.
+    bloc = next(m.value for m in at.markdown if "Réserve CNY" in m.value and "font-size:1.75rem" in m.value)
+    assert ">—<" in bloc
+    assert "$" not in bloc and "€" not in bloc
+    # Les autres cartes ne sont pas touchées par l'échec du CNY.
+    assert "**8 694.44 CHF**" in legendes
+    assert not any("taux indisponible" in c.value for c in at.caption if "CHF" in c.value)
+
+
+def test_robot_taux_indisponible_est_signale_pas_avale(monkeypatch):
+    """Régression : la ligne au taux indisponible était écartée sans bruit. Elle doit
+    déclencher une alerte nommant la devise ; le snapshot reste écrit, partiel."""
+    monkeypatch.setattr(daily_snapshot.db, "tables_requises_manquantes", lambda: [])
+    monkeypatch.setattr(daily_snapshot.db, "lire_allocation_personnalisee", lambda: None)
+    monkeypatch.setattr(daily_snapshot.db, "transactions", lambda: [{"ticker": "IGLN.L"}])
+    monkeypatch.setattr(daily_snapshot, "charger_transactions", lambda rows: rows)
+    monkeypatch.setattr(daily_snapshot, "calculer_positions", lambda t, a: ["IGLN.L"])
+    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos: (
+        [SimpleNamespace(ticker="IGLN.L", poche="rv", valeur_eur=1000.0, valeur_usd=1100.0)], []))
+    monkeypatch.setattr(daily_snapshot.prices, "cours_or", lambda: 2650.0)
+    monkeypatch.setattr(daily_snapshot.fx, "taux", _taux_cny_absent)
+    ops = OPERATIONS + [{"id": 9, "compte_id": "c-cny", "type": "ouverture", "montant": 300,
+                         "date": "2026-01-01", "contrepartie": None, "groupe": None}]
+    monkeypatch.setattr(db, "comptes_liquidites", lambda: COMPTES)
+    monkeypatch.setattr(db, "operations_compte", lambda: ops)
+    capture, alertes = {}, []
+    monkeypatch.setattr(daily_snapshot.db, "ajouter_snapshot", lambda ligne: capture.update(ligne))
+    monkeypatch.setattr(daily_snapshot.db, "ajouter_alerte",
+                        lambda titre, texte, niveau=None: alertes.append((titre, texte)))
+
+    assert daily_snapshot.main() == 0                     # le snapshot est écrit
+    assert capture, "le snapshot doit être écrit"
+    # Taux de test : toute devise → EUR vaut 1,2 (sauf EUR). La ligne CNY n'est jamais
+    # valorisée à 1,0 : le courant ne contient que l'USD (5 150 CNY écartés), la précaution
+    # ne contient que le CHF (300 CNY écartés).
+    assert capture["courant_eur"] == pytest.approx(7.385 * 1.2, abs=0.01)
+    assert capture["precaution_eur"] == pytest.approx(8694.44 * 1.2, abs=0.01)
+    assert len(alertes) == 1
+    assert "CNY" in alertes[0][1] and "partiel" in alertes[0][1]
