@@ -306,6 +306,21 @@
         });
     }
 
+    /* Cours d'un mouvement de fonds (apport ou retrait) : la devise en euros ET
+       en dollars au jour de l'opération. Si l'un manque, la promesse est rejetée
+       avec `tauxIndisponible` et la paire manquante : il n'existe aucun repli
+       (ni 1, ni un taux de réglage) qui permettrait d'écrire le mouvement. */
+    function tauxMouvement(devise, dateISO) {
+        return Promise.all([taux(devise, dateISO, 'EUR'), taux(devise, dateISO, 'USD')]).then(function (r) {
+            var eur = PF.util.tauxValide(r[0]), usd = PF.util.tauxValide(r[1]);
+            if (eur !== null && usd !== null) return { eur: eur, usd: usd };
+            var e = new Error('taux indisponible');
+            e.tauxIndisponible = true;
+            e.paire = eur === null ? String(devise).toUpperCase() + '/EUR' : String(devise).toUpperCase() + '/USD';
+            throw e;
+        });
+    }
+
     function viderCache() {
         U.vider(cache_serie); U.vider(cache_cours); U.vider(cache_variation);
         U.vider(cache_seance); U.vider(cache_devise); U.vider(cache_fx);
@@ -390,7 +405,7 @@
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
         deviseDe: deviseDe, coursOr: coursOr,
-        taux: taux, viderCache: viderCache, supabase: supabase,
+        taux: taux, tauxMouvement: tauxMouvement, viderCache: viderCache, supabase: supabase,
         setTransport: function (fn) { transport = fn; viderCache(); },
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,
         cache: { cours: cache_cours, fx: cache_fx, variation: cache_variation, serie: cache_serie }

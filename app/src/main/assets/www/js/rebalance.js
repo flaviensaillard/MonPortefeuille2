@@ -60,7 +60,7 @@
        coûterait plus en frais qu'il ne corrige de dérive : on le signale. */
     function genererOrdres(ecarts, seuilMinUsd) {
         seuilMinUsd = seuilMinUsd === undefined ? 250 : seuilMinUsd;
-        var ordres = [], aSurveiller = [];
+        var ordres = [], aSurveiller = [], sansTaux = [];
 
         (ecarts || []).forEach(function (e) {
             if (!e.horsBande) return;
@@ -80,7 +80,11 @@
                     : (totalPoche > 0 ? a.valeurEur / totalPoche : 1 / e.actifs.length);
                 var montant = Math.abs(ecart) * part;
                 var montantU = Math.abs(ecartU) * part;
-                var prixEur = a.prix * (a.dernierTaux || 1);
+                // Sans cours de change pour cet actif, la quantité n'est pas calculée :
+                // l'ordre est signalé au lieu d'être chiffré avec un taux de 1.
+                var tauxEur = U.tauxValide(a.dernierTaux);
+                if (tauxEur === null) { sansTaux.push({ ticker: a.ticker, montantEur: U.arrondi(montant, 2) }); return; }
+                var prixEur = a.prix * tauxEur;
                 var quantite = prixEur > 0 ? montant / prixEur : 0;
                 ordres.push({
                     ticker: a.ticker,
@@ -96,7 +100,7 @@
             });
         });
 
-        return { ordres: ordres, aSurveiller: aSurveiller };
+        return { ordres: ordres, aSurveiller: aSurveiller, sansTaux: sansTaux };
     }
 
     PF.rebalance = {

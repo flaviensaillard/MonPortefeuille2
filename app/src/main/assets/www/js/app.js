@@ -997,12 +997,20 @@
             if (refus.length) { UI.toast(refus[0]); return; }
         }
 
-        PF.net.taux(devise, date, 'EUR').then(function (tEur) {
-            var tauxEur = tEur || 1;
-            return PF.net.taux(devise, date, 'USD').then(function (tUsd) {
-                return { eur: tauxEur, usd: tUsd || tauxEur * (etat.ctx ? etat.ctx.tauxEurUsd : 1.125) };
-            });
-        }).then(function (tx) {
+        /* Valorisation du mouvement au cours du jour. Sans cours, rien n'est écrit
+           et rien n'est remplacé : ni 1 (un dollar pris pour un euro), ni un taux
+           de réglage. La fonction peut être relancée par le bouton « Réessayer ». */
+        function valoriserEtEcrire() {
+            return PF.net.tauxMouvement(devise, date).catch(function (e) {
+                if (!e || !e.tauxIndisponible) throw e;
+                UI.confirmer('Taux indisponible',
+                    'Le cours ' + UI.h(e.paire) + ' du ' + UI.h(U.jourMoisAnneeISO(date))
+                    + ' n’est pas disponible. Le mouvement n’est pas enregistré : aucune valeur n’a été estimée.',
+                    'Réessayer', valoriserEtEcrire);
+                var refus = new Error('taux indisponible');
+                refus.tauxIndisponible = true;
+                throw refus;
+            }).then(function (tx) {
             var montantEur = U.arrondi(montant * tx.eur, 2);
             var montantUsd = U.arrondi(montant * tx.usd, 2);
             var coursOr = (etat.ctx && etat.ctx.coursOr) || 0;
@@ -1050,8 +1058,11 @@
             document.querySelector('#voile').click();
             rafraichir(true);
         }).catch(function (e) {
+            if (e && e.tauxIndisponible) return;     // le dialogue « Taux indisponible » a déjà parlé
             UI.toast('Échec : ' + (e && e.message ? e.message : 'écriture refusée'));
         });
+        }
+        valoriserEtEcrire();
     }
 
         /* L'historique v1 porte le cumul des apports nets : on le recalcule. */
@@ -2065,6 +2076,8 @@
     /* Jeu de démonstration : des ordres de grandeur plausibles, une allocation
        au plus près des cibles, pour que l'on puisse juger l'ergonomie avant
        même d'avoir branché sa base. */
+    /* DÉMO, NE PAS IMITER : ces cours de change sont des constantes de démonstration.
+       Le code réel n'a aucun taux de repli ; il dit « taux indisponible ». */
     function demoContexte() {
         var ctx = PF.portefeuille.contexteVide();
         var aujourd = U.todayISO();
@@ -2090,7 +2103,7 @@
             return {
                 ticker: p.ticker, classe: M.classeDe(p.ticker), deviseCotation: p.devise,
                 poche: (M.pocheDe(p.ticker) || { cle: 'inconnu' }).cle, quantite: p.qte, prix: p.cours,
-                valeurUsd: valeurUsd, valeurEur: valeurUsd / 1.125,
+                valeurUsd: valeurUsd, valeurEur: valeurUsd / 1.125,   // démo, ne pas imiter : taux figé
                 dernierTaux: p.devise === 'JPY' ? 0.006 : 1, dernierTauxUsd: p.tauxUsd,
                 pruUsd: p.cours * 0.88, pruEur: p.cours * 0.88 / 1.125,
                 coutTotalUsd: valeurUsd * 0.88, coutTotalEur: valeurUsd * 0.88 / 1.125,
@@ -2136,7 +2149,7 @@
         ctx.comptes.forEach(function (c) {
             c.solde = PF.comptes.soldeDuCompte(c.id, ctx.operationsCompte);
             c.valeurUsd = c.solde * tauxUsdDemo[c.devise];
-            c.valeurEur = c.valeurUsd / 1.125;
+            c.valeurEur = c.valeurUsd / 1.125;   // démo, ne pas imiter : taux figé
             ctx.comptesVariation[c.id] = 0;
         });
 
@@ -2173,7 +2186,7 @@
             { id: 3, date: U.ajouterJours(aujourd, -40), type: 'apport', montant_eur: 2500, montant_usd: 2812, montant_or: 1.06, cours_or: 2650, reference: null }
         ];
         ctx.inflation = { 2023: 0.049, 2024: 0.02, 2025: 0.017, 2026: 0.015 };
-        ctx.tauxEurUsd = 1.125;
+        ctx.tauxEurUsd = 1.125;     // démo, ne pas imiter : taux figé de démonstration
         ctx.coursOr = 2650;
         ctx.capitalInvestiUsd = U.arrondi(investi * 0.84, 2);
         ctx.capitalInvestiEur = U.arrondi(investi * 0.84 / 1.125, 2);

@@ -35,7 +35,11 @@
 
     function signe(x) { return x > 0 ? '+' : (x < 0 ? '-' : ''); }
 
+    /* Une valeur absente ou non calculable s'affiche « — ». Surtout pas « 0,00 € » :
+       nombre() ramène tout ce qui n'est pas un nombre à zéro, et un zéro affiché
+       est un chiffre, pas une absence. */
     function usd(x, opts) {
+        if (!estNombre(x)) return '—';
         opts = opts || {};
         var d = opts.dec === undefined ? 2 : opts.dec;
         var s = opts.signe ? signe(x) : '';
@@ -43,10 +47,30 @@
     }
 
     function eur(x, opts) {
+        if (!estNombre(x)) return '—';
         opts = opts || {};
         var d = opts.dec === undefined ? 2 : opts.dec;
         var s = opts.signe ? signe(x) : '';
         return s + nombre(opts.signe ? Math.abs(x) : x, d) + ' €';
+    }
+
+    /* Taux de change utilisable : un nombre strictement positif, sinon rien.
+       Ne jamais remplacer un taux absent par 1 ni par une constante. */
+    function tauxValide(t) {
+        return estNombre(t) && t > 0 ? t : null;
+    }
+
+    /* Conversion USD -> EUR avec un taux réel. Sans taux, ou sans montant,
+       le résultat est null (affiché « — »), jamais une division par zéro ni par 1. */
+    function enEur(usdValeur, tauxEurUsd) {
+        var t = tauxValide(tauxEurUsd);
+        return t !== null && estNombre(usdValeur) ? usdValeur / t : null;
+    }
+
+    /* Conversion EUR -> USD avec un taux réel. Même règle que enEur. */
+    function enUsd(eurValeur, tauxEurUsd) {
+        var t = tauxValide(tauxEurUsd);
+        return t !== null && estNombre(eurValeur) ? eurValeur * t : null;
     }
 
     /* Deux fonctions, deux métiers : on ne convertit une unité qu'une seule
@@ -214,7 +238,8 @@
 
     PF.util = {
         estNombre: estNombre, num: num, nombre: nombre, signe: signe,
-        usd: usd, eur: eur, pct: pct, pctSigne: pctSigne, points: points,
+        usd: usd, eur: eur, tauxValide: tauxValide, enEur: enEur, enUsd: enUsd,
+        pct: pct, pctSigne: pctSigne, points: points,
         tauxPlausible: tauxPlausible, inflationDepuisTable: inflationDepuisTable,
         quantite: quantite, fleche: fleche, flecheTexte: flecheTexte,
         parseDate: parseDate, iso: iso, todayISO: todayISO, jourMois: jourMois,

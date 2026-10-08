@@ -35,7 +35,7 @@ class Ordre:
     ticker: str
     sens: str                 # "achat" ou "vente"
     montant_eur: float
-    quantite: float
+    quantite: float | None    # None : cours de change indisponible, quantité non calculée
     poche: str
     motif: str = ""
     montant_usd: float = 0.0
@@ -181,15 +181,22 @@ def generer_ordres(
                 part = (a.valeur_eur / total_poche) if total_poche > 0 else (1.0 / len(e.actifs))
             montant = abs(ecart) * part
             montant_u = ecart_u * part
-            quantite = montant / (a.prix * (a.dernier_taux or 1.0)) if a.prix > 0 else 0.0
+            # Sans cours de change pour cet actif, la quantité n'est pas calculée
+            # (None, affichée « — ») : jamais une quantité faite avec un taux de 1.
+            taux_eur = a.dernier_taux if (a.dernier_taux and a.dernier_taux > 0) else None
+            if taux_eur is None or not a.prix > 0:
+                quantite = None
+            else:
+                quantite = round(montant / (a.prix * taux_eur), 6)
             ordres.append(Ordre(
                 ticker=a.ticker,
                 sens=sens,
                 montant_eur=round(montant, 2),
-                quantite=round(quantite, 6),
+                quantite=quantite,
                 poche=e.poche_cle,
                 motif=f"{e.poche_nom} à {e.poids_reel*100:.1f} % vs cible "
-                      f"{e.poids_cible*100:.1f} % (bande ±{e.bande*100:.1f} pts)",
+                      f"{e.poids_cible*100:.1f} % (bande ±{e.bande*100:.1f} pts)"
+                      + ("" if quantite is not None else " — cours de change indisponible : quantité non calculée"),
                 montant_usd=round(montant_u, 2),
             ))
 

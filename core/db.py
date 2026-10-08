@@ -626,13 +626,19 @@ def ajuster_solde_compte(
     ticker: str,
     delta_quantite: float,
     type_defaut: str = "💵 Cash",
-    taux_usd: float = 1.0,
+    taux_usd: float | None = None,
 ) -> float | None:
     """Ajoute `delta_quantite` (positif ou négatif) à la ligne `ticker` dans `Donnees`.
+
+    `taux_usd` est le cours de la devise en dollars (1.0 pour le dollar lui-même).
+    Il est obligatoire : sans lui, la valeur en dollars de la ligne ne peut pas être
+    écrite, et aucun taux de remplacement n'est inventé. Lève ValueError dans ce cas.
 
     Retourne le nouveau solde dans la devise du compte, ou `None` en cas d'échec.
     """
     verifier_ecriture_cash()
+    if taux_usd is None or not taux_usd > 0:
+        raise ValueError("taux EUR/USD indisponible : solde non ajusté, aucune valeur de repli")
     t_up = str(ticker).strip().upper()
     try:
         c = client()
@@ -646,7 +652,7 @@ def ajuster_solde_compte(
                 except Exception:
                     q_actuel = 0.0
                 q_nouveau = round(max(0.0, q_actuel + float(delta_quantite)), 6)
-                val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+                val_tot_usd = round(q_nouveau * float(taux_usd), 2)
                 maj = {
                     "Quantité": q_nouveau,
                     "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
@@ -658,12 +664,12 @@ def ajuster_solde_compte(
                 return q_nouveau
         # Si la ligne n'existe pas encore dans Donnees
         q_nouveau = round(max(0.0, float(delta_quantite)), 6)
-        val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+        val_tot_usd = round(q_nouveau * float(taux_usd), 2)
         c.table("Donnees").insert({
             "Ticker": t_up,
             "Type": type_defaut,
             "Devise Cotation": "Auto",
-            "Court": f"$ {float(taux_usd or 1.0):.2f}",
+            "Court": f"$ {float(taux_usd):.2f}",
             "Quantité": q_nouveau,
             "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
             "Pourcentage (%)": 0,

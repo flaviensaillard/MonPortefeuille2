@@ -61,9 +61,9 @@ class Contexte:
     total_precaution_usd: float = 0.0
     total_courant_usd: float = 0.0
     patrimoine_total_usd: float = 0.0
-    taux_eur_usd: float = 1.125
-    # Taux EUR/USD du jour introuvable : `taux_eur_usd` garde alors 1.125 pour l'affichage
-    # seulement, et AUCUN calcul ne doit s'en servir (voir `_taux_valide` et le graphique).
+    # Taux EUR/USD du jour, ou None s'il est introuvable. Aucun repli : ni 1,0, ni 1,125.
+    # Les calculs passent par `_taux_valide` ; l'affichage montre « — ».
+    taux_eur_usd: float | None = None
     taux_indisponible: bool = False
     # Dates des points du graphique dont la valeur USD dépend de ce taux : non tracées.
     dates_sans_taux: list = field(default_factory=list)
@@ -475,7 +475,7 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     try:
         ctx.taux_eur_usd = float(fx.taux("EUR", aujourdhui_iso, "USD"))
     except Exception as exc:
-        ctx.taux_eur_usd = 1.125
+        ctx.taux_eur_usd = None
         ctx.taux_indisponible = True
         ctx.echecs_fx.append(f"EUR/USD du jour ({exc})")
     from . import ui as _ui
@@ -672,8 +672,10 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
     """
     from . import dates as _dates
 
-    taux = ctx.taux_eur_usd if ctx.taux_eur_usd > 0 else 1.125
+    # Sans taux, `taux` vaut NaN : toute valeur qui en dépend devient NaN et
+    # `progression_periode` la retire. Jamais un taux de remplacement.
     taux_ok = _taux_valide(ctx)
+    taux = ctx.taux_eur_usd if taux_ok else float("nan")
     ctx.dates_sans_taux = []
     sans_taux: list[pd.Timestamp] = []
 

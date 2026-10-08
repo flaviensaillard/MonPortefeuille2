@@ -186,6 +186,10 @@ with tab_reeq:
         format="%.2f",
         help="Permet de simuler immédiatement les ordres d'achat si vous prévoyez d'ajouter du cash en plus du solde actuel.",
     )
+    if apport_simule_usd > 0 and not (ctx.taux_eur_usd or 0) > 0:
+        # Exclusion annoncée : sans taux, l'apport simulé ne peut pas entrer dans les totaux en euros.
+        st.warning("Taux EUR/USD indisponible : l'apport simulé n'est pas pris en compte dans les totaux.")
+        apport_simule_usd = 0.0
     apport_simule_eur = apport_simule_usd / ctx.taux_eur_usd if ctx.taux_eur_usd else 0.0
 
     assiette_usd = ctx.total_investi_usd + ctx.total_courant_usd + apport_simule_usd
@@ -394,6 +398,12 @@ with tab_reeq:
                             }
                             try:
                                 db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
+                                if "EUR" in compte_cash and not (ctx.taux_eur_usd or 0) > 0:
+                                    # Vérifié AVANT l'écriture : pas de transaction sans son ajustement de solde.
+                                    raise ValueError(
+                                        "taux EUR/USD du jour indisponible : opération non enregistrée, "
+                                        "aucune valeur de repli n'a été utilisée"
+                                    )
                                 db.ecrire(db.T_TRANSACTIONS, [ligne])
                                 montant_devise = quantite * cours + (frais if sens == "Achat" else -frais)
                                 signe_cash = -1.0 if sens == "Achat" else 1.0
@@ -825,7 +835,7 @@ with tab_fonds:
                     d_fr = pd.to_datetime(r["date"]).strftime("%d/%m/%Y") if pd.notna(r.get("date")) else "—"
                     sens_lbl = "↗ Apport" if str(r.get("sens")).lower() == "apport" else "↘ Retrait"
                     m_e = float(r.get("montant_eur") or 0.0)
-                    m_u = float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else m_e * ctx.taux_eur_usd
+                    m_u = float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else (m_e * ctx.taux_eur_usd if ctx.taux_eur_usd else None)
                     cpt_lbl = LIBELLES_COMPTES.get(str(r.get("compte") or ""), str(r.get("compte") or "—"))
                     lbl_ap = f"#{ap_id} — {d_fr} · {sens_lbl} · {ui.usd_eur(m_u, m_e)} ({cpt_lbl})"
                     options_ap[lbl_ap] = r
@@ -842,8 +852,10 @@ with tab_fonds:
                 m_usd_actuel = (
                     float(r_sel["montant_usd"])
                     if pd.notna(r_sel.get("montant_usd"))
-                    else round(m_eur_actuel * ctx.taux_eur_usd, 2)
+                    else (round(m_eur_actuel * ctx.taux_eur_usd, 2) if ctx.taux_eur_usd else None)
                 )
+                if m_usd_actuel is None:
+                    st.warning("Taux EUR/USD indisponible : le montant en dollars de cet apport n'est pas recalculé. Saisissez le montant corrigé en dollars.")
 
                 with st.form(f"editer_apport_{ap_id_sel}"):
                     ac1, ac2, ac3, ac4 = st.columns(4)
@@ -857,7 +869,7 @@ with tab_fonds:
                     montant_ap_edit = ac3.number_input(
                         "Montant corrigé",
                         min_value=0.0,
-                        value=round(m_usd_actuel, 2),
+                        value=round(m_usd_actuel, 2) if m_usd_actuel is not None else 0.0,
                         format="%.2f",
                         step=50.0,
                     )
@@ -931,7 +943,7 @@ with tab_fonds:
             "Date": pd.to_datetime(r["date"]).strftime("%d/%m/%Y"),
             "Sens": "↗ Apport" if r["sens"] == "apport" else "↘ Retrait",
             "Montant ($ / €)": ui.usd_eur(
-                float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else float(r["montant_eur"]) * ctx.taux_eur_usd,
+                float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else (float(r["montant_eur"]) * ctx.taux_eur_usd if ctx.taux_eur_usd else None),
                 float(r["montant_eur"]),
             ),
             "Équivalent or": f"{float(r['montant_or']):.4f} oz" if pd.notna(r.get("montant_or")) else "—",
@@ -943,11 +955,14 @@ with tab_fonds:
             float(r["montant_eur"]) * (1 if r["sens"] == "apport" else -1)
             for _, r in df.iterrows()
         )
-        apports_nets_usd = sum(
-            (float(r["montant_usd"]) if pd.notna(r.get("montant_usd")) else float(r["montant_eur"]) * ctx.taux_eur_usd)
+        _nets_usd = [
+            (float(r["montant_usd"]) if pd.notna(r.get("montant_usd"))
+             else (float(r["montant_eur"]) * ctx.taux_eur_usd if ctx.taux_eur_usd else None))
             * (1 if r["sens"] == "apport" else -1)
             for _, r in df.iterrows()
-        )
+        ]
+        # Un apport sans cours en dollars rend le total en dollars inconnu : « — », pas une somme partielle.
+        apports_nets_usd = None if any(v is None for v in _nets_usd) else sum(_nets_usd)
         ui.metric_usd_eur(st, "Apports nets cumulés", apports_nets_usd, apports_nets_eur)
 
 # ===========================================================================

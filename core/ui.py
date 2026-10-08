@@ -110,17 +110,17 @@ def _nombre(valeur: object) -> float | None:
 
 
 # Taux EUR -> USD courant (ex. 1,125 : 1 € = 1,125 $), rafraîchi par
-# `session.charger()`. Permet à `usd_eur(montant_usd)` d'afficher l'indication
-# en euros même quand seul le montant en dollars lui est passé.
-_TAUX_EUR_USD: float = 1.125
+# `session.charger()`, ou None s'il est introuvable. Pas de valeur par défaut :
+# sans taux, l'indication en euros est « — ».
+_TAUX_EUR_USD: float | None = None
 
 
 def definir_taux_eur_usd(taux: float | None) -> None:
     """Enregistre le taux EUR -> USD courant pour l'indication en euros."""
     global _TAUX_EUR_USD
     val = _nombre(taux)
-    if val is not None and val > 0:
-        _TAUX_EUR_USD = val
+    # Un taux absent efface le précédent : pas de cours de la veille affiché comme celui du jour.
+    _TAUX_EUR_USD = val if (val is not None and val > 0) else None
 
 
 def usd(montant: float | None, decimales: int = 2, signe: bool = False) -> str:
@@ -151,10 +151,10 @@ def usd_eur(
     v_eur = _nombre(montant_eur)
     if v_eur is None:
         t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
-        v_eur = (v_usd / t) if (t and t > 0) else v_usd
+        v_eur = (v_usd / t) if (t and t > 0) else None
     fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
     s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
-    s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+    s_eur = "—" if v_eur is None else f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
     return f"{s_usd} / {s_eur}"
 
 
@@ -274,10 +274,10 @@ def html_usd_eur(
     v_eur = _nombre(montant_eur)
     if v_eur is None:
         t = _nombre(taux_eur_usd) or _TAUX_EUR_USD
-        v_eur = (v_usd / t) if (t and t > 0) else v_usd
+        v_eur = (v_usd / t) if (t and t > 0) else None
     fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
     s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
-    s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+    s_eur = "—" if v_eur is None else f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
     return (
         f"<div style='color:#ffffff;font-weight:600;font-size:{taille_usd};line-height:1.2;'>{s_usd}</div>"
         f"<div style='color:#38bdf8;font-weight:500;font-size:{taille_eur};line-height:1.2;margin-top:2px;'>{s_eur}</div>"
@@ -344,14 +344,14 @@ def metric_usd_eur(
         v_eur = _nombre(montant_eur)
         if v_eur is None:
             t = _TAUX_EUR_USD
-            v_eur = (v_usd / t) if (t and t > 0) else v_usd
+            v_eur = (v_usd / t) if (t and t > 0) else None
         if signe and abs(v_usd) <= 1e-6:
             s_usd = f"{0.0:,.{decimales}f}".replace(",", " ").replace(".", ",") + " $"
             s_eur = f"{0.0:,.{decimales}f}".replace(",", " ").replace(".", ",") + " €"
         else:
             fmt = f"+,.{decimales}f" if signe else f",.{decimales}f"
             s_usd = f"{v_usd:{fmt}}".replace(",", " ").replace(".", ",") + " $"
-            s_eur = f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
+            s_eur = "—" if v_eur is None else f"{v_eur:{fmt}}".replace(",", " ").replace(".", ",") + " €"
 
         if signe:
             c_haut = _couleur_variation(v_usd)

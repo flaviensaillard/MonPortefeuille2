@@ -158,7 +158,7 @@ if fantomes:
                 detail = " · ".join(
                     f"**{ui.jour(r['_d'])}** — "
                     f"{'apport' if str(r['sens']).lower().startswith('app') else 'retrait'} "
-                    f"de {ui.usd_eur(float(r['montant_usd']) if pd.notna(r.get('montant_usd')) else float(r['montant_eur']) * ctx.taux_eur_usd, float(r['montant_eur']))}"
+                    f"de {ui.usd_eur(float(r['montant_usd']) if pd.notna(r.get('montant_usd')) else (float(r['montant_eur']) * ctx.taux_eur_usd if ctx.taux_eur_usd else None), float(r['montant_eur']))}"
                     for _, r in dedans.sort_values("_d").iterrows()
                 )
                 st.caption(f"Versements enregistrés sur cette période : {detail}")

@@ -113,29 +113,36 @@
                         deviseCotation: t.devise,
                         quantite: 0, coutTotalEur: 0, coutTotalUsd: 0,
                         pruEur: 0, pruUsd: 0, prix: 0,
-                        valeurEur: 0, valeurUsd: 0, pvLatenteEur: 0, pvLatenteUsd: 0
+                        valeurEur: 0, valeurUsd: 0, pvLatenteEur: 0, pvLatenteUsd: 0,
+                        nonCalcule: false   // vrai si le coût d'une ligne n'a pas de cours de change
                     };
                 }
 
+                // Aucun repli : ni le cours USD pour l'EUR, ni 1. Sans l'un des deux
+                // cours, le coût de cette ligne est inconnu : la position est marquée
+                // « non calculée » (voir valoriser). La quantité, elle, ne dépend pas du change.
                 var tEur = t.devise === 'EUR' ? 1 : taux[t.devise + '|EUR|' + t.date];
                 var tUsd = t.devise === 'USD' ? 1 : taux[t.devise + '|USD|' + t.date];
-                if (tEur === null || tEur === undefined) {
-                    manquants[t.devise + '/EUR'] = 1;
-                    tEur = tUsd !== null && tUsd !== undefined ? tUsd : 1;
-                }
-                if (tUsd === null || tUsd === undefined) tUsd = tEur;
+                var eurOk = tEur !== null && tEur !== undefined;
+                var usdOk = tUsd !== null && tUsd !== undefined;
+                if (!eurOk) manquants[t.devise + '/EUR'] = 1;
+                if (!usdOk) manquants[t.devise + '/USD'] = 1;
+                var coutConnu = eurOk && usdOk;
+                if (!coutConnu) pos.nonCalcule = true;
 
-                var montantEur = t.montantNet * tEur;
-                var montantUsd = t.montantNet * tUsd;
+                var montantEur = coutConnu ? t.montantNet * tEur : null;
+                var montantUsd = coutConnu ? t.montantNet * tUsd : null;
                 // Conservés pour neutraliser les achats/ventes comme flux
-                // internes quand la référence précède l'opération.
+                // internes quand la référence précède l'opération. Null = inconnu.
                 t.montantNetEur = montantEur;
                 t.montantNetUsd = montantUsd;
 
                 if (t.type === 'achat') {
                     pos.quantite += t.quantite;
-                    pos.coutTotalEur += montantEur;
-                    pos.coutTotalUsd += montantUsd;
+                    if (coutConnu) {
+                        pos.coutTotalEur += montantEur;
+                        pos.coutTotalUsd += montantUsd;
+                    }
                 } else {
                     if (pos.quantite <= 1e-9) {
                         erreurs.push('Vente de ' + U.quantite(t.quantite) + ' ' + t.ticker + ' le '
@@ -187,7 +194,8 @@
         })).then(function (resultats) {
             resultats.forEach(function (r) {
                 var pos = r.pos;
-                if (r.prix === null || r.tEur === null || r.tUsd === null) { echecs.push(pos.ticker); return; }
+                // Une position dont un coût n'a pas de cours est listée en échec, jamais valorisée à moitié.
+                if (pos.nonCalcule || r.prix === null || r.tEur === null || r.tUsd === null) { echecs.push(pos.ticker); return; }
                 var devise = r.devise || pos.deviseCotation;
                 pos.prix = r.prix;
                 pos.valeurEur = pos.quantite * r.prix * r.tEur;
@@ -298,7 +306,7 @@
             snapshots: [], apports: [], inflation: {},
             totalInvestiEur: 0, totalPrecautionEur: 0, totalCourantEur: 0, patrimoineTotalEur: 0,
             totalInvestiUsd: 0, totalPrecautionUsd: 0, totalCourantUsd: 0, patrimoineTotalUsd: 0,
-            tauxEurUsd: 1.125, coursOr: null, equivalentOrOz: null,
+            tauxEurUsd: null, tauxIndisponible: false, nbPointsSansTaux: 0, coursOr: null, equivalentOrOz: null,
             echecsCours: [], echecsFx: [], erreurs: [], anomaliesTransactions: [],
             allocationCfg: M.allocationDefaut(), etatAllocation: M.verifier(null),
             variationsActifs: {}, capitalInvestiUsd: null, capitalInvestiEur: null,
@@ -398,7 +406,11 @@
 
             // --- Taux EUR -> USD du jour
             return PF.net.taux('EUR', jour, 'USD').then(function (t) {
-                ctx.tauxEurUsd = (t && t > 0) ? t : 1.125;
+                // Pas de cours EUR/USD : aucun repli. Le tableau de bord le dit,
+                // et l'historique en dollars n'est pas tracé (voir enrichirHistoriquesUsd).
+                ctx.tauxEurUsd = U.tauxValide(t);
+                ctx.tauxIndisponible = ctx.tauxEurUsd === null;
+                if (ctx.tauxIndisponible) ctx.echecsFx.push('EUR/USD');
                 if (ctx.comptesEtat.presente && ctx.comptes.length) {
                     return completerLiquiditesDepuisComptes(ctx, jour);
                 }
@@ -419,7 +431,12 @@
         }).then(function () {
             // --- Historiques en dollars
             enrichirHistoriquesUsd(ctx);
-            ctx.serie = PF.metrics.seriePerformance(ctx.snapshots, ctx.apports, ctx.fluxTitresFinal);
+            // Sans cours EUR/USD, pas de courbe de performance : une série à flux
+            // manquants donnerait un rendement faux, sans le dire.
+            // Sans cours EUR/USD, ou avec un apport sans montant en dollars, pas de courbe :
+            // une série à flux manquants donnerait un rendement faux, sans le dire.
+            ctx.serie = (ctx.tauxIndisponible || apportsSansUsd(ctx))
+                ? null : PF.metrics.seriePerformance(ctx.snapshots, ctx.apports, ctx.fluxTitresFinal);
             var dernier = ctx.snapshots && ctx.snapshots.length ? ctx.snapshots[ctx.snapshots.length - 1] : null;
             ctx.capitalInvestiUsd = dernier ? U.num(dernier.capital_investi_usd, null) : null;
             ctx.capitalInvestiEur = dernier ? U.num(dernier.capital_investi_eur, null) : null;
@@ -680,7 +697,7 @@
     /* Attache les colonnes en dollars aux apports et aux snapshots, puis ajoute
        un point distinct pour la valorisation en direct du jour. */
     function enrichirHistoriquesUsd(ctx) {
-        var taux = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125;
+        var taux = U.tauxValide(ctx.tauxEurUsd);
 
         // --- Apports en USD
         var usdParRef = {};
@@ -698,8 +715,18 @@
             }
             if (usdParRef[ref] !== undefined) { a.montant_usd = U.arrondi(usdParRef[ref], 2); return; }
             if (a.montant_or > 0 && a.cours_or > 0) { a.montant_usd = U.arrondi(a.montant_or * a.cours_or, 2); return; }
-            a.montant_usd = U.arrondi(a.montant_eur * taux, 2);
+            // Sans cours, le montant en dollars reste absent : jamais le montant en euros.
+            a.montant_usd = taux === null ? null : U.arrondi(a.montant_eur * taux, 2);
         });
+
+        // Sans cours EUR/USD, l'historique ne peut pas être exprimé en dollars :
+        // aucun point n'est tracé, et le nombre de points non tracés est dit.
+        if (taux === null) {
+            ctx.nbPointsSansTaux = (ctx.snapshotsBruts || []).length + (ctx.projections || []).length;
+            ctx.snapshots = [];
+            return;
+        }
+        ctx.nbPointsSansTaux = 0;
 
         // --- Snapshots : `Projections` (v1, en dollars) + `pf2_snapshots`
         var snaps = (ctx.snapshotsBruts || []).slice();
@@ -866,15 +893,23 @@
     /* Un capital investi à 0 est une valeur manquante (NULL en base) : on
        propage le dernier connu augmenté des apports de la période. Aucune date
        n'affiche « — » à cause d'un trou. */
+    /* Vrai si un apport n'a pas de montant en dollars (pas de cours du jour). */
+    function apportsSansUsd(ctx) {
+        return (ctx.apports || []).some(function (a) { return U.num(a.montant_usd, null) === null; });
+    }
+
     function propagerCapitalInvesti(ctx, taux) {
         var snaps = ctx.snapshots || [];
         if (!snaps.length) return;
         var dates = snaps.map(function (s) { return s.date; });
         var fluxJour = {};
+        var fluxInconnus = apportsSansUsd(ctx);
         (ctx.apports || []).forEach(function (a) {
             // Montants stockés positifs : le signe vient de `sens`. Sans cela,
             // un retrait ferait monter le capital investi.
-            fluxJour[a.date] = (fluxJour[a.date] || 0) + PF.metrics.montantSigne(a, 'montant_usd');
+            var s = PF.metrics.montantSigne(a, 'montant_usd');
+            if (s === null) return;   // inconnu : pas de repli sur les euros
+            fluxJour[a.date] = (fluxJour[a.date] || 0) + s;
         });
         var flux = PF.metrics.fluxParPeriode(dates, fluxJour, 0);
 
@@ -883,7 +918,7 @@
             var c = U.num(s.capital_investi_usd, 0);
             if (c > 0 && !premierConnu) { premierConnu = true; cumulConnu = c; }
             else if (c > 0) cumulConnu = c;
-            else if (premierConnu) cumulConnu = U.arrondi(cumulConnu + (flux[i] || 0), 2);
+            else if (premierConnu) cumulConnu = fluxInconnus ? null : U.arrondi(cumulConnu + (flux[i] || 0), 2);
             s.capital_investi_usd = premierConnu ? cumulConnu : null;
             if (s.capital_investi_usd) {
                 var invU = U.num(s.patrimoine_investi_usd, 0), invE = U.num(s.patrimoine_investi_eur, 0);

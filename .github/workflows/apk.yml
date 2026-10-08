@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '2.0'
-      VERSION_CODE: '26'
+      VERSION_NAME: '2.0.1'
+      VERSION_CODE: '27'
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +79,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-2.0.apk
+          name: Porte-feuille-2.0.1.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 
