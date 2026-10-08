@@ -112,19 +112,12 @@
                 if (res && res.length) {
                     var meta = res[0].meta || {};
                     out.currency = (meta.currency || '').toUpperCase() || null;
-                    /* Le « méta » porte la cotation du moment et la clôture
-                       précédente : c'est exactement la référence du courtier
-                       (« variation journalière »). La série, elle, peut s'arrêter
+                    /* Le « méta » porte la cotation du moment (`regularMarketPrice`)
+                       et la séance qui va avec. La série, elle, peut s'arrêter
                        à la séance précédente — cas connu de Yahoo sur IGLN.L,
-                       XDW0.L et FLXC.L, où la dernière ligne arrive sans cours.
-                       S'en remettre aux deux dernières clôtures de la série
-                       affichait donc la variation de la veille. */
+                       XDW0.L et FLXC.L, où la dernière ligne arrive sans cours. */
                     var prixMeta = Number(meta.regularMarketPrice);
-                    var veilleMeta = Number(
-                        meta.chartPreviousClose !== undefined && meta.chartPreviousClose !== null
-                            ? meta.chartPreviousClose : meta.previousClose);
                     out.cours = (isFinite(prixMeta) && prixMeta > 0) ? prixMeta : null;
-                    out.veille = (isFinite(veilleMeta) && veilleMeta > 0) ? veilleMeta : null;
                     out.seance = meta.regularMarketTime
                         ? U.iso(new Date(meta.regularMarketTime * 1000)) : null;
                     var ts = res[0].timestamp || [];
@@ -136,6 +129,30 @@
                             out.timestamps.push(U.iso(new Date(ts[i] * 1000)));
                             out.closes.push(v);
                         }
+                    }
+                    /* La clôture précédente se prend DANS la série, pas dans le
+                       méta. `chartPreviousClose` est la clôture d'avant la
+                       PREMIÈRE bougie de la fenêtre demandée : sur `range=5d`,
+                       c'est celle d'il y a ~6 séances, pas celle de la veille.
+                       L'utiliser donnait une variation sur une semaine affichée
+                       comme « variation du jour » — l'écart avec le courtier.
+                       Bonne base : la dernière clôture de la série ANTÉRIEURE à
+                       la séance du cours. Série à jour (dernière bougie = séance
+                       du cours) → la veille, comme le courtier. Série en retard
+                       (IGLN.L, XDW0.L, FLXC.L : dernière bougie sans cours) →
+                       la dernière clôture connue, exactement ce qu'il faut. */
+                    out.veille = null;
+                    if (out.seance) {
+                        for (var j = out.timestamps.length - 1; j >= 0; j--) {
+                            if (out.timestamps[j] < out.seance) {
+                                out.veille = out.closes[j];
+                                break;
+                            }
+                        }
+                    } else if (out.closes.length >= 2) {
+                        // Pas de séance connue : la veille est l'avant-dernière
+                        // clôture (comportement d'avant la 1.7.3).
+                        out.veille = out.closes[out.closes.length - 2];
                     }
                     out.ok = out.closes.length > 0;
                 }

@@ -113,7 +113,10 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
             # Une seule requete pour toute l'histoire de la paire, puis
             # recherche dedans. Un appel par date rendait la reconstitution
             # de l'historique impraticable.
-            h = yf.Ticker(symbole).history(period="max")
+            # auto_adjust=False : sans effet sur une paire de devises (pas de
+            # dividendes), mais explicite — le défaut a basculé à True dans
+            # yfinance 0.2.51 et on ne veut pas dépendre d'un autre basculement.
+            h = yf.Ticker(symbole).history(period="max", auto_adjust=False)
             serie = dates.dernier_avant(h["Close"].dropna(), d)
             if serie.empty:
                 raise FXIndisponible(devise, contre, str(date), "aucun cours antérieur")
