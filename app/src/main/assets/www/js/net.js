@@ -22,6 +22,7 @@
     var cache_devise = {};     // ticker -> devise
     var cache_fx = {};         // DEV-CONTRE|date -> taux
     var transport = null;      // pour les tests (renvoie un objet ou une promesse)
+    var seuilEcart = 0.02;     // 2 % : écart maximum normal entre cours et veille
     var compteurCb = 0;
 
     var promesses = {};
@@ -154,6 +155,9 @@
                         // clôture (comportement d'avant la 1.7.3).
                         out.veille = out.closes[out.closes.length - 2];
                     }
+                    out.ecartSignificatif = out.cours !== null && out.veille !== null
+                        && out.veille > 0
+                        && Math.abs(out.cours / out.veille - 1) > seuilEcart;
                     out.ok = out.closes.length > 0;
                 }
             } catch (e) { out.ok = false; }
@@ -228,6 +232,18 @@
     function variationSeance(ticker) {
         var v = cache_seance[String(ticker || '').toUpperCase().trim()];
         return v === undefined ? null : v;
+    }
+
+    /* Variation du jour consolidée : retourne la variation fractionnaire, la
+       séance comparée et si le seuil d'écart est dépassé. */
+    function varJour(ticker) {
+        var tk = String(ticker || '').toUpperCase().trim();
+        var v = cache_variation[tk];
+        if (v === undefined || v === null) return null;
+        return {
+            variation: v,
+            seance: cache_seance[tk] || null,
+            seuilDepasse: Math.abs(v) > seuilEcart };
     }
 
     function deviseDe(ticker) {
@@ -348,9 +364,11 @@
     PF.net = {
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
+        varJour: varJour,
         deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, viderCache: viderCache, supabase: supabase,
         setTransport: function (fn) { transport = fn; viderCache(); },
+        seuilEcart: seuilEcart,
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,
         cache: { cours: cache_cours, fx: cache_fx, variation: cache_variation, serie: cache_serie }
     };

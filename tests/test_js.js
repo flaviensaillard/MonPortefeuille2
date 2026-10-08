@@ -483,8 +483,27 @@ PF.portefeuille.charger().then((ctx) => {
             test('la séance comparée de la série en retard est celle du méta', () =>
                 PF.net.variationSeance('SERIE.ENRETARD') === U.iso(new Date(T_AUJ * 1000)));
             PF.net.setTransport(fauxTransport);
-            console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
-            process.exit(echecs === 0 ? 0 : 1);
+
+            // --- seuilEcart et varJour
+            test('seuilEcart est défini à 2 %', () => proche(PF.net.seuilEcart, 0.02));
+            test('varJour est une fonction exposée', () => typeof PF.net.varJour === 'function');
+            test('varJour retourne null sans données', () => PF.net.varJour('ZZZZZ.NULL') === null);
+            return PF.net.cours('GC=F').then(() => {
+                test('varJour retourne un objet après un cours', () => {
+                    var vj = PF.net.varJour('GC=F');
+                    return vj !== null && typeof vj.variation === 'number';
+                });
+                test('varJour contient la séance', () => {
+                    var vj = PF.net.varJour('GC=F');
+                    return vj !== null && vj.seance !== undefined && vj.seance !== null;
+                });
+                test('varJour.seuilDepasse est un booléen', () => {
+                    var vj = PF.net.varJour('GC=F');
+                    return typeof vj.seuilDepasse === 'boolean';
+                });
+                console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
+                process.exit(echecs === 0 ? 0 : 1);
+            });
         });
     }).catch((e) => {
         console.log('  ✗ méta Yahoo : ' + (e && e.stack ? e.stack : e));
