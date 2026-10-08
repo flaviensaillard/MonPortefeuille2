@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '1.7.7'
-      VERSION_CODE: '23'
+      VERSION_NAME: '1.7.9'
+      VERSION_CODE: '25'
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +43,21 @@ jobs:
           path: keystore
           key: apk-keystore-v1
 
+      # Empreinte : elle prouve QUEL code est parti dans l'APK. À comparer
+      # avec « git rev-parse HEAD » du dépôt — et net.js doit contenir les
+      # garde-fous (seuilEcart, varJour) du correctif « écarts courtier ».
+      - name: Empreinte du code embarqué
+        run: |
+          set -e
+          echo "## Empreinte du code embarqué" >> "$GITHUB_STEP_SUMMARY"
+          echo '- commit : `'"$(git rev-parse HEAD)"'`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- net.js : `'"$(md5sum app/src/main/assets/www/js/net.js | cut -d" " -f1)"'`' >> "$GITHUB_STEP_SUMMARY"
+          N=$(grep -c "seuilEcart\|varJour" app/src/main/assets/www/js/net.js || true)
+          echo "- garde-fous présents dans net.js : $N (attendu : au moins 5)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$N" -lt 5 ]; then
+            echo "!! ATTENTION : le correctif « écarts courtier » n est PAS dans cet arbre" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Construire l'APK
         run: bash build.sh
 
@@ -56,13 +71,13 @@ jobs:
           gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
                  --title "APK ${VERSION_NAME}" \
-                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions."
+                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions. Écarts avec le courtier : la variation du jour est désormais celle CALCULÉE PAR YAHOO (même référence que le courtier, insensible aux bougies trouées), et les cours fossiles (XJSE.SW : cours figé au 06/12/2023) sont détectés et rejetés."
           gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-1.7.7.apk
+          name: Porte-feuille-1.7.9.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 

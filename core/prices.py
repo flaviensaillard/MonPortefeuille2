@@ -15,6 +15,7 @@ affiche un bandeau listant les titres concernés.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 import pandas as pd
@@ -149,29 +150,94 @@ def serie(ticker: str):
 
 
 
-def cotation_du_moment(ticker: str) -> tuple[float, float] | None:
-    """Dernier cours et clôture précédente, tels que Yahoo les donne au moment T.
+def _seuil_ecart(symbole: str) -> float:
+    """Écart maximal toléré entre cotation du moment et dernière clôture.
 
-    C'est exactement la référence du courtier (« variation journalière ») : le
-    cours du moment comparé à la clôture précédente. La série historique, elle,
-    peut s'arrêter à la séance d'avant — Yahoo renvoie une ligne de queue sans
-    cours pour IGLN.L, XDW0.L et FLXC.L — et une ligne semblait alors n'avoir
-    pas bougé.
+    Une action ou un ETF ne saute pas de 20 % entre deux séances ; une crypto,
+    si. Au-delà du seuil, la cotation est réputée fausse (métadonnées fossiles
+    chez Yahoo — cas XJSE.SW qui sert un cours figé au 06/12/2023).
+    """
+    haut = symbole.endswith(("-USD", "-USDT")) or "USDT" in symbole
+    return 0.75 if haut else 0.20
 
-    Retourne `None` si Yahoo ne répond rien d'exploitable : l'appelant garde
-    alors le comportement historique (dernières clôtures de la série).
+
+def cotation_du_moment(ticker: str) -> float | None:
+    """Dernier cours publié par Yahoo pour `ticker`, une fois vérifié.
+
+    La variation du jour associée (chiffre CALCULÉ PAR YAHOO, même référence
+    que le courtier — ou à défaut cours du moment contre clôture précédente)
+    est posée dans le cache de `variation_recente`.
+
+    DEUX GARDE-FOUS, pour ne pas propager une donnée Yahoo fausse :
+    - la séance du cours doit être récente : XJSE.SW renvoie un
+      `regularMarketPrice` figé au 06/12/2023 (+22,5 % au-dessus du marché) ;
+    - le cours doit être cohérent avec la clôture précédente : au-delà du
+      seuil, la cotation est réputée fossile.
+
+    Retourne `None` si Yahoo ne répond rien d'exploitable ou de crédible :
+    l'appelant garde alors le comportement historique (dernières clôtures de
+    la série), et la variation du jour vient des métadonnées Yahoo quand il
+    en publie une.
     """
     symbole = ALIAS_YAHOO.get(str(ticker).upper().strip(), str(ticker).upper().strip())
     try:
-        fi = yf.Ticker(symbole).fast_info
+        tk = yf.Ticker(symbole)
+        fi = tk.fast_info
         dernier = float(getattr(fi, "last_price", None) or 0.0)
         veille = float(getattr(fi, "previous_close", None) or 0.0)
+        # Les métadonnées de la même réponse portent la séance du cours et la
+        # variation du jour CALCULÉE PAR YAHOO (même référence que le
+        # courtier). Déjà chargées par `fast_info` : pas de requête de plus.
+        meta: dict = {}
+        try:
+            meta = tk.get_history_metadata() or {}
+        except Exception:
+            meta = {}
     except Exception as exc:
         log.info("Cotation du moment indisponible pour %s : %s", ticker, exc)
         return None
-    if dernier <= 0 or veille <= 0 or dernier != dernier or veille != veille:
+    if dernier <= 0 or dernier != dernier:
         return None
-    return dernier, veille
+
+    # Garde-fou 1 : une séance trop ancienne est un cours fossile.
+    ts = meta.get("regularMarketTime")
+    if ts:
+        try:
+            seance = dt.datetime.fromtimestamp(int(ts), dt.timezone.utc).date()
+            if (dt.date.today() - seance).days > 5:
+                log.info(
+                    "Cotation du moment de %s rejetée : séance du %s (fossile)",
+                    ticker, seance.isoformat(),
+                )
+                return None
+        except (ValueError, TypeError, OSError, OverflowError):
+            pass
+
+    if veille > 0 and veille == veille:
+        # Garde-fou 2 : cohérence cours/clôture précédente.
+        if abs(dernier / veille - 1.0) > _seuil_ecart(symbole):
+            log.info(
+                "Cotation du moment de %s rejetée : %.4f vs clôture %.4f",
+                ticker, dernier, veille,
+            )
+            return None
+        variation = (dernier / veille) - 1.0
+    else:
+        variation = None
+
+    # La variation PUBLIÉE PAR YAHOO prime : elle compare le cours du moment à
+    # la clôture OFFICIELLE de la veille, même quand la série publique troue
+    # cette séance (IGLN.L, XDW0.L, FLXC.L).
+    pct = meta.get("regularMarketChangePercent", meta.get("fulldayChangePercent"))
+    try:
+        pct_f = float(pct) if pct is not None else None
+    except (TypeError, ValueError):
+        pct_f = None
+    if pct_f is not None and pct_f == pct_f and abs(pct_f) <= _seuil_ecart(symbole) * 100:
+        variation = pct_f / 100.0
+
+    _cache_var[ticker] = variation
+    return dernier
 
 
 def cours(ticker: str, date: str | None = None) -> float:
@@ -218,10 +284,12 @@ def cours(ticker: str, date: str | None = None) -> float:
             # Cotation du moment d'abord : elle porte AUSSI la clôture
             # précédente, donc la variation du jour telle que le courtier
             # l'affiche. Repli sur la série si Yahoo ne la donne pas.
-            marche = cotation_du_moment(ticker)
-            if marche is not None:
-                valeur, veille = marche
-                _cache_var[ticker] = (valeur / veille) - 1.0
+            valeur = cotation_du_moment(ticker)
+            if valeur is not None:
+                # La variation du jour, elle, a déjà été posée dans le cache
+                # par `cotation_du_moment` : c'est le chiffre CALCULÉ PAR
+                # YAHOO (même référence que le courtier) quand il en publie
+                # une, sinon cours du moment contre clôture précédente.
                 _cache[cle] = valeur
                 return float(valeur)
 
