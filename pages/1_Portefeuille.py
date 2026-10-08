@@ -17,7 +17,7 @@ import importlib
 from core import db, fx, metrics, models, prices, rebalance, session as S
 from core import ui
 from core.models import POCHES_PAR_CLE
-from core.portfolio import devise_cotation_de
+from core.portfolio import devise_cotation_de, operations_compte_affichage, resume_comptes
 
 if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(models, "bande_actif") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "fleche_pct") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(models)
@@ -47,6 +47,11 @@ if etat_alloc["depasse_100"]:
     st.error(etat_alloc["message"])
 elif etat_alloc["inferieur_100"]:
     st.warning(etat_alloc["message"])
+
+# 2.0 : les liquidités sont des comptes, gérés dans l'application. Ici : lecture seule.
+gerees = db.cash_gere_par_comptes()
+if gerees:
+    st.info(db.MESSAGE_LECTURE_COMPTES)
 
 tab_actifs, tab_reeq, tab_fonds, tab_alloc = st.tabs([
     "📋 1. Liste des actifs & Poches",
@@ -285,121 +290,124 @@ with tab_reeq:
     st.divider()
     st.subheader("Enregistrer une transaction (Achat / Vente)")
 
-    with st.expander("➕ Nouvelle transaction", expanded=False):
-        st.caption(
-            "Saisissez le cours dans la **devise de cotation du titre**. "
-            "Ne le convertissez jamais à la main."
-        )
-
-        with st.form("nouvelle_transaction", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            date_tx = c1.date_input("Date", value=dt.date.today())
-            tickers_cfg = {str(a.get("ticker", "")).upper().strip() for a in cfg_alloc.get("actifs", []) if a.get("ticker")}
-            tickers_connus = sorted({t.ticker for t in ctx.transactions} | tickers_cfg)
-            ticker = c2.selectbox("Actif", options=tickers_connus + ["➕ Nouveau…"])
-            if ticker == "➕ Nouveau…":
-                ticker = c2.text_input("Nouveau ticker")
-            sens = c3.radio("Sens", ["Achat", "Vente"], horizontal=True)
-
-            c4, c5, c6 = st.columns(3)
-            quantite = c4.number_input("Quantité", min_value=0.0, format="%.6f")
-            cours = c5.number_input("Cours unitaire", min_value=0.0, format="%.6f")
-            frais = c6.number_input("Frais", min_value=0.0, format="%.2f", value=0.0)
-
-            devise_connue = devise_cotation_de(ticker) if ticker else None
-            devise_defaut = devise_connue or "USD"
-            cd1, cd2, cd3 = st.columns(3)
-            DEVISES_LISTE = ["USD", "EUR", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
-            LIBELLES_DEV = {
-                "USD": "USD ($ — Dollar américain)",
-                "EUR": "EUR (€ — Euro)",
-                "CHF": "CHF (Franc suisse)",
-                "JPY": "JPY (¥ — Yen japonais)",
-                "GBP": "GBP (£ — Livre sterling)",
-                "CNY": "CNY (¥ — Yuan chinois)",
-                "CAD": "CAD (CA$ — Dollar canadien)",
-                "AUD": "AUD (A$ — Dollar australien)",
-                "HKD": "HKD (HK$ — Dollar de Hong Kong)",
-                "SGD": "SGD (S$ — Dollar de Singapour)",
-                "NOK": "NOK (kr — Couronne norvégienne)",
-                "SEK": "SEK (kr — Couronne suédoise)",
-                "DKK": "DKK (kr — Couronne danoise)",
-            }
-            devise = cd1.selectbox(
-                "Devise de cotation",
-                DEVISES_LISTE,
-                format_func=lambda code: LIBELLES_DEV.get(code, code),
-                index=max(0, DEVISES_LISTE.index(devise_defaut))
-                if devise_defaut in DEVISES_LISTE else 0,
-            )
-            source = cd2.selectbox("Source", ["swissquote", "revolut", "manuel"])
-            compte_cash = cd3.selectbox(
-                "Compte de liquidités à débiter / créditer",
-                [
-                    "💵 Compte courant USD ($)",
-                    "💵 Compte courant EUR (€)",
-                    "Ne pas modifier les soldes cash",
-                ],
-                index=0,
+    if gerees:
+        st.info("Les achats et ventes se saisissent dans l’application : le compte débité ou crédité y est écrit avec eux.")
+    if not gerees:
+        with st.expander("➕ Nouvelle transaction", expanded=False):
+            st.caption(
+                "Saisissez le cours dans la **devise de cotation du titre**. "
+                "Ne le convertissez jamais à la main."
             )
 
-            soumis = st.form_submit_button("🔨 Enregistrer")
+            with st.form("nouvelle_transaction", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                date_tx = c1.date_input("Date", value=dt.date.today())
+                tickers_cfg = {str(a.get("ticker", "")).upper().strip() for a in cfg_alloc.get("actifs", []) if a.get("ticker")}
+                tickers_connus = sorted({t.ticker for t in ctx.transactions} | tickers_cfg)
+                ticker = c2.selectbox("Actif", options=tickers_connus + ["➕ Nouveau…"])
+                if ticker == "➕ Nouveau…":
+                    ticker = c2.text_input("Nouveau ticker")
+                sens = c3.radio("Sens", ["Achat", "Vente"], horizontal=True)
 
-            if soumis:
-                problemes = []
-                if not ticker or ticker == "➕ Nouveau…":
-                    problemes.append("Ticker manquant.")
-                if quantite <= 0:
-                    problemes.append("La quantité doit être positive.")
-                if cours <= 0:
-                    problemes.append("Le cours doit être positif.")
+                c4, c5, c6 = st.columns(3)
+                quantite = c4.number_input("Quantité", min_value=0.0, format="%.6f")
+                cours = c5.number_input("Cours unitaire", min_value=0.0, format="%.6f")
+                frais = c6.number_input("Frais", min_value=0.0, format="%.2f", value=0.0)
 
-                devise_attendue = devise_cotation_de(ticker) if ticker else None
-                if ticker and devise_attendue and devise != devise_attendue:
-                    st.warning(
-                        f"`{ticker}` est coté en **{devise_attendue}** mais vous "
-                        f"avez saisi **{devise}**. Vérifiez la devise avant de continuer."
-                    )
+                devise_connue = devise_cotation_de(ticker) if ticker else None
+                devise_defaut = devise_connue or "USD"
+                cd1, cd2, cd3 = st.columns(3)
+                DEVISES_LISTE = ["USD", "EUR", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
+                LIBELLES_DEV = {
+                    "USD": "USD ($ — Dollar américain)",
+                    "EUR": "EUR (€ — Euro)",
+                    "CHF": "CHF (Franc suisse)",
+                    "JPY": "JPY (¥ — Yen japonais)",
+                    "GBP": "GBP (£ — Livre sterling)",
+                    "CNY": "CNY (¥ — Yuan chinois)",
+                    "CAD": "CAD (CA$ — Dollar canadien)",
+                    "AUD": "AUD (A$ — Dollar australien)",
+                    "HKD": "HKD (HK$ — Dollar de Hong Kong)",
+                    "SGD": "SGD (S$ — Dollar de Singapour)",
+                    "NOK": "NOK (kr — Couronne norvégienne)",
+                    "SEK": "SEK (kr — Couronne suédoise)",
+                    "DKK": "DKK (kr — Couronne danoise)",
+                }
+                devise = cd1.selectbox(
+                    "Devise de cotation",
+                    DEVISES_LISTE,
+                    format_func=lambda code: LIBELLES_DEV.get(code, code),
+                    index=max(0, DEVISES_LISTE.index(devise_defaut))
+                    if devise_defaut in DEVISES_LISTE else 0,
+                )
+                source = cd2.selectbox("Source", ["swissquote", "revolut", "manuel"])
+                compte_cash = cd3.selectbox(
+                    "Compte de liquidités à débiter / créditer",
+                    [
+                        "💵 Compte courant USD ($)",
+                        "💵 Compte courant EUR (€)",
+                        "Ne pas modifier les soldes cash",
+                    ],
+                    index=0,
+                )
 
-                if problemes:
-                    for p in problemes:
-                        st.error(p)
-                else:
-                    try:
-                        taux_vers_eur = fx.taux(devise, date_tx.isoformat(), "EUR")
-                        taux_vers_usd = fx.taux(devise, date_tx.isoformat(), "USD")
-                    except fx.FXIndisponible as exc:
-                        st.error(
-                            f"Transaction non enregistrée : {exc}. "
-                            "Aucune valeur de repli n'a été utilisée."
+                soumis = st.form_submit_button("🔨 Enregistrer")
+
+                if soumis:
+                    problemes = []
+                    if not ticker or ticker == "➕ Nouveau…":
+                        problemes.append("Ticker manquant.")
+                    if quantite <= 0:
+                        problemes.append("La quantité doit être positive.")
+                    if cours <= 0:
+                        problemes.append("Le cours doit être positif.")
+
+                    devise_attendue = devise_cotation_de(ticker) if ticker else None
+                    if ticker and devise_attendue and devise != devise_attendue:
+                        st.warning(
+                            f"`{ticker}` est coté en **{devise_attendue}** mais vous "
+                            f"avez saisi **{devise}**. Vérifiez la devise avant de continuer."
                         )
+
+                    if problemes:
+                        for p in problemes:
+                            st.error(p)
                     else:
-                        ligne = {
-                            "ticker": ticker.upper().strip(),
-                            "sens": sens.lower(),
-                            "date": date_tx.isoformat(),
-                            "quantite": quantite,
-                            "cours": cours,
-                            "frais": frais,
-                            "devise": devise,
-                            "source": source,
-                        }
                         try:
-                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
-                            db.ecrire(db.T_TRANSACTIONS, [ligne])
-                            montant_devise = quantite * cours + (frais if sens == "Achat" else -frais)
-                            signe_cash = -1.0 if sens == "Achat" else 1.0
-                            if "USD" in compte_cash:
-                                delta_usd = signe_cash * (montant_devise * taux_vers_usd)
-                                db.ajuster_solde_compte("USD", delta_usd, "💵 Cash", 1.0)
-                            elif "EUR" in compte_cash:
-                                delta_eur = signe_cash * (montant_devise * taux_vers_eur)
-                                db.ajuster_solde_compte("EUR", delta_eur, "💵 Cash", ctx.taux_eur_usd)
-                            st.success(f"✅ {sens} de {quantite} {ticker.upper()} enregistré.")
-                            S.vider_cache()
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Écriture échouée : {exc}")
+                            taux_vers_eur = fx.taux(devise, date_tx.isoformat(), "EUR")
+                            taux_vers_usd = fx.taux(devise, date_tx.isoformat(), "USD")
+                        except fx.FXIndisponible as exc:
+                            st.error(
+                                f"Transaction non enregistrée : {exc}. "
+                                "Aucune valeur de repli n'a été utilisée."
+                            )
+                        else:
+                            ligne = {
+                                "ticker": ticker.upper().strip(),
+                                "sens": sens.lower(),
+                                "date": date_tx.isoformat(),
+                                "quantite": quantite,
+                                "cours": cours,
+                                "frais": frais,
+                                "devise": devise,
+                                "source": source,
+                            }
+                            try:
+                                db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
+                                db.ecrire(db.T_TRANSACTIONS, [ligne])
+                                montant_devise = quantite * cours + (frais if sens == "Achat" else -frais)
+                                signe_cash = -1.0 if sens == "Achat" else 1.0
+                                if "USD" in compte_cash:
+                                    delta_usd = signe_cash * (montant_devise * taux_vers_usd)
+                                    db.ajuster_solde_compte("USD", delta_usd, "💵 Cash", 1.0)
+                                elif "EUR" in compte_cash:
+                                    delta_eur = signe_cash * (montant_devise * taux_vers_eur)
+                                    db.ajuster_solde_compte("EUR", delta_eur, "💵 Cash", ctx.taux_eur_usd)
+                                st.success(f"✅ {sens} de {quantite} {ticker.upper()} enregistré.")
+                                S.vider_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Écriture échouée : {exc}")
 
     # --- Édition et suppression des transactions (achats / ventes) ---
     if ctx.transactions:
@@ -472,8 +480,8 @@ with tab_reeq:
                     )
 
                     b_save, b_del = st.columns(2)
-                    btn_sauver_tx = b_save.form_submit_button("💾 Enregistrer les modifications")
-                    btn_suppr_tx = b_del.form_submit_button("🗑️ Supprimer cette transaction")
+                    btn_sauver_tx = b_save.form_submit_button("💾 Enregistrer les modifications", disabled=gerees)
+                    btn_suppr_tx = b_del.form_submit_button("🗑️ Supprimer cette transaction", disabled=gerees)
 
                     if btn_sauver_tx:
                         if not ticker_edit.strip():
@@ -482,6 +490,7 @@ with tab_reeq:
                             st.error("La quantité et le cours unitaire doivent être strictement positifs.")
                         else:
                             try:
+                                db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                                 db.modifier_transaction(
                                     int(tx_sel.id),
                                     {
@@ -503,6 +512,7 @@ with tab_reeq:
 
                     if btn_suppr_tx:
                         try:
+                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                             db.supprimer_transaction(int(tx_sel.id))
                             st.success(f"🗑️ Transaction #{tx_sel.id} supprimée.")
                             S.vider_cache()
@@ -545,11 +555,16 @@ with tab_fonds:
         ("CNY", "🏦 Réserve CNY", "🏦 Cash réserve", "Épargne de précaution — hors rééquilibrage"),
     ]
 
+    PERIMETRE_CARTE = {"USD": "courant", "EUR": "courant", "CHF": "precaution", "CNY": "precaution"}
     cols_c = st.columns(4)
     for idx, (code_dev, libelle, type_c, desc_c) in enumerate(COMPTES_META):
-        if isinstance(soldes_natifs, list):
-            soldes_natifs = {str(x.get("ticker", "")).upper(): x for x in soldes_natifs if isinstance(x, dict)}
-        q_natif = float(soldes_natifs.get(code_dev, {}).get("quantite", 0.0))
+        # Chaque carte ne compte que la poche qu'elle représente : « Réserve CNY » = la réserve,
+        # même si la devise a aussi un disponible (listé dans le tableau ci-dessous).
+        q_natif = sum(
+            float(v.get("quantite") or 0.0) for v in soldes_natifs.values()
+            if str(v.get("ticker", "")).upper() == code_dev
+            and v.get("perimetre") == PERIMETRE_CARTE[code_dev]
+        )
         try:
             t_usd = 1.0 if code_dev == "USD" else fx.taux(code_dev, jour_iso, "USD")
             t_eur = 1.0 if code_dev == "EUR" else fx.taux(code_dev, jour_iso, "EUR")
@@ -563,162 +578,205 @@ with tab_fonds:
             st.caption(f"Solde en devise : **{q_natif:,.2f} {code_dev}**".replace(",", " "))
 
     st.divider()
-    with st.expander("➕ Nouveau mouvement de fonds", expanded=True):
-        type_op = st.radio(
-            "Nature de l'opération",
-            options=[
-                "↗ Apport de capital (entrée de fonds externes)",
-                "↘ Retrait de capital (sortie de fonds vers l'extérieur)",
-                "↔ Virement interne entre deux comptes du portefeuille",
-            ],
-            horizontal=True,
+    st.subheader("📒 Vos comptes de liquidités")
+    lecture_ok = True
+    try:
+        comptes_lus = db.comptes_liquidites()
+        operations_lues = db.operations_compte() if comptes_lus else []
+    except Exception as exc:
+        lecture_ok = False
+        st.error(f"Comptes de liquidités illisibles : {exc}")
+    if lecture_ok and comptes_lus is None:
+        st.warning("La table des comptes (pf2_comptes) est absente : exécutez migrations/003_comptes.sql dans Supabase.")
+    elif lecture_ok and not comptes_lus:
+        st.info("Pas encore de comptes : les liquidités sont lues dans l’historique v1. "
+                "Ouvrez l’application 2.0 : la migration crée vos comptes automatiquement.")
+    elif lecture_ok:
+        lignes_compte = resume_comptes(comptes_lus, operations_lues)
+        ui.tableau(pd.DataFrame([{
+            "Compte": L["nom"],
+            "Banque": L["banque"],
+            "Devise": L["devise"],
+            "Type": L["type"],
+            "Statut": "Archivé" if L["archive"] else "Actif",
+            "Solde": f"{L['solde']:,.2f}".replace(",", " ") + " " + L["devise"],
+            "Opérations": L["nb_operations"],
+        } for L in lignes_compte]))
+        noms_compte = {L["id"]: L["nom"] for L in lignes_compte}
+        compte_choisi = st.selectbox(
+            "Opérations du compte", list(noms_compte.keys()),
+            format_func=lambda i: noms_compte[i], key="compte_detail",
         )
+        ops_compte = operations_compte_affichage(compte_choisi, comptes_lus, operations_lues)
+        if ops_compte:
+            ui.tableau(pd.DataFrame([{
+                "Date": pd.to_datetime(o["date"]).strftime("%d/%m/%Y") if o["date"] else "—",
+                "Opération": o["type"],
+                "Compte d’en face": o["contrepartie"] or "—",
+                "Montant": f"{o['montant']:+,.2f}".replace(",", " "),
+                "Note": o["note"] or "—",
+            } for o in ops_compte]))
+        else:
+            st.caption("Aucune opération sur ce compte.")
 
-        OPTIONS_COMPTES = {
-            "💵 Compte courant USD ($ — Swissquote / Cash disponible)": ("USD", "💵 Cash", "swissquote_usd"),
-            "💵 Compte courant EUR (€ — Cash disponible)": ("EUR", "💵 Cash", "courant_eur"),
-            "🏦 Réserve CHF (Épargne de précaution CHF)": ("CHF", "🏦 Cash réserve", "reserve_chf"),
-            "🏦 Réserve CNY (Épargne de précaution CNY)": ("CNY", "🏦 Cash réserve", "reserve_cny"),
-            "💵 Compte courant GBP (£ — Livre sterling)": ("GBP", "💵 Cash", "courant_gbp"),
-            "💵 Compte courant JPY (¥ — Yen japonais)": ("JPY", "💵 Cash", "courant_jpy"),
-            "💵 Compte courant CAD (CA$ — Dollar canadien)": ("CAD", "💵 Cash", "courant_cad"),
-            "💵 Compte courant AUD (A$ — Dollar australien)": ("AUD", "💵 Cash", "courant_aud"),
-            "💵 Compte courant HKD (HK$ — Dollar de Hong Kong)": ("HKD", "💵 Cash", "courant_hkd"),
-            "💵 Compte courant SGD (S$ — Dollar de Singapour)": ("SGD", "💵 Cash", "courant_sgd"),
-            "💵 Compte courant NOK (kr — Couronne norvégienne)": ("NOK", "💵 Cash", "courant_nok"),
-            "💵 Compte courant SEK (kr — Couronne suédoise)": ("SEK", "💵 Cash", "courant_sek"),
-            "💵 Compte courant DKK (kr — Couronne danoise)": ("DKK", "💵 Cash", "courant_dkk"),
-            "🏦 Réserve GBP (£ — Épargne de précaution)": ("GBP", "🏦 Cash réserve", "reserve_gbp"),
-            "🏦 Réserve JPY (¥ — Épargne de précaution)": ("JPY", "🏦 Cash réserve", "reserve_jpy"),
-        }
-        DEVISES_FONDS = ["EUR", "USD", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
-        LIBELLES_DEV_FONDS = {
-            "EUR": "EUR (€ — Euro)",
-            "USD": "USD ($ — Dollar américain)",
-            "CHF": "CHF (Franc suisse)",
-            "JPY": "JPY (¥ — Yen japonais)",
-            "GBP": "GBP (£ — Livre sterling)",
-            "CNY": "CNY (¥ — Yuan chinois)",
-            "CAD": "CAD (CA$ — Dollar canadien)",
-            "AUD": "AUD (A$ — Dollar australien)",
-            "HKD": "HKD (HK$ — Dollar de Hong Kong)",
-            "SGD": "SGD (S$ — Dollar de Singapour)",
-            "NOK": "NOK (kr — Couronne norvégienne)",
-            "SEK": "SEK (kr — Couronne suédoise)",
-            "DKK": "DKK (kr — Couronne danoise)",
-        }
-
-        with st.form("nouveau_mouvement_fonds", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            date_mvt = c1.date_input("Date du mouvement", value=dt.date.today())
-            montant = c2.number_input("Montant saisi", min_value=0.0, format="%.2f", step=100.0)
-            devise_saisie = c3.selectbox(
-                "Devise du montant saisi",
-                DEVISES_FONDS,
-                format_func=lambda code: LIBELLES_DEV_FONDS.get(code, code),
-                index=0,
+    st.divider()
+    if not gerees:
+        with st.expander("➕ Nouveau mouvement de fonds", expanded=True):
+            type_op = st.radio(
+                "Nature de l'opération",
+                options=[
+                    "↗ Apport de capital (entrée de fonds externes)",
+                    "↘ Retrait de capital (sortie de fonds vers l'extérieur)",
+                    "↔ Virement interne entre deux comptes du portefeuille",
+                ],
+                horizontal=True,
             )
 
-            if type_op.startswith("↔"):
-                ca, cb = st.columns(2)
-                compte_source_lbl = ca.selectbox(
-                    "Compte débité (d'où partent les fonds)",
-                    list(OPTIONS_COMPTES.keys()),
-                    index=1,
-                )
-                compte_cible_lbl = cb.selectbox(
-                    "Compte crédité (où arrivent les fonds)",
-                    list(OPTIONS_COMPTES.keys()),
+            OPTIONS_COMPTES = {
+                "💵 Compte courant USD ($ — Swissquote / Cash disponible)": ("USD", "💵 Cash", "swissquote_usd"),
+                "💵 Compte courant EUR (€ — Cash disponible)": ("EUR", "💵 Cash", "courant_eur"),
+                "🏦 Réserve CHF (Épargne de précaution CHF)": ("CHF", "🏦 Cash réserve", "reserve_chf"),
+                "🏦 Réserve CNY (Épargne de précaution CNY)": ("CNY", "🏦 Cash réserve", "reserve_cny"),
+                "💵 Compte courant GBP (£ — Livre sterling)": ("GBP", "💵 Cash", "courant_gbp"),
+                "💵 Compte courant JPY (¥ — Yen japonais)": ("JPY", "💵 Cash", "courant_jpy"),
+                "💵 Compte courant CAD (CA$ — Dollar canadien)": ("CAD", "💵 Cash", "courant_cad"),
+                "💵 Compte courant AUD (A$ — Dollar australien)": ("AUD", "💵 Cash", "courant_aud"),
+                "💵 Compte courant HKD (HK$ — Dollar de Hong Kong)": ("HKD", "💵 Cash", "courant_hkd"),
+                "💵 Compte courant SGD (S$ — Dollar de Singapour)": ("SGD", "💵 Cash", "courant_sgd"),
+                "💵 Compte courant NOK (kr — Couronne norvégienne)": ("NOK", "💵 Cash", "courant_nok"),
+                "💵 Compte courant SEK (kr — Couronne suédoise)": ("SEK", "💵 Cash", "courant_sek"),
+                "💵 Compte courant DKK (kr — Couronne danoise)": ("DKK", "💵 Cash", "courant_dkk"),
+                "🏦 Réserve GBP (£ — Épargne de précaution)": ("GBP", "🏦 Cash réserve", "reserve_gbp"),
+                "🏦 Réserve JPY (¥ — Épargne de précaution)": ("JPY", "🏦 Cash réserve", "reserve_jpy"),
+            }
+            DEVISES_FONDS = ["EUR", "USD", "CHF", "JPY", "GBP", "CNY", "CAD", "AUD", "HKD", "SGD", "NOK", "SEK", "DKK"]
+            LIBELLES_DEV_FONDS = {
+                "EUR": "EUR (€ — Euro)",
+                "USD": "USD ($ — Dollar américain)",
+                "CHF": "CHF (Franc suisse)",
+                "JPY": "JPY (¥ — Yen japonais)",
+                "GBP": "GBP (£ — Livre sterling)",
+                "CNY": "CNY (¥ — Yuan chinois)",
+                "CAD": "CAD (CA$ — Dollar canadien)",
+                "AUD": "AUD (A$ — Dollar australien)",
+                "HKD": "HKD (HK$ — Dollar de Hong Kong)",
+                "SGD": "SGD (S$ — Dollar de Singapour)",
+                "NOK": "NOK (kr — Couronne norvégienne)",
+                "SEK": "SEK (kr — Couronne suédoise)",
+                "DKK": "DKK (kr — Couronne danoise)",
+            }
+
+            with st.form("nouveau_mouvement_fonds", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                date_mvt = c1.date_input("Date du mouvement", value=dt.date.today())
+                montant = c2.number_input("Montant saisi", min_value=0.0, format="%.2f", step=100.0)
+                devise_saisie = c3.selectbox(
+                    "Devise du montant saisi",
+                    DEVISES_FONDS,
+                    format_func=lambda code: LIBELLES_DEV_FONDS.get(code, code),
                     index=0,
                 )
-                maj_solde = True
-            else:
-                est_apport = type_op.startswith("↗")
-                ca, cb = st.columns([2, 1])
-                compte_cible_lbl = ca.selectbox(
-                    "Dans quel compte les fonds arrivent-ils ?" if est_apport else "De quel compte les fonds repartent-ils ?",
-                    list(OPTIONS_COMPTES.keys()),
-                    index=0,
-                )
-                maj_solde = cb.checkbox(
-                    "Mettre à jour le solde du compte",
-                    value=True,
-                    help="Ajoute (ou retire) automatiquement ce montant au solde du compte sélectionné dans Donnees.",
-                )
-                compte_source_lbl = compte_cible_lbl
 
-            soumis = st.form_submit_button("✅ Enregistrer le mouvement")
-
-            if soumis:
-                if montant <= 0:
-                    st.error("Le montant doit être strictement positif.")
-                elif type_op.startswith("↔") and compte_source_lbl == compte_cible_lbl:
-                    st.error("Veuillez choisir deux comptes différents pour un virement interne.")
+                if type_op.startswith("↔"):
+                    ca, cb = st.columns(2)
+                    compte_source_lbl = ca.selectbox(
+                        "Compte débité (d'où partent les fonds)",
+                        list(OPTIONS_COMPTES.keys()),
+                        index=1,
+                    )
+                    compte_cible_lbl = cb.selectbox(
+                        "Compte crédité (où arrivent les fonds)",
+                        list(OPTIONS_COMPTES.keys()),
+                        index=0,
+                    )
+                    maj_solde = True
                 else:
-                    d_iso = date_mvt.isoformat()
-                    try:
-                        taux_vers_eur = 1.0 if devise_saisie == "EUR" else fx.taux(devise_saisie, d_iso, "EUR")
-                        taux_vers_usd = 1.0 if devise_saisie == "USD" else fx.taux(devise_saisie, d_iso, "USD")
-                        montant_eur = montant * taux_vers_eur
-                        montant_usd = montant * taux_vers_usd
-                        cours_or = prices.cours_or(d_iso)
-                        onces = montant_usd / cours_or
-                    except (fx.FXIndisponible, prices.CoursIndisponible) as exc:
-                        st.error(
-                            f"Mouvement non enregistré : {exc}. "
-                            "Aucune valeur de repli n'a été utilisée."
-                        )
+                    est_apport = type_op.startswith("↗")
+                    ca, cb = st.columns([2, 1])
+                    compte_cible_lbl = ca.selectbox(
+                        "Dans quel compte les fonds arrivent-ils ?" if est_apport else "De quel compte les fonds repartent-ils ?",
+                        list(OPTIONS_COMPTES.keys()),
+                        index=0,
+                    )
+                    maj_solde = cb.checkbox(
+                        "Mettre à jour le solde du compte",
+                        value=True,
+                        help="Ajoute (ou retire) automatiquement ce montant au solde du compte sélectionné dans Donnees.",
+                    )
+                    compte_source_lbl = compte_cible_lbl
+
+                soumis = st.form_submit_button("✅ Enregistrer le mouvement")
+
+                if soumis:
+                    if montant <= 0:
+                        st.error("Le montant doit être strictement positif.")
+                    elif type_op.startswith("↔") and compte_source_lbl == compte_cible_lbl:
+                        st.error("Veuillez choisir deux comptes différents pour un virement interne.")
                     else:
+                        d_iso = date_mvt.isoformat()
                         try:
-                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
-                            if type_op.startswith("↔"):
-                                dev_src, typ_src, _ = OPTIONS_COMPTES[compte_source_lbl]
-                                dev_dst, typ_dst, _ = OPTIONS_COMPTES[compte_cible_lbl]
-                                t_src = 1.0 if devise_saisie == dev_src else fx.taux(devise_saisie, d_iso, dev_src)
-                                t_dst = 1.0 if devise_saisie == dev_dst else fx.taux(devise_saisie, d_iso, dev_dst)
-                                t_src_usd = 1.0 if dev_src == "USD" else fx.taux(dev_src, d_iso, "USD")
-                                t_dst_usd = 1.0 if dev_dst == "USD" else fx.taux(dev_dst, d_iso, "USD")
-                                db.ajuster_solde_compte(dev_src, -(montant * t_src), typ_src, t_src_usd)
-                                db.ajuster_solde_compte(dev_dst, +(montant * t_dst), typ_dst, t_dst_usd)
-                                st.success(
-                                    f"✅ Virement interne de {ui.usd_eur(montant_usd, montant_eur)} effectué "
-                                    f"de **{dev_src}** vers **{dev_dst}**."
-                                )
-                            else:
-                                est_apport = type_op.startswith("↗")
-                                dev_cpt, typ_cpt, slug_cpt = OPTIONS_COMPTES[compte_cible_lbl]
-                                t_cpt = 1.0 if devise_saisie == dev_cpt else fx.taux(devise_saisie, d_iso, dev_cpt)
-                                t_cpt_usd = 1.0 if dev_cpt == "USD" else fx.taux(dev_cpt, d_iso, "USD")
-                                delta_cpt = (montant * t_cpt) * (1.0 if est_apport else -1.0)
+                            taux_vers_eur = 1.0 if devise_saisie == "EUR" else fx.taux(devise_saisie, d_iso, "EUR")
+                            taux_vers_usd = 1.0 if devise_saisie == "USD" else fx.taux(devise_saisie, d_iso, "USD")
+                            montant_eur = montant * taux_vers_eur
+                            montant_usd = montant * taux_vers_usd
+                            cours_or = prices.cours_or(d_iso)
+                            onces = montant_usd / cours_or
+                        except (fx.FXIndisponible, prices.CoursIndisponible) as exc:
+                            st.error(
+                                f"Mouvement non enregistré : {exc}. "
+                                "Aucune valeur de repli n'a été utilisée."
+                            )
+                        else:
+                            try:
+                                db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
+                                if type_op.startswith("↔"):
+                                    dev_src, typ_src, _ = OPTIONS_COMPTES[compte_source_lbl]
+                                    dev_dst, typ_dst, _ = OPTIONS_COMPTES[compte_cible_lbl]
+                                    t_src = 1.0 if devise_saisie == dev_src else fx.taux(devise_saisie, d_iso, dev_src)
+                                    t_dst = 1.0 if devise_saisie == dev_dst else fx.taux(devise_saisie, d_iso, dev_dst)
+                                    t_src_usd = 1.0 if dev_src == "USD" else fx.taux(dev_src, d_iso, "USD")
+                                    t_dst_usd = 1.0 if dev_dst == "USD" else fx.taux(dev_dst, d_iso, "USD")
+                                    db.ajuster_solde_compte(dev_src, -(montant * t_src), typ_src, t_src_usd)
+                                    db.ajuster_solde_compte(dev_dst, +(montant * t_dst), typ_dst, t_dst_usd)
+                                    st.success(
+                                        f"✅ Virement interne de {ui.usd_eur(montant_usd, montant_eur)} effectué "
+                                        f"de **{dev_src}** vers **{dev_dst}**."
+                                    )
+                                else:
+                                    est_apport = type_op.startswith("↗")
+                                    dev_cpt, typ_cpt, slug_cpt = OPTIONS_COMPTES[compte_cible_lbl]
+                                    t_cpt = 1.0 if devise_saisie == dev_cpt else fx.taux(devise_saisie, d_iso, dev_cpt)
+                                    t_cpt_usd = 1.0 if dev_cpt == "USD" else fx.taux(dev_cpt, d_iso, "USD")
+                                    delta_cpt = (montant * t_cpt) * (1.0 if est_apport else -1.0)
 
-                                db.ecrire(db.T_APPORTS, [{
-                                    "date": d_iso,
-                                    "sens": "apport" if est_apport else "retrait",
-                                    "montant_eur": round(montant_eur, 2),
-                                    "montant_or": round(onces, 6),
-                                    "cours_or": round(cours_or, 2),
-                                    "compte": slug_cpt,
-                                    "reference": f"usd:{montant_usd:.2f}",
-                                }])
-                                db.ajouter_historique_v1(
-                                    date_mvt.strftime("%d/%m/%Y"),
-                                    "apport" if est_apport else "retrait",
-                                    montant_usd,
-                                    montant_eur,
-                                    onces,
-                                )
-                                if maj_solde:
-                                    db.ajuster_solde_compte(dev_cpt, delta_cpt, typ_cpt, t_cpt_usd)
+                                    db.ecrire(db.T_APPORTS, [{
+                                        "date": d_iso,
+                                        "sens": "apport" if est_apport else "retrait",
+                                        "montant_eur": round(montant_eur, 2),
+                                        "montant_or": round(onces, 6),
+                                        "cours_or": round(cours_or, 2),
+                                        "compte": slug_cpt,
+                                        "reference": f"usd:{montant_usd:.2f}",
+                                    }])
+                                    db.ajouter_historique_v1(
+                                        date_mvt.strftime("%d/%m/%Y"),
+                                        "apport" if est_apport else "retrait",
+                                        montant_usd,
+                                        montant_eur,
+                                        onces,
+                                    )
+                                    if maj_solde:
+                                        db.ajuster_solde_compte(dev_cpt, delta_cpt, typ_cpt, t_cpt_usd)
 
-                                lib_sens = "Apport" if est_apport else "Retrait"
-                                st.success(
-                                    f"✅ {lib_sens} de {ui.usd_eur(montant_usd, montant_eur)} enregistré "
-                                    f"sur **{compte_cible_lbl}** ({onces:.4f} oz d'or au cours du jour)."
-                                )
-                            S.vider_cache()
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Écriture échouée : {exc}")
+                                    lib_sens = "Apport" if est_apport else "Retrait"
+                                    st.success(
+                                        f"✅ {lib_sens} de {ui.usd_eur(montant_usd, montant_eur)} enregistré "
+                                        f"sur **{compte_cible_lbl}** ({onces:.4f} oz d'or au cours du jour)."
+                                    )
+                                S.vider_cache()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Écriture échouée : {exc}")
 
     st.divider()
     st.subheader("📜 Historique des apports et retraits de capital")
@@ -816,8 +874,8 @@ with tab_fonds:
                     )
 
                     ba1, ba2 = st.columns(2)
-                    btn_sauver_ap = ba1.form_submit_button("💾 Enregistrer les modifications de l'apport")
-                    btn_suppr_ap = ba2.form_submit_button("🗑️ Supprimer cet apport / retrait")
+                    btn_sauver_ap = ba1.form_submit_button("💾 Enregistrer les modifications de l'apport", disabled=gerees)
+                    btn_suppr_ap = ba2.form_submit_button("🗑️ Supprimer cet apport / retrait", disabled=gerees)
 
                     if btn_sauver_ap:
                         if montant_ap_edit <= 0:
@@ -836,6 +894,7 @@ with tab_fonds:
                             else:
                                 _, _, slug_nv = OPTIONS_COMPTES[compte_ap_edit_lbl]
                                 try:
+                                    db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                                     db.modifier_apport(
                                         ap_id_sel,
                                         {
@@ -856,6 +915,7 @@ with tab_fonds:
 
                     if btn_suppr_ap:
                         try:
+                            db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture
                             db.supprimer_apport(ap_id_sel)
                             st.success(f"🗑️ Mouvement #{ap_id_sel} supprimé.")
                             S.vider_cache()

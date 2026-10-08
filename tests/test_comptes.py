@@ -12,6 +12,8 @@ Aucun appel réseau : Supabase et Yahoo sont remplacés par des faux.
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 import pytest
 
@@ -178,6 +180,9 @@ def test_devise_avec_deux_poches_garde_deux_entrees(monkeypatch):
     soldes = db.soldes_comptes_liquidites()
     assert soldes["CNY:courant"]["quantite"] == pytest.approx(5150)
     assert soldes["CNY:precaution"]["quantite"] == pytest.approx(300)
+    # Le robot et la page utilisent `ticker` (la devise), jamais la clé.
+    assert soldes["CNY:courant"]["ticker"] == "CNY"
+    assert soldes["CNY:precaution"]["ticker"] == "CNY"
 
 
 # --- Écritures : Python ne touche plus au cash quand les comptes existent ---
@@ -247,3 +252,165 @@ def test_session_fx_manquant_est_signale_pas_remplace(monkeypatch):
     session._completer_liquidites_depuis_comptes(ctx, "2026-10-08")
     assert not any(a.ticker == "CHF" for a in ctx.actifs)
     assert any(e.startswith("CHF/") for e in ctx.echecs_fx)
+
+
+# --- Robot : une devise répartie entre deux poches reste dans le snapshot ---------
+
+from types import SimpleNamespace  # noqa: E402
+
+from jobs import daily_snapshot  # noqa: E402
+
+
+class _FXFaux(Exception):
+    pass
+
+
+def _taux_faux(devise, jour, cible):
+    """Comme le vrai fx.taux : une devise inconnue lève une erreur (ici « CNY:courant »)."""
+    table = {("USD", "EUR"): 0.9, ("CNY", "EUR"): 0.13, ("CHF", "EUR"): 1.0,
+             ("EUR", "USD"): 1.1, ("USD", "USD"): 1.0, ("CNY", "USD"): 0.14, ("CHF", "USD"): 1.2}
+    if (devise, cible) not in table:
+        raise daily_snapshot.fx.FXIndisponible(f"pas de taux {devise}/{cible}")
+    return table[(devise, cible)]
+
+
+def test_robot_snapshot_garde_la_devise_repartie(monkeypatch):
+    """Régression : avec la clé « CNY:courant », la ligne CNY du disponible était écartée
+    sans bruit. Le snapshot doit compter les 200 CNY du disponible et les 300 de la réserve."""
+    monkeypatch.setattr(daily_snapshot.db, "tables_requises_manquantes", lambda: [])
+    monkeypatch.setattr(daily_snapshot.db, "lire_allocation_personnalisee", lambda: None)
+    monkeypatch.setattr(daily_snapshot.db, "transactions", lambda: [{"ticker": "IGLN.L"}])
+    monkeypatch.setattr(daily_snapshot, "charger_transactions", lambda rows: rows)
+    monkeypatch.setattr(daily_snapshot, "calculer_positions", lambda t, a: ["IGLN.L"])
+    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos: (
+        [SimpleNamespace(ticker="IGLN.L", poche="rv", valeur_eur=1000.0, valeur_usd=1100.0)], []))
+    monkeypatch.setattr(daily_snapshot.prices, "cours_or", lambda: 2650.0)
+    monkeypatch.setattr(daily_snapshot.fx, "taux", _taux_faux)
+    # Liquidités : vrais comptes (USD disponible, CHF réserve, CNY réparti), lus par db.
+    # Réserve CNY non vide : sans elle, la partie « réserve » de la régression ne serait pas testée.
+    ops = OPERATIONS + [{"id": 9, "compte_id": "c-cny", "type": "ouverture", "montant": 300,
+                         "date": "2026-01-01", "contrepartie": None, "groupe": None}]
+    monkeypatch.setattr(db, "comptes_liquidites", lambda: COMPTES)
+    monkeypatch.setattr(db, "operations_compte", lambda: ops)
+    capture = {}
+    monkeypatch.setattr(daily_snapshot.db, "ajouter_snapshot", lambda ligne: capture.update(ligne))
+    monkeypatch.setattr(daily_snapshot.db, "ajouter_alerte", lambda *a, **k: None)
+
+    assert daily_snapshot.main() == 0
+    # Courant : USD 7,385 × 0.9 + CNY 5 150 (Voyage, disponible) × 0.13
+    assert capture["courant_eur"] == pytest.approx(7.385 * 0.9 + 5150 * 0.13, abs=0.01)
+    # Précaution : CHF 8 694,44 × 1.0 + CNY 300 (Réserve CNY) × 0.13
+    assert capture["precaution_eur"] == pytest.approx(8694.44 * 1.0 + 300 * 0.13, abs=0.01)
+
+
+# --- Affichage : résumé des comptes et opérations d'un compte -----------------------
+
+def test_resume_comptes_actifs_puis_archives_et_soldes():
+    lignes = portfolio.resume_comptes(COMPTES, OPERATIONS)
+    ordre = [L["nom"] for L in lignes]
+    # Disponibles d'abord, réserves ensuite (puis le reste) ; l'archivé n'est jamais en tête.
+    assert ordre.index("Courtage USD") < ordre.index("Livret CHF")
+    archive = [dict(c, archive=True) if c["id"] == "c-cny" else c for c in COMPTES]
+    fin = portfolio.resume_comptes(archive, OPERATIONS)
+    assert fin[-1]["nom"] == "Compte CNY" and fin[-1]["archive"] is True
+    voyage = next(L for L in lignes if L["nom"] == "Voyage CNY")
+    assert voyage["solde"] == pytest.approx(5150) and voyage["type"] == "Disponible"
+    assert voyage["nb_operations"] == 3   # ouverture, dépôt, retrait
+
+
+def test_resume_comptes_banque_vide_et_motif():
+    lignes = portfolio.resume_comptes(COMPTES, OPERATIONS)
+    voyage = next(L for L in lignes if L["nom"] == "Voyage CNY")
+    assert voyage["banque"] == "Banque non renseignée"
+    chf = next(L for L in lignes if L["nom"] == "Livret CHF")
+    assert chf["motif"] == "Épargne de précaution" and chf["type"] == "Réserve"
+
+
+def test_operations_affichage_contrepartie_de_virement():
+    comptes = [
+        {"id": "a", "nom": "Voyage CNY", "devise": "CNY", "type": "disponible"},
+        {"id": "b", "nom": "Réserve CNY", "devise": "CNY", "type": "reserve"},
+    ]
+    ops = [
+        {"id": 1, "compte_id": "a", "type": "virement", "montant": -300, "date": "2026-03-02",
+         "contrepartie": "b", "groupe": "g", "note": None},
+        {"id": 2, "compte_id": "b", "type": "virement", "montant": 300, "date": "2026-03-02",
+         "contrepartie": "a", "groupe": "g", "note": None},
+        {"id": 3, "compte_id": "a", "type": "ouverture", "montant": 500, "date": "2026-01-01",
+         "contrepartie": None, "groupe": None, "note": None},
+    ]
+    lignes = portfolio.operations_compte_affichage("a", comptes, ops)
+    assert [L["date"] for L in lignes] == ["2026-03-02", "2026-01-01"]   # récentes d'abord
+    assert lignes[0]["contrepartie"] == "→ Réserve CNY"                   # sortie
+    assert lignes[1]["contrepartie"] == "" and lignes[1]["type"] == "Solde d’ouverture"
+    entree = portfolio.operations_compte_affichage("b", comptes, ops)[0]
+    assert entree["contrepartie"] == "← Voyage CNY"                       # entrée
+
+
+# --- Lecture seule : le message et le garde-fou -------------------------------------
+
+def test_message_lecture_seule_dit_ou_se_gerent_les_comptes():
+    assert "se gèrent dans l’application" in db.MESSAGE_LECTURE_COMPTES
+    assert "se gèrent dans l’application" in db.MESSAGE_COMPTES_2_0
+
+
+def test_garde_refuse_avec_le_message_et_n_ecrit_rien(monkeypatch):
+    monkeypatch.setattr(db, "comptes_liquidites", lambda: COMPTES)
+    with pytest.raises(db.ComptesGeresDansAppli) as exc:
+        db.verifier_ecriture_cash()
+    assert str(exc.value) == db.MESSAGE_COMPTES_2_0
+
+
+# --- Page Portefeuille (Streamlit AppTest, sans réseau) ----------------------------
+
+PAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pages", "1_Portefeuille.py")
+
+
+# Un virement de 300 CNY : Voyage (disponible) -> Réserve CNY. La réserve passe à 300.
+OPERATIONS_PAGE = OPERATIONS + [
+    {"id": 7, "compte_id": "c-voy", "type": "virement", "montant": -300, "date": "2026-03-01",
+     "contrepartie": "c-cny", "groupe": "g1", "note": None},
+    {"id": 8, "compte_id": "c-cny", "type": "virement", "montant": 300, "date": "2026-03-01",
+     "contrepartie": "c-voy", "groupe": "g1", "note": None},
+]
+
+
+def _page_avec(monkeypatch, comptes_lus, operations_lues):
+    from core import session as S, fx as _fx
+    monkeypatch.setattr(db, "comptes_liquidites", lambda: comptes_lus)
+    monkeypatch.setattr(db, "operations_compte", lambda: operations_lues)
+    monkeypatch.setattr(db, "lire_allocation_personnalisee", lambda: None)
+    monkeypatch.setattr(db, "lire", lambda table: pd.DataFrame())
+    monkeypatch.setattr(_fx, "taux", lambda devise, jour, cible: 1.0 if devise == cible else 1.2)
+    ctx = S.Contexte()
+    ctx.taux_eur_usd = 1.125
+    monkeypatch.setattr(S, "charger", lambda: ctx)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.run()
+    return at
+
+
+def test_page_2_0_lecture_seule_et_affichage(monkeypatch):
+    at = _page_avec(monkeypatch, COMPTES, OPERATIONS_PAGE)
+    assert not at.exception, [e.value for e in at.exception]
+    infos = [i.value for i in at.info]
+    assert any("se gèrent dans l’application" in t for t in infos)
+    libelles = [b.label for b in at.button]
+    assert not any(l.startswith("✅ Enregistrer le mouvement") or l == "🔨 Enregistrer" for l in libelles)
+    legendes = " | ".join(c.value for c in at.caption)
+    assert "**300.00 CNY**" in legendes          # carte « Réserve CNY » : la réserve seule
+    assert "**8 694.44 CHF**" in legendes        # carte « Réserve CHF »
+    at.selectbox(key="compte_detail").set_value("c-voy").run()
+    # Voyage CNY : 5 000 + 250 - 100 - 300 (virement vers « Compte CNY ») = 4 850
+    assert any("→ Compte CNY" in str(df.value.to_dict()) for df in at.dataframe)
+    assert any("4 850.00 CNY" in str(df.value.to_dict()) for df in at.dataframe)
+
+
+def test_page_sans_comptes_garde_la_saisie_v1(monkeypatch):
+    at = _page_avec(monkeypatch, [], [])
+    assert not at.exception, [e.value for e in at.exception]
+    infos = [i.value for i in at.info]
+    assert not any("lecture seule" in t for t in infos)
+    assert any("Pas encore de comptes" in t for t in infos)
+    assert any("Enregistrer" in b.label for b in at.button)

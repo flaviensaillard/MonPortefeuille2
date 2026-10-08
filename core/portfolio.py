@@ -654,3 +654,65 @@ def grouper_liquidites(comptes: list[dict], operations: list[dict]) -> list[dict
         for (d, p), q in sorted(groupes.items())
         if abs(q) > 1e-9
     ]
+
+
+# ---------------------------------------------------------------------------
+# Affichage des comptes (lecture seule, pour Streamlit et les tests)
+# ---------------------------------------------------------------------------
+
+LIBELLE_TYPE_COMPTE_AFFICHE = {"reserve": "Réserve", "disponible": "Disponible"}
+
+LIBELLE_OPERATION_COMPTE = {
+    "ouverture": "Solde d’ouverture", "depot": "Dépôt (apport)", "retrait": "Retrait",
+    "virement": "Virement", "achat_titres": "Achat de titres",
+    "vente_titres": "Vente de titres", "frais": "Frais",
+}
+
+
+def resume_comptes(comptes, operations):
+    """Une ligne par compte, pour l'affichage : soldes calculés, jamais stockés.
+
+    Ordre : comptes actifs d'abord (disponibles, puis réserves), archivés à la fin.
+    Un compte archivé garde sa ligne et son solde : il reste dans le patrimoine.
+    """
+    soldes = soldes_par_compte(comptes, operations)
+    nb_ops = {}
+    for o in operations or []:
+        nb_ops[o.get("compte_id")] = nb_ops.get(o.get("compte_id"), 0) + 1
+    lignes = []
+    for c in comptes or []:
+        lignes.append({
+            "id": c["id"],
+            "nom": c.get("nom") or "",
+            "banque": c.get("banque") or "Banque non renseignée",
+            "devise": c.get("devise") or "",
+            "type": LIBELLE_TYPE_COMPTE_AFFICHE.get(c.get("type"), c.get("type") or ""),
+            "motif": c.get("motif") or "",
+            "archive": bool(c.get("archive")),
+            "solde": soldes.get(c["id"], 0.0),
+            "nb_operations": nb_ops.get(c["id"], 0),
+        })
+    lignes.sort(key=lambda L: (L["archive"], 0 if L["type"] == "Disponible" else 1, L["devise"], L["nom"]))
+    return lignes
+
+
+def operations_compte_affichage(compte_id, comptes, operations):
+    """Opérations d'un compte, récentes d'abord, avec le compte d'en face d'un virement :
+    « → Livret CHF » si l'argent sort vers lui, « ← Courtage USD » s'il entre depuis lui."""
+    noms = {c["id"]: c.get("nom") or "" for c in comptes or []}
+    mes_ops = [o for o in operations or [] if o.get("compte_id") == compte_id]
+    mes_ops.sort(key=lambda o: (str(o.get("date") or ""), int(o.get("id") or 0)), reverse=True)
+    lignes = []
+    for o in mes_ops:
+        montant = float(o.get("montant") or 0.0)
+        contrepartie = ""
+        if o.get("type") == "virement" and o.get("contrepartie") in noms:
+            contrepartie = ("→ " if montant < 0 else "← ") + noms[o["contrepartie"]]
+        lignes.append({
+            "date": str(o.get("date") or ""),
+            "type": LIBELLE_OPERATION_COMPTE.get(o.get("type"), o.get("type") or ""),
+            "montant": montant,
+            "contrepartie": contrepartie,
+            "note": o.get("note") or "",
+        })
+    return lignes

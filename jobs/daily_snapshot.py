@@ -109,7 +109,10 @@ def main() -> int:
         comptes_liq = db.soldes_comptes_liquidites()
         if isinstance(comptes_liq, dict):
             for dev_code, info in comptes_liq.items():
-                code = str(dev_code).upper()
+                # La devise est le champ `ticker`. La clé peut être « CNY:courant » quand une
+                # devise est répartie entre deux poches : s'en servir ferait échouer le cours
+                # et la ligne serait écartée sans bruit.
+                code = str(info.get("ticker") or dev_code).upper()
                 if code in tickers_deja:
                     continue
                 qte = float(info.get("quantite") or 0.0)

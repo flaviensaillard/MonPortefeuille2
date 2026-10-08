@@ -42,9 +42,14 @@ class ComptesGeresDansAppli(RuntimeError):
     """
 
 
+MESSAGE_LECTURE_COMPTES = (
+    "Les comptes se gèrent dans l’application. Cette page affiche vos liquidités en "
+    "lecture seule : soldes, types, banques et opérations."
+)
+
 MESSAGE_COMPTES_2_0 = (
-    "Les comptes de liquidités se gèrent désormais dans l’application 2.0 "
-    "(écran Comptes). Cette page ne peut plus écrire le cash : rien n’a été enregistré."
+    "Les comptes se gèrent dans l’application : depuis la 2.0, les liquidités sont des "
+    "comptes. Cette page les affiche en lecture seule ; rien n’a été enregistré."
 )
 
 
