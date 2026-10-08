@@ -56,6 +56,7 @@ jobs:
           echo "- garde-fous présents dans net.js : $N (attendu : 6)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$N" -lt 6 ]; then
             echo "!! ATTENTION : le correctif « écarts courtier » n est PAS dans cet arbre" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Construire l'APK
@@ -70,8 +71,9 @@ jobs:
           cp dist/Porte-feuille.apk "dist/Porte-feuille-${VERSION_NAME}.apk"
           gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
+                 --target "$GITHUB_SHA" \
                  --title "APK ${VERSION_NAME}" \
-                 --notes "APK Porte-feuille ${VERSION_NAME}, construite par GitHub Actions. Écarts avec le courtier : la variation du jour est désormais celle CALCULÉE PAR YAHOO (même référence que le courtier, insensible aux bougies trouées), et les cours fossiles (XJSE.SW : cours figé au 06/12/2023) sont détectés et rejetés."
+                 --notes "APK Porte-feuille ${VERSION_NAME} (code ${VERSION_CODE}), construite par GitHub Actions depuis le commit $GITHUB_SHA. Les notes détaillées sont mises à jour à la main sur la release."
           gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
