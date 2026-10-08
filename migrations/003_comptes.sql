@@ -5,25 +5,42 @@
 -- USD / CHF / CNY) par de vrais comptes : nom, banque, devise, type
 -- (réserve / disponible) et motif, alimentés par des opérations.
 --
--- Nommé 003 et non 002 : 002_rls.sql existe déjà. À exécuter une seule fois
--- dans l'éditeur SQL de Supabase, après 001_init.sql et 002_rls.sql.
--- Ne modifie aucune table existante : la v1 et le robot nocturne continuent
--- de lire `Donnees` pendant la transition.
+-- À exécuter dans Supabase : SQL Editor > New query > coller ce fichier > Run.
+-- Prérequis : 001_init.sql (tables pf2_transactions et pf2_apports).
+-- Nommé 003 et non 002 : 002_rls.sql existe déjà.
+--
+-- IDEMPOTENT : chaque instruction peut être rejouée sans erreur
+-- (create ... if not exists, drop policy if exists, enable RLS déjà actif).
+--
+-- Ne modifie aucune table existante. La v1 et le robot nocturne continuent de
+-- lire `Donnees` pendant la transition ; la migration des soldes est faite par
+-- l'application au premier lancement 2.0 (table pf2_comptes vide).
 --
 -- Retour arrière (si besoin) :
 --   drop table if exists pf2_operations_compte;
 --   drop table if exists pf2_comptes;
 -- ===========================================================================
 
+
 -- ---------------------------------------------------------------------------
--- Comptes. Le solde n'est JAMAIS stocké : il se calcule comme la somme signée
--- des opérations du compte. Une seule source de vérité.
+-- pf2_comptes — un compte de liquidités.
+--
+-- Le SOLDE n'est jamais stocké. Il se calcule comme la somme signée des
+-- opérations du compte (pf2_operations_compte). Une seule source de vérité.
+--
+-- type :
+--   'reserve'    épargne de précaution, jamais investie, jamais proposée à
+--                l'achat ou à la vente de titres.
+--   'disponible' compte courant : achats et ventes de titres de sa devise.
+--
+-- archive : un compte n'est jamais supprimé. Archivé, il disparaît des listes
+--           mais garde son historique et reste compté dans le patrimoine.
 -- ---------------------------------------------------------------------------
 create table if not exists pf2_comptes (
-    id          text primary key,          -- uuid généré par l'application
+    id          text primary key,          -- identifiant généré par l'application
     nom         text not null,             -- « Livret CHF », « Courtage USD »…
-    banque      text,                      -- texte libre (suggestions côté app)
-    devise      text not null,             -- ISO 4217 : 'USD', 'CHF', 'CNY', 'EUR'…
+    banque      text,                      -- texte libre ; l'application propose les banques déjà saisies
+    devise      text not null,             -- code ISO 4217 : 'USD', 'CHF', 'CNY', 'EUR'…
     type        text not null check (type in ('reserve', 'disponible')),
     motif       text,                      -- pourquoi ce compte existe
     archive     boolean not null default false,
@@ -32,21 +49,45 @@ create table if not exists pf2_comptes (
     modifie_le  timestamptz default now()
 );
 
+
 -- ---------------------------------------------------------------------------
--- Opérations. `montant` est dans la DEVISE du compte, signé :
--- > 0 = argent qui entre, < 0 = argent qui sort.
+-- pf2_operations_compte — chaque mouvement d'un compte.
 --
--- Un virement écrit DEUX opérations (sortie sur la source, entrée sur la cible)
--- qui partagent le même `groupe`. `contrepartie` porte l'id du compte de
--- l'autre jambe. (Le cahier des charges mélangeait les deux usages dans
--- `contrepartie` ; on sépare : `contrepartie` = compte, `groupe` = lien.)
+-- montant : dans la DEVISE du compte, signé.
+--           > 0 : l'argent entre sur le compte.   < 0 : l'argent en sort.
 --
--- `transaction_id` et `apport_id` : suppression en cascade. Supprimer une
--- transaction ou un apport supprime sa propre écriture de compte : aucun
--- mouvement orphelin, donc aucun double comptage.
+-- type :
+--   ouverture     solde initial (y compris la migration depuis Donnees)
+--   depot         apport de fonds (lié à pf2_apports via apport_id)
+--   retrait       retrait de fonds (lié à pf2_apports via apport_id)
+--   virement      une jambe d'un virement entre deux comptes
+--   achat_titres  achat (lié à pf2_transactions via transaction_id)
+--   vente_titres  vente (lié à pf2_transactions via transaction_id)
+--   frais         frais de compte
+--
+-- groupe : identifiant de COUPLAGE des deux jambes d'un virement (un uuid
+--          commun à la sortie et à l'entrée). Modifier ou supprimer une jambe
+--          agit sur les deux. NULL pour toute autre opération.
+--
+-- contrepartie : identifiant du compte D'EN FACE dans un virement. Affiché
+--          « → Livret CHF » (sortie) ou « ← Courtage USD » (entrée).
+--          NULL pour toute autre opération. Pas de clé étrangère : un compte
+--          n'est jamais supprimé, il est archivé.
+--
+-- apport_id : lien vers pf2_apports. Supprimer un apport SUPPRIME son
+--          opération de compte (on delete cascade) : aucun mouvement orphelin,
+--          donc aucun double comptage.
+--
+-- transaction_id : lien vers pf2_transactions. Même règle : supprimer une
+--          transaction supprime son opération de compte.
+--
+-- Un virement écrit DEUX lignes (sortie sur la source, entrée sur la cible),
+-- avec le même `groupe`, chacune portant l'id du compte d'en face dans
+-- `contrepartie`. Les deux lignes sont écrites en une seule requête.
 -- ---------------------------------------------------------------------------
--- `by default` (et non `always`) : la modification d'un virement réécrit les deux
--- jambes en UN upsert sur leurs id ; avec `always`, PostgreSQL refuse un id explicite.
+-- `by default` (et non `always`) : la modification d'un virement réécrit ses
+-- deux jambes en UN upsert sur leurs id. Avec `always`, PostgreSQL refuse un
+-- id explicite.
 create table if not exists pf2_operations_compte (
     id             bigint generated by default as identity primary key,
     compte_id      text not null references pf2_comptes (id),
@@ -55,8 +96,8 @@ create table if not exists pf2_operations_compte (
                       'achat_titres', 'vente_titres', 'frais')),
     montant        numeric not null,
     date           date not null,
-    contrepartie   text,                   -- id du compte de l'autre jambe (virement)
-    groupe         text,                   -- uuid commun aux deux jambes d'un virement
+    contrepartie   text,
+    groupe         text,
     transaction_id bigint references pf2_transactions (id) on delete cascade,
     apport_id      bigint references pf2_apports (id) on delete cascade,
     note           text,
@@ -72,10 +113,14 @@ create index if not exists pf2_operations_compte_transaction_idx
 create index if not exists pf2_operations_compte_apport_idx
     on pf2_operations_compte (apport_id);
 
+
 -- ---------------------------------------------------------------------------
--- Row Level Security — même politique que 002_rls.sql. SANS ce bloc, RLS actif
--- sans politique : les lectures renvoient zéro ligne et les écritures échouent
--- en 42501 (voir 002_rls.sql pour le détail de ce piège).
+-- Row Level Security — même politique que 002_rls.sql.
+-- Accordée aux rôles `anon` (clé publique saisie dans l'application) et
+-- `authenticated` : select, insert, update et delete (`for all`).
+-- SANS ce bloc, RLS actif sans politique : les lectures renvoient zéro ligne et
+-- les écritures échouent en 42501 (voir 002_rls.sql pour le détail).
+-- Portée limitée aux deux tables de 2.0 ; la v1 n'est pas touchée.
 -- ---------------------------------------------------------------------------
 alter table pf2_comptes enable row level security;
 alter table pf2_operations_compte enable row level security;
