@@ -134,7 +134,12 @@ def serie(ticker: str):
 
     symbole = ALIAS_YAHOO.get(ticker, ticker)
     try:
-        h = yf.Ticker(symbole).history(period="max")
+        # `auto_adjust=False` est explicite : depuis yfinance 0.2.51 (puis la
+        # branche 1.x), `True` est devenu le défaut. La série serait alors
+        # « ajustée » (dividendes réinvestis) : chaque cours daté descend de
+        # tous les dividendes détachés depuis, et ne correspond plus au cours
+        # affiché par le courtier ni par Yahoo lui-même.
+        h = yf.Ticker(symbole).history(period="max", auto_adjust=False)
     except Exception as exc:
         raise CoursIndisponible(ticker, "", str(exc)) from exc
 
@@ -221,7 +226,7 @@ def cours(ticker: str, date: str | None = None) -> float:
                 return float(valeur)
 
             tk = yf.Ticker(symbole)
-            h = tk.history(period="5d")
+            h = tk.history(period="5d", auto_adjust=False)
             if h.empty:
                 raise CoursIndisponible(ticker, "", "série vide")
             # Yahoo renvoie une ligne de queue sans cours (séance non ouverte,

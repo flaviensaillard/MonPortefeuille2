@@ -117,7 +117,7 @@ class FauxTicker:
     def __init__(self, frame):
         self._frame = frame
 
-    def history(self, period=None, start=None, end=None):
+    def history(self, period=None, start=None, end=None, **kwargs):
         if period:                       # branche « aujourd'hui »
             return self._frame
         pd.to_datetime(self._rame_index_milieu(start, end))
@@ -137,7 +137,7 @@ def _simuler_yahoo(monkeypatch, module, valeurs, fuseau="Europe/London"):
         def __init__(self, _symbole):
             pass
 
-        def history(self, period=None, start=None, end=None):
+        def history(self, period=None, start=None, end=None, **kwargs):
             if period is not None:
                 return frame
             # Respecte la fenêtre demandée, comme le fait Yahoo.

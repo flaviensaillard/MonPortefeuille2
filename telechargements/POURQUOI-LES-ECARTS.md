@@ -168,3 +168,30 @@ table. Tant que vous ne le demandez pas, **je ne touche à aucune donnée**.
 
 Tout le reste (le correctif du 07/10 sur le repère d'enregistrement, les retraits
 signés, les achats/ventes comptés comme transferts internes) est inchangé.
+
+---
+
+## 9. Ce que corrige la 1.7.6 — et pourquoi la 1.7.3→1.7.5 écartait du courtier
+
+Le correctif décrit au § 4 contenait une erreur. Pour trouver « la clôture de la
+veille », il lisait le champ `chartPreviousClose` que Yahoo place à côté de la
+série. Or ce champ ne veut pas dire « clôture de la veille » : c'est la clôture
+**d'avant la première bougie de la fenêtre demandée**. L'application demande
+5 séances — ce champ pointait donc sur **il y a environ 6 séances**, pas sur la
+veille. Résultat : la ligne affichait une variation **sur une semaine**, présentée
+comme « variation du jour ». Comparée au courtier (qui, lui, compare bien le cours
+du moment à la clôture de la veille), elle paraissait fausse — c'était le cas.
+
+La 1.7.6 prend la clôture de la veille **dans la série elle-même** : la dernière
+clôture antérieure à la séance du cours. Série à jour → exactement la veille,
+comme le courtier ; série en retard (IGLN.L, XDW0.L, FLXC.L) → la dernière
+clôture connue, qui est la bonne base. Le cours affiché reste la cotation du
+moment, inchangée.
+
+Côté Streamlit et robot nocturne (Python), la même idée vaut pour l'**ajustement
+des dividendes** : les versions récentes de la bibliothèque Yahoo ajustent les
+clôtures historiques comme si les dividendes étaient réinvestis. Un cours daté
+redescendait alors de tous les dividendes détachés depuis, et ne correspondait
+plus au cours du courtier. Les appels passent désormais `auto_adjust=False` :
+les cours sont les cours réellement cotés.
+

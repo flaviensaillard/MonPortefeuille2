@@ -64,7 +64,7 @@ def _simuler_yahoo(monkeypatch, valeurs):
         def __init__(self, symbole):
             self.symbole = symbole
 
-        def history(self, period=None, start=None, end=None):
+        def history(self, period=None, start=None, end=None, **kwargs):
             if "=X" in self.symbole or "=F" in self.symbole:
                 plat = pd.DataFrame({"Close": [1.0] * len(valeurs)}, index=idx)
                 return plat
@@ -153,7 +153,7 @@ def test_la_serie_est_chargee_une_seule_fois(monkeypatch):
         def __init__(self, symbole):
             self.symbole = symbole
 
-        def history(self, period=None, start=None, end=None):
+        def history(self, period=None, start=None, end=None, **kwargs):
             appels.append(self.symbole)
             idx = pd.date_range("2025-01-02", periods=3, tz="Europe/London")
             return pd.DataFrame({"Close": [30.0, 30.0, 30.0]}, index=idx)
