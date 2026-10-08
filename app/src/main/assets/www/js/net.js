@@ -22,7 +22,6 @@
     var cache_devise = {};     // ticker -> devise
     var cache_fx = {};         // DEV-CONTRE|date -> taux
     var transport = null;      // pour les tests (renvoie un objet ou une promesse)
-    var seuilEcart = 0.02;     // 2 % : écart maximum normal entre cours et veille
     var compteurCb = 0;
 
     var promesses = {};
@@ -100,6 +99,14 @@
         return d <= 3 && d >= -1;
     }
 
+    /* Écart maximal toléré entre la cotation du moment et la dernière clôture
+       de la série. Au-delà, la cotation est réputée fausse (métadonnées
+       fossiles chez Yahoo — cas XJSE.SW) : on retombe sur la série. Une action
+       ou un ETF ne saute pas de 20 % entre deux séances ; une crypto, si. */
+    function seuilEcart(symbole) {
+        return /-USD$|-USDT$/.test(String(symbole || '')) ? 0.75 : 0.20;
+    }
+
     /* Série de clôtures d'un symbole Yahoo, en une seule requête. */
     function serie(symbole, range) {
         range = range || 'max';
@@ -121,6 +128,16 @@
                     out.cours = (isFinite(prixMeta) && prixMeta > 0) ? prixMeta : null;
                     out.seance = meta.regularMarketTime
                         ? U.iso(new Date(meta.regularMarketTime * 1000)) : null;
+                    /* Yahoo calcule LUI-MÊME la variation du jour (cours du
+                       moment contre la clôture officielle de la veille) : c'est
+                       le même chiffre que le courtier. On le prend quand il
+                       existe — car la série, elle, peut TROUER une séance
+                       (IGLN.L, XDW0.L, FLXC.L : bougie de la veille sans cours),
+                       et une base reconstituée depuis la série retombe alors
+                       sur l'avant-veille. */
+                    var pct = Number(meta.regularMarketChangePercent);
+                    if (!isFinite(pct)) pct = Number(meta.fulldayChangePercent);
+                    out.varJour = (isFinite(pct) && pct !== 0) ? pct / 100 : null;
                     var ts = res[0].timestamp || [];
                     var q = (res[0].indicators && res[0].indicators.quote && res[0].indicators.quote[0]) || {};
                     var cl = q.close || [];
@@ -155,9 +172,6 @@
                         // clôture (comportement d'avant la 1.7.3).
                         out.veille = out.closes[out.closes.length - 2];
                     }
-                    out.ecartSignificatif = out.cours !== null && out.veille !== null
-                        && out.veille > 0
-                        && Math.abs(out.cours / out.veille - 1) > seuilEcart;
                     out.ok = out.closes.length > 0;
                 }
             } catch (e) { out.ok = false; }
@@ -183,27 +197,50 @@
         var symbole = ALIAS_YAHOO[tk] || tk;
         var range = estRecent(dateISO) ? '5d' : 'max';
         return serie(symbole, range).then(function (s) {
+            if (s.currency) cache_devise[tk] = s.currency;
             var prix = null;
             if (s.ok && s.closes.length) {
                 if (dateISO && !estRecent(dateISO)) {
                     var idx = dernierAvant(s, dateISO);
                     if (idx >= 0) prix = s.closes[idx];
                 } else {
-                    // Cotation du moment d'abord (méta Yahoo) : la série peut
-                    // être en retard d'une séance sur certains tickers.
-                    prix = (s.cours !== null && s.cours !== undefined)
-                        ? s.cours : s.closes[s.closes.length - 1];
-                    var base = (s.veille !== null && s.veille !== undefined)
-                        ? s.veille
-                        : (s.closes.length >= 2 ? s.closes[s.closes.length - 2] : null);
-                    if (base !== null && base !== undefined && base > 0 && prix > 0) {
-                        cache_variation[tk] = prix / base - 1;
-                        cache_seance[tk] = s.seance
-                            || (s.timestamps.length ? s.timestamps[s.timestamps.length - 1] : null);
+                    // --- Cotation du moment, SOUS RÉSERVE.
+                    // XJSE.SW sert un « cours du moment » figé au 06/12/2023
+                    // (métadonnées fossiles, en JPY) : l'utiliser gonflait la
+                    // ligne de +22,5 %. Deux conditions pour faire confiance :
+                    // la séance du cours est récente, et le cours est cohérent
+                    // avec la dernière clôture de la série (un ETF ne fait pas
+                    // +20 % entre deux séances ; une crypto, si).
+                    var dernier = s.closes[s.closes.length - 1];
+                    var avantDernier = s.closes.length >= 2
+                        ? s.closes[s.closes.length - 2] : null;
+                    var seuil = seuilEcart(symbole);
+                    var liveValide = s.cours > 0 && s.seance && estRecent(s.seance)
+                        && dernier > 0
+                        && Math.abs(s.cours / dernier - 1) <= seuil;
+                    var prix = liveValide ? s.cours : dernier;
+                    var base = liveValide && s.veille !== null && s.veille !== undefined
+                        ? s.veille : avantDernier;
+                    var seance = liveValide ? s.seance
+                        : (s.timestamps.length ? s.timestamps[s.timestamps.length - 1] : null);
+                    // Variation du jour : le chiffre CALCULÉ PAR YAHOO d'abord
+                    // (même référence que le courtier, insensible aux bougies
+                    // trouées), sinon cours/base reconstitués depuis la série.
+                    var v = null;
+                    if (liveValide && s.varJour !== null && s.varJour !== undefined
+                        && Math.abs(s.varJour) <= seuil) {
+                        v = s.varJour;
+                    } else if (base !== null && base !== undefined && base > 0 && prix > 0) {
+                        v = prix / base - 1;
                     }
+                    if (v !== null) {
+                        cache_variation[tk] = v;
+                        cache_seance[tk] = seance;
+                    }
+                    cache_cours[cleC] = prix > 0 ? prix : null;
+                    return cache_cours[cleC];
                 }
             }
-            if (s.currency) cache_devise[tk] = s.currency;
             if (prix === null || !isFinite(prix) || prix <= 0) prix = null;
             cache_cours[cleC] = prix;
             return prix;
@@ -232,18 +269,6 @@
     function variationSeance(ticker) {
         var v = cache_seance[String(ticker || '').toUpperCase().trim()];
         return v === undefined ? null : v;
-    }
-
-    /* Variation du jour consolidée : retourne la variation fractionnaire, la
-       séance comparée et si le seuil d'écart est dépassé. */
-    function varJour(ticker) {
-        var tk = String(ticker || '').toUpperCase().trim();
-        var v = cache_variation[tk];
-        if (v === undefined || v === null) return null;
-        return {
-            variation: v,
-            seance: cache_seance[tk] || null,
-            seuilDepasse: Math.abs(v) > seuilEcart };
     }
 
     function deviseDe(ticker) {
@@ -364,11 +389,9 @@
     PF.net = {
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
-        varJour: varJour,
         deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, viderCache: viderCache, supabase: supabase,
         setTransport: function (fn) { transport = fn; viderCache(); },
-        seuilEcart: seuilEcart,
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,
         cache: { cours: cache_cours, fx: cache_fx, variation: cache_variation, serie: cache_serie }
     };

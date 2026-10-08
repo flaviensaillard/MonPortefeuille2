@@ -434,15 +434,18 @@ PF.portefeuille.charger().then((ctx) => {
         return txt.indexOf('07/10/2026') >= 0 && /\d+h\d\d/.test(txt);
     });
 
-    // La cotation du moment (méta Yahoo) doit primer sur la dernière clôture de
-    // la série : celle-ci peut s'arrêter à la séance précédente (IGLN.L, XDW0.L,
-    // FLXC.L), et la ligne semblait alors n'avoir pas bougé.
-    // La clôture de la veille, elle, vient de la SÉRIE — jamais de
-    // `chartPreviousClose` : ce champ est la clôture d'avant la PREMIÈRE bougie
-    // de la fenêtre demandée (sur range=5d, celle d'il y a ~6 séances), pas
-    // celle de la veille. L'utiliser donnait une variation sur une semaine
-    // affichée comme « variation du jour » — d'où l'écart avec le courtier.
-    const T_AUJ = Date.UTC(2026, 9, 8, 14, 30) / 1000;
+    // Écarts avec le courtier : la variation du jour doit être le MÊME chiffre
+    // que lui. Quatre cas réels (constatés le 08/10/2026 sur Yahoo) :
+    //   1. série à jour + marché ouvert ;
+    //   2. bougie de la veille TROUÉE (IGLN.L, XDW0.L, FLXC.L) — Yahoo fournit
+    //      alors LUI-MÊME la variation du jour (regularMarketChangePercent),
+    //      c'est elle qui fait foi ;
+    //   3. cours du moment FOSSILE (XJSE.SW : 1297.45 figé au 06/12/2023) — à
+    //      rejeter, on retombe sur la série ;
+    //   4. crypto : un vrai saut de +50 % doit rester crédible.
+    // `chartPreviousClose` ne doit JAMAIS servir de veille : c'est la clôture
+    // d'avant la PREMIÈRE bougie de la fenêtre (~6 séances sur range=5d).
+    const T_AUJ = Math.floor(Date.now() / 1000);
     const T_HIER = T_AUJ - 86400, T_AVVEILLE = T_AUJ - 2 * 86400;
     function fauxYahoo(meta, timestamps, closes) {
         return (method, url, entetes, corps) => {
@@ -454,55 +457,80 @@ PF.portefeuille.charger().then((ctx) => {
             return fauxTransport(method, url, entetes, corps);
         };
     }
-    // Cas 1 — série à jour, marché ouvert : la série porte la bougie du jour et
-    // le méta la cotation du moment. `chartPreviousClose: 94` est ce que Yahoo
-    // renvoie réellement sur range=5d (clôture d'il y a ~6 séances) : il ne
-    // doit PAS servir de veille. Variation attendue : 99,4 / 98,5 - 1 (comme
-    // le courtier : cours du moment contre clôture de la veille).
+    // Cas 1 — tout va bien : la série porte la bougie du jour (99.1) et le méta
+    // le cours du moment (99.4). `chartPreviousClose: 94` est le piège réel de
+    // Yahoo (clôture d'il y a ~6 séances) : il ne doit pas servir de base.
     PF.net.setTransport(fauxYahoo(
         { currency: 'USD', regularMarketPrice: 99.4, chartPreviousClose: 94,
           regularMarketTime: T_AUJ },
         [T_AVVEILLE, T_HIER, T_AUJ], [97.7, 98.5, 99.1]));
     PF.net.cours('MARCHE.OUVERT').then((prix) => {
-        test('la cotation du moment prime sur la dernière clôture', () => proche(prix, 99.4));
-        test('la variation du jour part de la clôture de la veille (série), pas de chartPreviousClose', () =>
+        test('la cotation du moment est le prix affiché', () => proche(prix, 99.4));
+        test('sans variation Yahoo, le cours part de la clôture de la veille (série)', () =>
             proche(PF.net.variationRecente('MARCHE.OUVERT'), 99.4 / 98.5 - 1));
         test('la séance comparée vient du méta', () =>
             PF.net.variationSeance('MARCHE.OUVERT') === U.iso(new Date(T_AUJ * 1000)));
-        // Cas 2 — série en retard d'une séance (IGLN.L, XDW0.L, FLXC.L) : la
-        // dernière bougie exploitable est celle d'hier. La variation doit partir
-        // de cette clôture (la dernière connue), pas de l'avant-dernière.
-        PF.net.setTransport(fauxYahoo(
-            { currency: 'USD', regularMarketPrice: 99, chartPreviousClose: 100,
-              regularMarketTime: T_AUJ },
-            [T_AVVEILLE - 86400, T_HIER], [80.5, 80.6]));
-        return PF.net.cours('SERIE.ENRETARD').then((prix2) => {
-            test('série en retard : le prix reste la cotation du moment', () => proche(prix2, 99));
-            test('série en retard : la variation part de la dernière clôture connue', () =>
-                proche(PF.net.variationRecente('SERIE.ENRETARD'), 99 / 80.6 - 1));
-            test('la séance comparée de la série en retard est celle du méta', () =>
-                PF.net.variationSeance('SERIE.ENRETARD') === U.iso(new Date(T_AUJ * 1000)));
-            PF.net.setTransport(fauxTransport);
 
-            // --- seuilEcart et varJour
-            test('seuilEcart est défini à 2 %', () => proche(PF.net.seuilEcart, 0.02));
-            test('varJour est une fonction exposée', () => typeof PF.net.varJour === 'function');
-            test('varJour retourne null sans données', () => PF.net.varJour('ZZZZZ.NULL') === null);
-            return PF.net.cours('GC=F').then(() => {
-                test('varJour retourne un objet après un cours', () => {
-                    var vj = PF.net.varJour('GC=F');
-                    return vj !== null && typeof vj.variation === 'number';
+        // Cas 2 — IGLN.L, XDW0.L, FLXC.L : la bougie d'hier arrive SANS cours
+        // (null → retirée), la bougie du jour porte le cours du moment. Une
+        // base reconstituée depuis la série retomberait sur l'avant-veille
+        // (c'est le −0,94 % constaté au lieu de +0,41 %). Yahoo fournit la
+        // variation du jour calculée de son côté : +0,4141 % comme le courtier.
+        PF.net.setTransport(fauxYahoo(
+            { currency: 'USD', regularMarketPrice: 80.0275, chartPreviousClose: 80.63,
+              regularMarketChangePercent: 0.4141, regularMarketTime: T_AUJ },
+            [T_AVVEILLE - 2 * 86400, T_AVVEILLE - 86400, T_AVVEILLE, T_AUJ],
+            [80.2575, 80.4225, 80.7875, 80.0275]));   // pas de bougie d'hier : trouée
+        return PF.net.cours('BOUGIE.TROUEE').then((prix2) => {
+            test('bougie trouée : le prix reste la cotation du moment', () => proche(prix2, 80.0275));
+            test('bougie trouée : la variation est celle CALCULÉE PAR YAHOO (+0,4141 %)', () =>
+                proche(PF.net.variationRecente('BOUGIE.TROUEE'), 0.004141));
+            test('bougie trouée : la séance comparée est celle du méta', () =>
+                PF.net.variationSeance('BOUGIE.TROUEE') === U.iso(new Date(T_AUJ * 1000)));
+
+            // Cas 3 — XJSE.SW : « cours du moment » figé au 06/12/2023, +22,5 %
+            // au-dessus de la série réelle (1059). À rejeter : prix = dernière
+            // clôture, variation = les deux dernières clôtures de la série, et
+            // la fiche annonce « clôture du … » au lieu du cours du jour.
+            const T_FOSSILE = Date.UTC(2023, 11, 6, 17, 55) / 1000;
+            PF.net.setTransport(fauxYahoo(
+                { currency: 'JPY', regularMarketPrice: 1297.45, chartPreviousClose: 1056.6,
+                  regularMarketChangePercent: 0.0, regularMarketTime: T_FOSSILE },
+                [T_AVVEILLE - 2 * 86400, T_AVVEILLE - 86400, T_AVVEILLE, T_HIER],
+                [1056.6, 1059, 1059, 1059]));
+            return PF.net.cours('FOSSILE.TEST').then((prix3) => {
+                test('cours fossile rejeté : le prix est la dernière clôture de la série', () =>
+                    proche(prix3, 1059));
+                test('cours fossile rejeté : la variation vient des deux dernières clôtures', () =>
+                    proche(PF.net.variationRecente('FOSSILE.TEST'), 0));
+                test('cours fossile rejeté : la séance affichée est celle de la série', () =>
+                    PF.net.variationSeance('FOSSILE.TEST') === U.iso(new Date(T_HIER * 1000)));
+
+                // Cas 3bis — cours divergent mais SÉANCE RÉCENTE : un ETF qui
+                // « fait » +30 % en séance est une donnée fausse aussi.
+                PF.net.setTransport(fauxYahoo(
+                    { currency: 'USD', regularMarketPrice: 130, chartPreviousClose: 100,
+                      regularMarketChangePercent: 30, regularMarketTime: T_AUJ },
+                    [T_AVVEILLE, T_HIER], [97.7, 99.1]));
+                return PF.net.cours('PIEGE.TEST').then((prix4) => {
+                    test('saut de +30 % en séance : cotation jugée fausse, clôture gardée', () =>
+                        proche(prix4, 99.1));
+                    test('saut de +30 % : variation recalculée depuis la série', () =>
+                        proche(PF.net.variationRecente('PIEGE.TEST'), 99.1 / 97.7 - 1));
+
+                    // Cas 4 — crypto : un vrai saut doit être accepté.
+                    PF.net.setTransport(fauxYahoo(
+                        { currency: 'USD', regularMarketPrice: 150, chartPreviousClose: 100,
+                          regularMarketTime: T_AUJ },
+                        [T_AVVEILLE, T_HIER, T_AUJ], [97.7, 99.1, 150]));
+                    return PF.net.cours('CRYPTO.TEST-USD').then((prix5) => {
+                        test('crypto : un saut de +50 % reste crédible et est accepté', () =>
+                            proche(prix5, 150));
+                        PF.net.setTransport(fauxTransport);
+                        console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
+                        process.exit(echecs === 0 ? 0 : 1);
+                    });
                 });
-                test('varJour contient la séance', () => {
-                    var vj = PF.net.varJour('GC=F');
-                    return vj !== null && vj.seance !== undefined && vj.seance !== null;
-                });
-                test('varJour.seuilDepasse est un booléen', () => {
-                    var vj = PF.net.varJour('GC=F');
-                    return typeof vj.seuilDepasse === 'boolean';
-                });
-                console.log('\n' + (echecs === 0 ? '✔ ' : '✘ ') + reussis + ' réussis, ' + echecs + ' échecs\n');
-                process.exit(echecs === 0 ? 0 : 1);
             });
         });
     }).catch((e) => {
