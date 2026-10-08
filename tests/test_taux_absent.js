@@ -368,6 +368,20 @@ test('bandeau : titre sans taux de change → « Non calculé, taux de change in
     return true;
 });
 
+test('assistant : taux EUR/USD absent → null envoyé, jamais 0 lu comme un taux', () => {
+    const ctx = PF.portefeuille.contexteVide();
+    ctx.tauxEurUsd = null;
+    const c = PF.ia.contextePourIA(ctx);
+    if (c.tauxEurUsd !== null) throw new Error('taux envoyé à l’assistant : ' + JSON.stringify(c.tauxEurUsd));
+    return true;
+});
+test('assistant : taux présent → transmis tel quel', () => {
+    const ctx = PF.portefeuille.contexteVide();
+    ctx.tauxEurUsd = 1.2;
+    egal(PF.ia.contextePourIA(ctx).tauxEurUsd, 1.2);
+    return true;
+});
+
 // ------------------------------------------------------------------- lancement
 (async () => {
     for (const t of differes) {

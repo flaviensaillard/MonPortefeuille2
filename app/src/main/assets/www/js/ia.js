@@ -94,7 +94,8 @@
             horizon: horizonPourIA(),
             uniteDeCompte: 'USD',
             deviseDeDepense: 'EUR',
-            tauxEurUsd: ctx.tauxEurUsd || 0,
+            // Sans cours du jour : null (indisponible), jamais 0, que l'assistant lirait comme un taux.
+            tauxEurUsd: U.tauxValide(ctx.tauxEurUsd),
             capitalInvesti: Math.round(investi),
             cashDisponible: Math.round(ctx.totalCourantUsd || 0),
             epargnePrecaution: Math.round(ctx.totalPrecautionUsd || 0),
