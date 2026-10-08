@@ -368,7 +368,7 @@
     function planMigration(donnees, jour) {
         var erreurs = [];
         var specs = {
-            USD: { nom: 'Courtage USD', banque: null, type: TYPES.DISPONIBLE, motif: null, typeFixe: true },
+            USD: { nom: 'Courtage USD', banque: 'Swissquote', type: TYPES.DISPONIBLE, motif: null, typeFixe: true },
             CHF: { nom: 'Livret CHF', banque: 'Swissquote', type: TYPES.RESERVE,
                 motif: 'Épargne de précaution', typeFixe: true },
             CNY: { nom: 'Compte CNY', banque: null, type: TYPES.RESERVE, motif: null, typeFixe: false }
@@ -425,6 +425,16 @@
         return { comptes: plan, erreurs: [] };
     }
 
+    /* Libellé du compte d'en face d'un virement : « → Livret CHF » si l'argent sort
+       vers lui, « ← Courtage USD » s'il entre depuis lui. Vide pour toute autre
+       opération ou si l'autre compte n'est plus connu. */
+    function libelleContrepartie(operation, comptes) {
+        if (!operation || operation.type !== 'virement' || !operation.contrepartie) return '';
+        var autre = (comptes || []).filter(function (c) { return c.id === operation.contrepartie; })[0];
+        if (!autre) return '';
+        return (Number(operation.montant) < 0 ? '→ ' : '← ') + autre.nom;
+    }
+
     /* Vrai si la migration doit tourner : la table des comptes est lisible et vide. */
     function migrationRequise(comptesLus) {
         return Array.isArray(comptesLus) && comptesLus.length === 0;
@@ -439,6 +449,7 @@
         erreursCompte: erreursCompte, comptesActifs: comptesActifs,
         banquesConnues: banquesConnues,
         operationsDuCompte: operationsDuCompte, soldeDuCompte: soldeDuCompte,
+        libelleContrepartie: libelleContrepartie,
         montantTitre: montantTitre, operationTitre: operationTitre,
         operationMouvement: operationMouvement, operationOuverture: operationOuverture,
         versLigneOperation: versLigneOperation,

@@ -224,10 +224,30 @@ test('virement dans la même devise accepté', () => {
     const autre = compte('c-usd2', 'Second USD', 'USD', 'disponible');
     return C.verifierVirement({ source: usd, cible: autre, montant: 1, operations: soldes }).length === 0;
 });
+test('virement réserve → disponible, même devise : autorisé (décision 2.0)', () => {
+    const reserveCny = compte('c-cny-res', 'Réserve CNY', 'CNY', 'reserve');
+    const ops = [op('c-cny-res', 'ouverture', 1000)];
+    return C.verifierVirement({ source: reserveCny, cible: voyage, montant: 300, operations: ops }).length === 0;
+});
+test('virement disponible → réserve, même devise : autorisé', () => {
+    const ops = [op('c-voy', 'ouverture', 1000)];
+    return C.verifierVirement({ source: voyage, cible: cnyRes, montant: 300, operations: ops }).length === 0;
+});
 test('virement : solde source insuffisant refusé', () => {
     const autre = compte('c-usd2', 'Second USD', 'USD', 'disponible');
     return C.verifierVirement({ source: usd, cible: autre, montant: 50, operations: soldes }).length > 0;
 });
+
+console.log('\nContrepartie d’un virement');
+const comptesLibelle = [{ id: 'c-chf', nom: 'Livret CHF' }, { id: 'c-usd', nom: 'Courtage USD' }];
+test('sortie d’un virement : « → Livret CHF »', () =>
+    C.libelleContrepartie({ type: 'virement', montant: -200, contrepartie: 'c-chf' }, comptesLibelle) === '→ Livret CHF');
+test('entrée d’un virement : « ← Courtage USD »', () =>
+    C.libelleContrepartie({ type: 'virement', montant: 200, contrepartie: 'c-usd' }, comptesLibelle) === '← Courtage USD');
+test('une autre opération n’a pas de contrepartie affichée', () =>
+    C.libelleContrepartie({ type: 'depot', montant: 5, contrepartie: 'c-chf' }, comptesLibelle) === '');
+test('contrepartie inconnue : rien d’affiché, pas de nom deviné', () =>
+    C.libelleContrepartie({ type: 'virement', montant: -1, contrepartie: 'c-zzz' }, comptesLibelle) === '');
 
 console.log('\nListes proposées');
 test('achat en CNY : seul le disponible CNY est proposé (réserve exclue)', () => {
@@ -299,7 +319,7 @@ test('migration : USD disponible, CHF réserve avec motif, CNY réserve à 0', (
     const par = {};
     plan.comptes.forEach((p) => { par[p.origine] = p; });
     return plan.erreurs.length === 0
-        && par.USD.type === 'disponible' && proche(par.USD.solde, 7.385)
+        && par.USD.type === 'disponible' && par.USD.banque === 'Swissquote' && proche(par.USD.solde, 7.385)
         && par.CHF.type === 'reserve' && par.CHF.motif === 'Épargne de précaution' && par.CHF.banque === 'Swissquote'
         && par.CNY.type === 'reserve' && par.CNY.solde === 0;
 });

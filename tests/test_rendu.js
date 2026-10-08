@@ -135,14 +135,43 @@ JSDOM.fromFile(PAGE, {
             return ['USD', 'EUR', 'CHF', 'JPY', 'GBP', 'CNY', 'CAD', 'AUD', 'HKD', 'SGD', 'NOK', 'SEK', 'DKK']
                 .every((d) => html.indexOf(d) >= 0);
         });
-        test('sans compte disponible, l’achat le dit et propose de créer un compte', () => {
-            // Comptes 2.0 : la démo n'a aucun compte. Un achat ne propose jamais une
-            // réserve (les anciens libellés « Compte courant USD » / « Épargne CHF »
-            // ont disparu avec la constante v1) : il affiche l'état et la création.
+        test('l’achat propose le compte démo disponible en USD, jamais la réserve CHF', () => {
+            // La démo a deux comptes étiquetés « (démo) » : un disponible USD et une réserve CHF.
+            // L'achat en USD ne propose que le disponible.
             const html = w.document.getElementById('feuille').innerHTML;
-            return html.indexOf('Aucun compte disponible en USD') >= 0
-                && html.indexOf('Créer un compte disponible en USD') >= 0
-                && html.indexOf('Épargne de précaution') < 0;
+            return html.indexOf('Courtage USD (démo)') >= 0
+                && html.indexOf('Livret CHF (démo)') < 0
+                && html.indexOf('Aucun compte disponible') < 0;
+        });
+        test('sans compte disponible dans la devise, l’achat le dit et propose de créer', () => {
+            // Même écran, devise sans compte (EUR) : message et bouton de création.
+            const sel = w.document.getElementById('txDevise');
+            sel.value = 'EUR';
+            sel.dispatchEvent(new w.Event('change'));
+            const html = w.document.getElementById('feuille').innerHTML;
+            return html.indexOf('Aucun compte disponible en EUR') >= 0
+                && html.indexOf('Créer un compte disponible en EUR') >= 0;
+        });
+        test('l’écran Comptes montre les deux comptes démo avec leur solde', () => {
+            w.document.querySelector('#voile').click();
+            PF.vues.definirOngletPortefeuille('comptes');
+            PF.app.naviguer('portefeuille', true);
+            const html = w.document.getElementById('view').innerHTML;
+            return html.indexOf('Courtage USD (démo)') >= 0 && html.indexOf('Livret CHF (démo)') >= 0
+                && html.indexOf('1 240') >= 0 && html.indexOf('8 694') >= 0;
+        });
+        test('la fiche d’un compte montre le compte d’en face d’un virement', () => {
+            // Un virement USD -> CHF n'existe pas en démo : on en ajoute un le temps du test.
+            const ops = PF.app.etat.ctx.operationsCompte;
+            ops.push({ id: 99, compte_id: 'demo-usd', type: 'virement', montant: -100, date: '2026-10-01',
+                       contrepartie: 'demo-chf', groupe: 'g-test', transaction_id: null, apport_id: null, note: null });
+            try {
+                PF.app.feuilleCompte('demo-usd');
+                return w.document.getElementById('feuille').innerHTML.indexOf('→ Livret CHF (démo)') >= 0;
+            } finally {
+                ops.pop();
+                w.document.querySelector('#voile').click();
+            }
         });
         test('fermer la feuille', () => {
             w.document.getElementById('voile').click();

@@ -1302,7 +1302,10 @@
             else if (o.apport_id) attrs = ' data-apport="' + UI.h(o.apport_id) + '"';
             var signe = o.montant > 0 ? '+' : '';
             return '<div class="ligne"' + attrs + ' style="cursor:pointer">'
-                + '<div class="gr"><div class="tt">' + UI.h(LIBELLE_OPERATION[o.type] || o.type) + '</div>'
+                + '<div class="gr"><div class="tt">' + UI.h(LIBELLE_OPERATION[o.type] || o.type)
+                + (PF.comptes.libelleContrepartie(o, tousLesComptes())
+                    ? ' <span class="st">' + UI.h(PF.comptes.libelleContrepartie(o, tousLesComptes())) + '</span>' : '')
+                + '</div>'
                 + '<div class="st">' + UI.h(U.jourMoisAnneeISO(o.date)) + (o.note ? ' · ' + UI.h(o.note) : '') + '</div></div>'
                 + '<div class="dr"><div class="a ' + (o.montant >= 0 ? 'up' : 'down') + '">'
                 + signe + U.nombre(o.montant, 2) + ' ' + UI.h(c.devise) + '</div></div></div>';
@@ -2107,6 +2110,34 @@
             prix: 1, valeurUsd: 1240, valeurEur: 1102, dernierTaux: 0.889, dernierTauxUsd: 1,
             pruUsd: 1, pruEur: 1, coutTotalUsd: 1240, coutTotalEur: 1102,
             pvLatenteUsd: 0, pvLatenteEur: 0, variationPct: 0
+        });
+
+        /* Comptes de démonstration, étiquetés « (démo) » : ils donnent aux écrans
+           Comptes et achat de quoi montrer leur fonctionnement avant connexion.
+           Leurs soldes sont ceux des lignes USD et CHF ci-dessus (1 240 et 8 694). */
+        var noteDemo = 'Compte de démonstration : aucune donnée réelle.';
+        ctx.comptes = [
+            { id: 'demo-usd', nom: 'Courtage USD (démo)', banque: 'Swissquote', devise: 'USD',
+              type: 'disponible', motif: null, archive: false, note: noteDemo },
+            { id: 'demo-chf', nom: 'Livret CHF (démo)', banque: 'Swissquote', devise: 'CHF',
+              type: 'reserve', motif: 'Épargne de précaution', archive: false, note: noteDemo }
+        ];
+        ctx.operationsCompte = [
+            { id: 1, compte_id: 'demo-usd', type: 'ouverture', montant: 1500, date: U.ajouterJours(aujourd, -400),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null },
+            { id: 2, compte_id: 'demo-usd', type: 'achat_titres', montant: -260, date: U.ajouterJours(aujourd, -120),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null },
+            { id: 3, compte_id: 'demo-chf', type: 'ouverture', montant: 8694, date: U.ajouterJours(aujourd, -400),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null }
+        ];
+        ctx.comptesEtat = { presente: true, erreur: null };
+        ctx.comptesVariation = {};
+        var tauxUsdDemo = { USD: 1, CHF: 1.2 };
+        ctx.comptes.forEach(function (c) {
+            c.solde = PF.comptes.soldeDuCompte(c.id, ctx.operationsCompte);
+            c.valeurUsd = c.solde * tauxUsdDemo[c.devise];
+            c.valeurEur = c.valeurUsd / 1.125;
+            ctx.comptesVariation[c.id] = 0;
         });
 
         var investi = ctx.actifs.filter(function (a) { return a.poche !== 'precaution' && a.poche !== 'courant'; })
