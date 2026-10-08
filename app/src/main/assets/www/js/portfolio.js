@@ -302,7 +302,9 @@
             echecsCours: [], echecsFx: [], erreurs: [], anomaliesTransactions: [],
             allocationCfg: M.allocationDefaut(), etatAllocation: M.verifier(null),
             variationsActifs: {}, capitalInvestiUsd: null, capitalInvestiEur: null,
-            liquides: {}, importeLe: null, horodatage: Date.now()
+            liquides: {}, importeLe: null, horodatage: Date.now(),
+            comptes: [], operationsCompte: [], comptesEtat: { presente: null, erreur: null },
+            comptesVariation: {}
         };
     }
 
@@ -325,12 +327,23 @@
             lireTable('pf2_inflation', 'select=*'),
             lireTable('Donnees', 'select=*'),
             lireTable('Projections', 'select=*'),
-            lireTable('Historique', 'select=*')
+            lireTable('Historique', 'select=*'),
+            lireComptes()
         ]).then(function (r) {
             var config = r[0], txRows = r[1], apRows = r[2], snRows = r[3], infRows = r[4];
             ctx.donneesV1 = r[5] || [];
             ctx.projections = r[6] || [];
             ctx.historiqueV1 = r[7] || [];
+            ctx.comptesEtat = r[8].etat;
+            ctx.comptes = r[8].comptes;
+            ctx.operationsCompte = r[8].operations;
+            if (!ctx.comptesEtat.presente) {
+                ctx.erreurs.push('Comptes de liquidités indisponibles : la table pf2_comptes est absente '
+                    + 'ou illisible (' + (ctx.comptesEtat.erreur || 'absente') + '). Exécutez '
+                    + 'migrations/003_comptes.sql. Les liquidités sont lues, pour l’instant, dans Donnees.');
+            } else if (ctx.comptesEtat.erreur) {
+                ctx.erreurs.push('Opérations des comptes illisibles : ' + ctx.comptesEtat.erreur);
+            }
 
             // --- Allocation personnalisée
             try {
@@ -386,6 +399,11 @@
             // --- Taux EUR -> USD du jour
             return PF.net.taux('EUR', jour, 'USD').then(function (t) {
                 ctx.tauxEurUsd = (t && t > 0) ? t : 1.125;
+                if (ctx.comptesEtat.presente && ctx.comptes.length) {
+                    return completerLiquiditesDepuisComptes(ctx, jour);
+                }
+                // Table des comptes absente ou vide : l'ancienne lecture de Donnees
+                // reste en place, et l'écran le dit (voir lireComptes).
                 return completerLiquiditesV1(ctx, jour);
             });
         }).then(function () {
@@ -428,6 +446,102 @@
             };
         }).filter(function (a) { return a.date; })
             .sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    }
+
+    /* Lecture des comptes et de leurs opérations. Contrairement à `lireTable`, une
+       erreur n'est PAS avalée : l'état (présente ou non, et pourquoi) remonte à
+       l'écran. Une table absente ne doit pas passer pour une table vide. */
+    function lireComptes() {
+        var etat = { presente: false, erreur: null };
+        return PF.net.supabase.select('pf2_comptes', 'select=*').then(function (rowsC) {
+            etat.presente = true;
+            return PF.net.supabase.select('pf2_operations_compte', 'select=*').then(function (rowsO) {
+                return { etat: etat, comptes: (rowsC || []).map(versCompte), operations: (rowsO || []).map(versOperation) };
+            }, function (e) {
+                etat.erreur = e.message;
+                return { etat: etat, comptes: [], operations: [] };
+            });
+        }, function (e) {
+            etat.erreur = e.message;
+            return { etat: etat, comptes: [], operations: [] };
+        });
+    }
+
+    function versCompte(r) {
+        return {
+            id: String(r.id), nom: String(r.nom || ''), banque: r.banque || null,
+            devise: String(r.devise || '').toUpperCase(), type: String(r.type || ''),
+            motif: r.motif || null, archive: !!r.archive, note: r.note || null
+        };
+    }
+
+    function versOperation(r) {
+        return {
+            id: r.id, compte_id: String(r.compte_id), type: String(r.type || ''),
+            montant: U.num(r.montant, 0), date: U.parseDate(r.date),
+            contrepartie: r.contrepartie || null, groupe: r.groupe || null,
+            transaction_id: (r.transaction_id === undefined) ? null : r.transaction_id,
+            apport_id: (r.apport_id === undefined) ? null : r.apport_id,
+            note: r.note || null
+        };
+    }
+
+    /* Liquidités tirées des COMPTES : une ligne `espece` par (devise, poche), la
+       poche venant du TYPE du compte (réserve → précaution, disponible → courant).
+       Un taux manquant est signalé dans echecsFx, jamais remplacé. */
+    function completerLiquiditesDepuisComptes(ctx, jour) {
+        var groupes = PF.comptes.grouperLiquidites(ctx.comptes, ctx.operationsCompte);
+        return Promise.all(groupes.map(function (g) {
+            return Promise.all([
+                g.devise === 'EUR' ? Promise.resolve(1) : PF.net.taux(g.devise, jour, 'EUR'),
+                g.devise === 'USD' ? Promise.resolve(1) : PF.net.taux(g.devise, jour, 'USD')
+            ]).then(function (v) {
+                if (v[0] === null || v[1] === null) {
+                    ctx.echecsFx.push(g.devise + '/' + (v[0] === null ? 'EUR' : 'USD'));
+                    return null;
+                }
+                ctx.actifs.push({
+                    ticker: g.devise, classe: 'espece', deviseCotation: g.devise, poche: g.poche,
+                    quantite: g.quantite, prix: 1, valeurEur: g.quantite * v[0], valeurUsd: g.quantite * v[1],
+                    dernierTaux: v[0], dernierTauxUsd: v[1], pruEur: 1, pruUsd: 1,
+                    coutTotalEur: g.quantite * v[0], coutTotalUsd: g.quantite * v[1],
+                    pvLatenteEur: 0, pvLatenteUsd: 0, variationPct: 0
+                });
+                ctx.liquides[g.devise] = { quantite: g.quantite, type: g.poche };
+                return null;
+            });
+        })).then(function () {
+            return valoriserComptes(ctx, jour);
+        });
+    }
+
+    /* Valeur de CHAQUE compte (archivés compris) en devise, USD et EUR, et sa
+       variation depuis la veille exprimée en dollars : le mouvement de change de la
+       devise. Pas de variation disponible → null, affiché « — », jamais 0 inventé. */
+    function valoriserComptes(ctx, jour) {
+        return Promise.all(ctx.comptes.map(function (c) {
+            var solde = PF.comptes.soldeDuCompte(c.id, ctx.operationsCompte);
+            return Promise.all([
+                c.devise === 'EUR' ? Promise.resolve(1) : PF.net.taux(c.devise, jour, 'EUR'),
+                c.devise === 'USD' ? Promise.resolve(1) : PF.net.taux(c.devise, jour, 'USD'),
+                variationDeChange(c.devise)
+            ]).then(function (v) {
+                c.solde = solde;
+                c.valeurEur = (v[0] === null) ? null : solde * v[0];
+                c.valeurUsd = (v[1] === null) ? null : solde * v[1];
+                ctx.comptesVariation[c.id] = v[2];
+                return c;
+            });
+        }));
+    }
+
+    function variationDeChange(devise) {
+        if (devise === 'USD') return Promise.resolve(0);
+        return PF.net.serie(devise + 'USD=X', '5d').then(function (s) {
+            if (!s || !s.ok || s.closes.length < 2) return null;
+            var n = s.closes.length;
+            return s.closes[n - 1] / s.closes[n - 2] - 1;
+        }).catch(function () { return null; });
     }
 
     /* Les liquidités de la v1 (CHF, CNY, USD, EUR) n'étaient pas dans
@@ -806,6 +920,8 @@
         lireConfig: lireConfig,
         sauverConfigCle: sauverConfigCle,
         contexteVide: contexteVide,
-        enrichirHistoriquesUsd: enrichirHistoriquesUsd
+        enrichirHistoriquesUsd: enrichirHistoriquesUsd,
+        lireComptes: lireComptes,
+        valoriserComptes: valoriserComptes
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

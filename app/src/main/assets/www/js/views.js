@@ -501,40 +501,87 @@
         return out;
     }
 
-    /* Les comptes de liquidités, en devise puis en dollars et en euros : c'est
-       l'écran « Fonds & Comptes » de la v2, avec les virements internes. */
+    /* Les comptes de liquidités : disponibles, réserves, archivés. Le solde de chaque
+       compte est calculé à partir de ses opérations. Un archivé sort des listes et des
+       propositions, mais son solde reste compté dans le patrimoine. */
     function ongletComptes(ctx) {
-        var comptes = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; });
-        var out = '<div class="titre">Comptes de liquidités <span class="n">' + comptes.length + '</span></div>';
-        if (!comptes.length) {
-            return out + '<div class="vide" style="padding:18px">Aucun compte de liquidités trouvé '
-                + 'dans la table Donnees.</div>';
+        var etatC = ctx.comptesEtat || { presente: null };
+        var tous = ctx.comptes || [];
+        var out = '<div class="titre">Mes comptes <span class="n">' + tous.filter(function (c) { return !c.archive; }).length + '</span></div>';
+        if (ctx.bandeauMigration) out += '<div class="info">' + UI.h(ctx.bandeauMigration) + '</div>';
+
+        if (etatC.presente === false) {
+            out += '<div class="erreur">La table des comptes (pf2_comptes) est absente ou illisible'
+                + (etatC.erreur ? ' : ' + UI.h(etatC.erreur) : '') + '. Exécutez migrations/003_comptes.sql dans Supabase. '
+                + 'En attendant, les liquidités sont lues dans l’ancienne table Donnees, sans création ni modification de compte.</div>';
         }
-        var totalUsd = 0, totalEur = 0;
-        comptes.forEach(function (c) { totalUsd += c.valeurUsd; totalEur += c.valeurEur; });
 
-        out += '<div class="card gold"><div class="lbl">Total disponible</div>'
-            + UI.montant(totalUsd, totalEur)
-            + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Épargne de précaution : '
-            + U.usd(ctx.totalPrecautionUsd, { dec: 0 }) + ' · cash disponible : '
-            + U.usd(ctx.totalCourantUsd, { dec: 0 }) + '</div></div>';
+        if (!tous.length) {
+            // Pas encore de comptes (table présente mais vide, ou absente) : on montre les
+            // liquidités telles que la v1 les tient, sans rien y écrire.
+            var anciens = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; });
+            if (!anciens.length) {
+                return out + '<div class="vide" style="padding:18px">Aucun compte de liquidités pour le moment.</div>'
+                    + (etatC.presente ? '<button class="btn" id="btnCompteNouveau">＋ Nouveau compte</button>' : '');
+            }
+            out += '<div class="card">';
+            anciens.forEach(function (c) {
+                out += '<div class="ligne"><div class="gr"><div class="tt">' + UI.h(c.ticker) + '</div>'
+                    + '<div class="st">Solde : ' + U.quantite(c.quantite) + ' ' + UI.h(c.ticker) + '</div></div>'
+                    + '<div class="dr"><div class="a">' + U.usd(c.valeurUsd, { dec: 0 }) + '</div>'
+                    + '<div class="b">' + U.eur(c.valeurEur, { dec: 0 }) + '</div></div></div>';
+            });
+            return out + '</div>';
+        }
 
-        out += '<div class="card">';
-        comptes.forEach(function (c) {
-            var poche = M.etat.parCle[c.poche];
-            out += '<div class="ligne"><div class="pastille" style="background:rgba(56,189,248,.14)">💵</div>'
-                + '<div class="gr"><div class="tt">' + UI.h(c.ticker) + '</div>'
-                + '<div class="st">Solde : <b style="color:var(--txt-2)">' + U.quantite(c.quantite) + ' '
-                + UI.h(c.ticker) + '</b>' + (poche ? ' · ' + UI.h(poche.nom) : '') + '</div></div>'
+        var actifs = tous.filter(function (c) { return !c.archive; });
+        var archives = tous.filter(function (c) { return c.archive; });
+        var disponibles = actifs.filter(function (c) { return c.type === 'disponible'; });
+        var reserves = actifs.filter(function (c) { return c.type === 'reserve'; });
+
+        function somme(liste, cle) {
+            return liste.reduce(function (t, c) { return t + (c[cle] === null || c[cle] === undefined ? 0 : c[cle]); }, 0);
+        }
+        var tousUsd = somme(tous, 'valeurUsd'), tousEur = somme(tous, 'valeurEur');
+
+        out += '<div class="card gold"><div class="lbl">Liquidités, total (archivés compris)</div>'
+            + UI.montant(tousUsd, tousEur)
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Disponibles : '
+            + U.usd(somme(disponibles, 'valeurUsd'), { dec: 0 }) + ' · Réserves : '
+            + U.usd(somme(reserves, 'valeurUsd'), { dec: 0 }) + '</div></div>';
+
+        function carte(c) {
+            var v = ctx.comptesVariation ? ctx.comptesVariation[c.id] : null;
+            var pastille = c.type === 'reserve' ? '🏦' : '💵';
+            var sousTitre = [c.banque || 'Banque non renseignée', c.motif].filter(Boolean).join(' · ');
+            return '<div class="ligne" data-compte="' + UI.h(c.id) + '" style="cursor:pointer">'
+                + '<div class="pastille" style="background:rgba(56,189,248,.14)">' + pastille + '</div>'
+                + '<div class="gr"><div class="tt">' + UI.h(c.nom) + (c.devise ? ' · ' + UI.h(c.devise) : '') + '</div>'
+                + '<div class="st">' + UI.h(sousTitre) + (v !== null && v !== undefined && c.devise !== 'USD'
+                    ? ' · change ' + U.flecheTexte(v) : '') + '</div></div>'
                 + '<div class="dr"><div class="a">' + U.usd(c.valeurUsd, { dec: 0 }) + '</div>'
-                + '<div class="b">' + U.eur(c.valeurEur, { dec: 0 }) + '</div></div></div>';
-        });
-        out += '</div>';
+                + '<div class="b">' + U.nombre(c.solde, 2) + ' ' + UI.h(c.devise) + '</div></div></div>';
+        }
 
-        out += '<button class="btn" id="btnVirement" style="margin-bottom:10px">↔ Virement entre deux comptes</button>';
-        out += '<div style="font-size:11.5px;color:var(--txt-3);padding:0 4px">Un virement interne ne modifie '
-            + 'ni votre capital investi ni vos apports : il déplace simplement des fonds d’un compte à l’autre, '
-            + 'au taux de change du jour de l’opération.</div>';
+        out += '<div class="titre" style="margin-top:14px">Disponibles <span class="n">' + disponibles.length + '</span></div>'
+            + '<div class="st" style="padding:0 4px 6px">Achats et ventes de titres se font ici, dans la devise du titre.</div>'
+            + '<div class="card">' + (disponibles.map(carte).join('') || '<div class="vide" style="padding:14px">Aucun compte disponible.</div>') + '</div>';
+        out += '<div class="titre" style="margin-top:14px">Réserves <span class="n">' + reserves.length + '</span></div>'
+            + '<div class="st" style="padding:0 4px 6px">Épargne de précaution : jamais investie, hors du calcul de rééquilibrage.</div>'
+            + '<div class="card">' + (reserves.map(carte).join('') || '<div class="vide" style="padding:14px">Aucune réserve.</div>') + '</div>';
+        if (archives.length) {
+            out += '<div class="titre" style="margin-top:14px">Archivés <span class="n">' + archives.length + '</span></div>'
+                + '<div class="st" style="padding:0 4px 6px">Historique consultable. Solde toujours compté dans le patrimoine.</div>'
+                + '<div class="card">' + archives.map(carte).join('') + '</div>';
+        }
+
+        if (etatC.presente) {
+            out += '<div class="grille g2" style="margin-top:12px">'
+                + '<button class="btn" id="btnCompteNouveau">＋ Nouveau compte</button>'
+                + '<button class="btn sec" id="btnVirement">↔ Virement</button></div>';
+        }
+        out += '<div style="font-size:11.5px;color:var(--txt-3);padding:8px 4px 0">Un virement déplace des fonds '
+            + 'd’un compte à l’autre dans une même devise, sans change. Il ne modifie ni votre capital investi ni vos apports.</div>';
         return out;
     }
 

@@ -9,7 +9,7 @@ const vm = require('vm');
 
 const RACINE = path.join(__dirname, '..', 'app', 'src', 'main', 'assets', 'www', 'js');
 const FICHIERS = ['util.js', 'models.js', 'net.js', 'store.js', 'metrics.js',
-    'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js', 'ia.js'];
+    'comptes.js', 'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js', 'ia.js'];
 
 // --- Faux navigateur -------------------------------------------------------
 const stockage = {};

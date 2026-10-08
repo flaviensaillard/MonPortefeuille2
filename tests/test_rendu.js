@@ -135,9 +135,14 @@ JSDOM.fromFile(PAGE, {
             return ['USD', 'EUR', 'CHF', 'JPY', 'GBP', 'CNY', 'CAD', 'AUD', 'HKD', 'SGD', 'NOK', 'SEK', 'DKK']
                 .every((d) => html.indexOf(d) >= 0);
         });
-        test('le choix du compte est proposé', () => {
+        test('sans compte disponible, l’achat le dit et propose de créer un compte', () => {
+            // Comptes 2.0 : la démo n'a aucun compte. Un achat ne propose jamais une
+            // réserve (les anciens libellés « Compte courant USD » / « Épargne CHF »
+            // ont disparu avec la constante v1) : il affiche l'état et la création.
             const html = w.document.getElementById('feuille').innerHTML;
-            return html.indexOf('Compte courant USD') >= 0 && html.indexOf('Épargne de précaution CHF') >= 0;
+            return html.indexOf('Aucun compte disponible en USD') >= 0
+                && html.indexOf('Créer un compte disponible en USD') >= 0
+                && html.indexOf('Épargne de précaution') < 0;
         });
         test('fermer la feuille', () => {
             w.document.getElementById('voile').click();
