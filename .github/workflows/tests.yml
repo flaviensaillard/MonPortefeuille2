@@ -22,6 +22,12 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - name: Lancer les tests
         run: python -m pytest tests/ -v
+      # Moteur JavaScript de l'application (comptes, portefeuille, écran) : faux réseau,
+      # aucun appel réel. Même code que celui de la WebView.
+      - name: Vérifier le moteur JavaScript
+        run: |
+          node tests/test_js.js
+          node tests/test_comptes.js
       # Les règles du service IA (phrase imposée sans passage, citation des
       # sources, indexation sans doublon) se testent en JavaScript, avec un
       # faux Cloudflare : aucun appel réseau réel.

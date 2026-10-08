@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '1.7.9'
-      VERSION_CODE: '25'
+      VERSION_NAME: '2.0'
+      VERSION_CODE: '26'
     steps:
       - uses: actions/checkout@v4
 
@@ -53,8 +53,8 @@ jobs:
           echo '- commit : `'"$(git rev-parse HEAD)"'`' >> "$GITHUB_STEP_SUMMARY"
           echo '- net.js : `'"$(md5sum app/src/main/assets/www/js/net.js | cut -d" " -f1)"'`' >> "$GITHUB_STEP_SUMMARY"
           N=$(grep -c "seuilEcart\|varJour" app/src/main/assets/www/js/net.js || true)
-          echo "- garde-fous présents dans net.js : $N (attendu : au moins 5)" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$N" -lt 5 ]; then
+          echo "- garde-fous présents dans net.js : $N (attendu : 6)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$N" -lt 6 ]; then
             echo "!! ATTENTION : le correctif « écarts courtier » n est PAS dans cet arbre" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -77,7 +77,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-1.7.9.apk
+          name: Porte-feuille-2.0.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 
