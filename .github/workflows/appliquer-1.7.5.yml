@@ -1,0 +1,148 @@
+name: Appliquer le correctif 1.7.5
+
+# Outil de service, à usage unique.
+#   1) Coller dans le dépôt les cinq morceaux du paquet (1.7.5.b64.part0 … part4).
+#   2) Onglet Actions -> « Appliquer le correctif 1.7.5 » -> Run workflow.
+#   3) Ce workflow vérifie les empreintes, applique le correctif, lance les
+#      82 tests JavaScript, passe la version à 1.7.5, pousse le commit, puis
+#      relance « Construire l'APK » et « Tests ».
+# Il se supprime lui-même une fois le travail fait.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  appliquer:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 1/3 — Vérifier et déballer le paquet
+        run: |
+          set -euo pipefail
+
+          # 1) Contrôler les cinq morceaux — ou accepter le fichier unique.
+          #    Le contrôle ignore les fins de ligne : un saut de ligne ajouté ou retiré
+          #    par l'éditeur web ne fait donc pas échouer le paquet.
+          if [ -f livraison-1.7.5.b64 ]; then
+              echo "Mode fichier unique (livraison-1.7.5.b64)."
+              tr -d '\r\n' < livraison-1.7.5.b64 > paquet.b64
+          else
+              while read -r attendu fichier; do
+                  [ -n "$fichier" ] || continue
+                  if [ ! -f "$fichier" ]; then echo "MORCEAU MANQUANT : $fichier"; exit 1; fi
+                  obtenu=$(tr -d '\r\n' < "$fichier" | sha256sum | cut -d' ' -f1)
+                  if [ "$obtenu" = "$attendu" ]; then
+                      echo "ok    $fichier"
+                  else
+                      echo "MORCEAU FAUX : $fichier — recopie ce morceau, puis relance."
+                      exit 1
+                  fi
+              done <<'SOMMES'
+          d38d63eed73dc9a16fe0df2ecee4de1cfdb46a8c8139e40816ed419a4cc044b2  1.7.5.b64.part0
+          453bf95273f1963ac1ef113279492b74c9e4fe526abc4c4624068f567ebe1024  1.7.5.b64.part1
+          e518f24cfe0c696131b5482c209f14123fe97c3cdaaafaeaa774c164d4be5966  1.7.5.b64.part2
+          d9183efb8eaf142ad19ab7a13ac558466483ccd9b48198692aefc113d62c977a  1.7.5.b64.part3
+          b3ee0bc7fd5aea8d1a43fca2432f0ccd726bf8339b6675a83f84b796de742f60  1.7.5.b64.part4
+          SOMMES
+              cat 1.7.5.b64.part0 1.7.5.b64.part1 1.7.5.b64.part2 1.7.5.b64.part3 \
+                  1.7.5.b64.part4 | tr -d '\r\n' > paquet.b64
+          fi
+
+          # 2) Décoder et vérifier l'archive elle-même, puis la déballer.
+          base64 -d paquet.b64 > livraison-1.7.5.tar.gz
+          echo "cd77277c53161d4e001ed966c98271e810927c192dd4be4fa95282d17ea20d07  livraison-1.7.5.tar.gz" \
+              | sha256sum -c -
+          rm -rf ext && mkdir -p ext
+          tar xzf livraison-1.7.5.tar.gz -C ext
+          echo "b9f3cbb795faefc00c52319d1913c1199ba08578e4f3cc7df1d2a3aba6e6c38a  ext/correctif-1.7.5-code.patch" \
+              | sha256sum -c -
+          echo "e3561dbbaf7c0f5b074bdae391a18fb5baf1a00355ce0adeaaed1560f7430ea2  ext/correctif-1.7.5-tests.patch" \
+              | sha256sum -c -
+
+          echo "PAQUET OK"
+
+      - name: 2/3 — Appliquer le correctif et lancer les tests
+        run: |
+          set -euo pipefail
+
+          # 3) Appliquer le correctif. Si l'arbre le contient déjà (relance), on continue.
+          if grep -q 'Perimetre.HORS' core/models.py 2>/dev/null; then
+              echo "Correctif déjà présent dans l'arbre."
+          else
+              git apply --3way ext/correctif-1.7.5-code.patch
+          fi
+
+          if grep -q 'test_hors_perimetre' tests/test_poches.py 2>/dev/null; then
+              echo "Patch tests déjà présent."
+          else
+              git apply --3way ext/correctif-1.7.5-tests.patch \
+                  || echo "::warning::patch tests non appliqué (le correctif de code reste valable)"
+          fi
+
+          # 4) Les 82 tests JavaScript : ils font barrage si quelque chose ne colle pas.
+          node tests/test_js.js
+
+          echo "CODE OK"
+
+      - name: 3/3 — Version 1.7.5, commit, push, relance des workflows
+        run: |
+          set -euo pipefail
+
+          # 5) Passer la version à 1.7.5 (idempotent : une seule fois)
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path('.github/workflows/apk.yml')
+          s = p.read_text()
+          if "VERSION_NAME: '1.7.5'" in s:
+              print("version déjà à 1.7.5")
+          else:
+              s = re.sub(r"VERSION_NAME: '1\.7\.\d+'", "VERSION_NAME: '1.7.5'", s)
+              m = re.search(r"VERSION_CODE: '(\d+)'", s)
+              code = int(m.group(1)) + 1
+              s = s[:m.start(1)] + str(code) + s[m.end(1):]
+              s = re.sub(r"Porte-feuille-1\.7\.\d+\.apk", "Porte-feuille-1.7.5.apk", s)
+              assert "VERSION_NAME: '1.7.5'" in s and f"VERSION_CODE: '{code}'" in s \
+                  and "Porte-feuille-1.7.5.apk" in s
+              p.write_text(s)
+              print("version:", re.search(r"VERSION_NAME: '([^']+)'", s).group(1),
+                    "| code:", code)
+          PY
+
+          # 6) Nettoyage : le paquet et l'outil de service ne restent pas dans le dépôt
+          rm -rf ext paquet.b64 livraison-1.7.5.tar.gz livraison-1.7.5.b64 \
+                 1.7.5.b64.part0 1.7.5.b64.part1 1.7.5.b64.part2 1.7.5.b64.part3 \
+                 1.7.5.b64.part4
+          git rm -q --ignore-unmatch .github/workflows/appliquer-1.7.5.yml
+
+          # 7) Commit et push
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+              echo "Rien à committer (déjà à jour)."
+          else
+              git commit -m "Correctif 1.7.5 — RI.PA hors périmètre (suivi, jamais compté)"
+              git push
+          fi
+
+          # 8) Relancer les deux workflows (un push par GITHUB_TOKEN ne les déclenche pas)
+          gh workflow run apk.yml --repo "$GITHUB_REPOSITORY" \
+              || gh workflow run "Construire l'APK" --repo "$GITHUB_REPOSITORY" || true
+          gh workflow run tests.yml --repo "$GITHUB_REPOSITORY" || true
+
+          {
+            echo "## ✔ Correctif 1.7.5 appliqué et poussé"
+            echo
+            echo "- Investi attendu : ≈ 80 771 \$ (Pernod Ricard exclu, suivi à part)"
+            echo "- APK 1.7.5 : https://github.com/$GITHUB_REPOSITORY/releases/latest/download/Porte-feuille-1.7.5.apk"
+            echo "- Après installation : lancer **une seule fois** le workflow « Reconstitution de l'historique »."
+          } >> "$GITHUB_STEP_SUMMARY"
