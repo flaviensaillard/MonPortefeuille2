@@ -1,0 +1,78 @@
+name: Appliquer le correctif 1.7.5
+
+# À lancer à la main : onglet « Actions » > « Appliquer le correctif 1.7.5 » > Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appliquer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Contrôler les 6 morceaux
+        run: |
+          set -u
+          mauvais=0
+          verifier() {   # $1 = nom du morceau, $2 = empreinte attendue
+            if [ ! -f "$1" ]; then
+              echo "::error::MORCEAU ABSENT : $1 — il manque le fichier $1 à la racine du dépôt."
+              mauvais=1; return
+            fi
+            obtenu=$(tr -d '[:space:]' < "$1" | sha256sum | cut -d' ' -f1)
+            if [ "$obtenu" != "$2" ]; then
+              echo "::error::MORCEAU FAUX : $1"
+              echo "   attendu : $2"
+              echo "   obtenu  : $obtenu"
+              mauvais=1
+            else
+              echo "   ok  $1"
+            fi
+          }
+          verifier 1.7.5.part0 1697b6909592c0dd336f4ce98356566a5c069a2e949ca81a08455192472e96f7
+          verifier 1.7.5.part1 a952671810cb86eb9928a661ad0881970770f299c174eeb6d12229acd0c21770
+          verifier 1.7.5.part2 57bf09367965578114a123e53061cc7a457b945d508f721e4a256ab8cc48b949
+          verifier 1.7.5.part3 e30b5c708842b5af10aa093551e7d4309010bb784a45ea101e3fb235e95301a0
+          verifier 1.7.5.part4 ebc59e391d04324dc03e16030b9ac7c574e4881ab0e35c6ddafbab968a717ba4
+          verifier 1.7.5.part5 e04048cf8e7f2427d18b5a4bfa3731066f8ad1d0e1c5f55c770b46086df9ec2d
+          if [ "$mauvais" != 0 ]; then
+            echo "::error::Recrée le(s) morceau(x) signalé(s) : ouvre le fichier de la consigne, Ctrl+A, Ctrl+C, puis colle dans un NOUVEAU fichier portant exactement le même nom."
+            exit 1
+          fi
+          echo "Les 6 morceaux sont intacts."
+
+      - name: Assembler le paquet
+        run: |
+          set -eu
+          cat 1.7.5.part0 1.7.5.part1 1.7.5.part2 1.7.5.part3 1.7.5.part4 1.7.5.part5 > p.b64
+          compact=$(tr -d '[:space:]' < p.b64 | sha256sum | cut -d' ' -f1)
+          if [ "$compact" != "55acbfd1cbb6e15da0228aa87b82332e50da1175a66b6fee28cd3ef1e80a91fa" ]; then
+            echo "::error::assemblage incohérent ($compact) — un morceau est incomplet ou dupliqué."
+            exit 1
+          fi
+          base64 -d --ignore-garbage p.b64 > paquet.tar.xz
+          obtenu=$(sha256sum paquet.tar.xz | cut -d' ' -f1)
+          if [ "$obtenu" != "791a35a27c2717fa404a3008e7cb08c6cc1c4ad6a08b6e98c91e729e3f764971" ]; then
+            echo "::error::archive illisible ($obtenu)"
+            exit 1
+          fi
+          mkdir -p paquet175
+          tar xf paquet.tar.xz -C paquet175
+          echo "Paquet prêt."
+
+      - name: Outils de test (facultatif)
+        continue-on-error: true
+        run: |
+          python3 -m pip install --quiet pytest \
+            || python3 -m pip install --quiet --break-system-packages pytest \
+            || echo "pytest non installé : le contrôle Python sera simplement ignoré"
+
+      - name: Appliquer le correctif et vérifier chaque fichier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash paquet175/appliquer.sh
