@@ -62,6 +62,11 @@ class Contexte:
     total_courant_usd: float = 0.0
     patrimoine_total_usd: float = 0.0
     taux_eur_usd: float = 1.125
+    # Taux EUR/USD du jour introuvable : `taux_eur_usd` garde alors 1.125 pour l'affichage
+    # seulement, et AUCUN calcul ne doit s'en servir (voir `_taux_valide` et le graphique).
+    taux_indisponible: bool = False
+    # Dates des points du graphique dont la valeur USD dépend de ce taux : non tracées.
+    dates_sans_taux: list = field(default_factory=list)
 
     cours_or: float | None = None
     equivalent_or_oz: float | None = None
@@ -469,8 +474,10 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
     aujourdhui_iso = dt.date.today().isoformat()
     try:
         ctx.taux_eur_usd = float(fx.taux("EUR", aujourdhui_iso, "USD"))
-    except Exception:
+    except Exception as exc:
         ctx.taux_eur_usd = 1.125
+        ctx.taux_indisponible = True
+        ctx.echecs_fx.append(f"EUR/USD du jour ({exc})")
     from . import ui as _ui
     _ui.definir_taux_eur_usd(ctx.taux_eur_usd)
 
@@ -639,6 +646,16 @@ def _completer_liquidites_depuis_comptes(ctx: Contexte, jour_iso: str) -> None:
         ))
 
 
+def _taux_valide(ctx: Contexte) -> bool:
+    """Vrai si le taux EUR/USD du jour est réel. Un taux manquant ne sert à aucun calcul."""
+    return bool(ctx.taux_eur_usd) and ctx.taux_eur_usd > 0 and not getattr(ctx, "taux_indisponible", False)
+
+
+def _arrondi(x):
+    """Arrondi au centime, ou None si la valeur n'a pas pu être calculée (taux manquant)."""
+    return round(x, 2) if x is not None else None
+
+
 def _enrichir_historiques_usd(ctx: Contexte) -> None:
     """Attache les colonnes USD (`*_usd`) aux apports et aux snapshots.
 
@@ -656,6 +673,9 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
     from . import dates as _dates
 
     taux = ctx.taux_eur_usd if ctx.taux_eur_usd > 0 else 1.125
+    taux_ok = _taux_valide(ctx)
+    ctx.dates_sans_taux = []
+    sans_taux: list[pd.Timestamp] = []
 
     # --- 1. Apports en USD ---
     if ctx.apports is not None and not ctx.apports.empty:
@@ -740,6 +760,7 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
             tot_e = eur_tot_par_date.get(d_cle, round(tot_u / ratio_jour, 2))
             if tot_u > inv_u and tot_e <= inv_e:
                 tot_e = round(inv_e + (tot_u - inv_u) / ratio_jour, 2)
+            # Projections donne les dollars nativement : aucun taux requis ici.
             lignes_u.append({
                 "Date": pd.Timestamp(d_cle),
                 "date": d_cle.isoformat(),
@@ -768,20 +789,25 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
                 co = sr.get("cours_or_usd")
                 if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0:
                     inv_u = float(oz) * float(co)
-                    ratio = inv_u / inv_e if inv_e > 0 else taux
-                    tot_u = tot_e * ratio
-                else:
+                    ratio = inv_u / inv_e if inv_e > 0 else (taux if taux_ok else None)
+                    tot_u = tot_e * ratio if ratio is not None else None
+                elif taux_ok:
                     inv_u = inv_e * taux
                     tot_u = tot_e * taux
+                else:
+                    inv_u = tot_u = None
                 if tot_e <= inv_e and ctx.total_precaution_eur > 0:
                     tot_e = round(inv_e + ctx.total_precaution_eur + ctx.total_courant_eur, 2)
-                    tot_u = round(inv_u + ctx.total_precaution_usd + ctx.total_courant_usd, 2)
+                    if inv_u is not None:
+                        tot_u = round(inv_u + ctx.total_precaution_usd + ctx.total_courant_usd, 2)
+                if inv_u is None or tot_u is None:
+                    sans_taux.append(pd.Timestamp(d_cle))
                 lignes_u.append({
                     "Date": pd.Timestamp(d_cle),
                     "date": d_cle.isoformat(),
-                    "patrimoine_investi_usd": round(inv_u, 2),
-                    "patrimoine_total_usd": round(tot_u, 2),
-                    "precaution_usd": round(max(tot_u - inv_u, 0.0), 2),
+                    "patrimoine_investi_usd": _arrondi(inv_u),
+                    "patrimoine_total_usd": _arrondi(tot_u),
+                    "precaution_usd": _arrondi(max(tot_u - inv_u, 0.0)) if inv_u is not None and tot_u is not None else None,
                     "courant_usd": 0.0,
                     "capital_investi_usd": None,
                     "patrimoine_investi_eur": round(inv_e, 2),
@@ -800,21 +826,26 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
         inv_u_list = []
         tot_u_list = []
         prec_u_list = []
-        for _, sr in snaps.iterrows():
+        dates_repli = _parser_dates(snaps["Date"]).tolist()
+        for i_sr, (_, sr) in enumerate(snaps.iterrows()):
             inv_e = float(sr.get("patrimoine_investi_eur") or 0.0)
             tot_e = float(sr.get("patrimoine_total_eur") or inv_e)
             oz = sr.get("equivalent_or_oz")
             co = sr.get("cours_or_usd")
             if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0:
                 inv_u = float(oz) * float(co)
-                ratio = inv_u / inv_e if inv_e > 0 else taux
-                tot_u = tot_e * ratio
-            else:
+                ratio = inv_u / inv_e if inv_e > 0 else (taux if taux_ok else None)
+                tot_u = tot_e * ratio if ratio is not None else None
+            elif taux_ok:
                 inv_u = inv_e * taux
                 tot_u = tot_e * taux
-            inv_u_list.append(round(inv_u, 2))
-            tot_u_list.append(round(tot_u, 2))
-            prec_u_list.append(round(max(tot_u - inv_u, 0.0), 2))
+            else:
+                inv_u = tot_u = None
+            if inv_u is None or tot_u is None:
+                sans_taux.append(pd.Timestamp(dates_repli[i_sr]))
+            inv_u_list.append(_arrondi(inv_u))
+            tot_u_list.append(_arrondi(tot_u))
+            prec_u_list.append(_arrondi(max(tot_u - inv_u, 0.0)) if inv_u is not None and tot_u is not None else None)
         snaps["patrimoine_investi_usd"] = inv_u_list
         snaps["patrimoine_total_usd"] = tot_u_list
         snaps["precaution_usd"] = prec_u_list
@@ -831,20 +862,26 @@ def _enrichir_historiques_usd(ctx: Contexte) -> None:
             inv_e = float(sr.get("patrimoine_investi_eur") or 0.0)
             tot_e = float(sr.get("patrimoine_total_eur") or inv_e)
             oz, co = sr.get("equivalent_or_oz"), sr.get("cours_or_usd")
-            inv_u = float(oz) * float(co) if pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0 else inv_e * taux
-            ratio = inv_u / inv_e if inv_e > 0 else taux
+            ok_or = pd.notna(oz) and pd.notna(co) and float(oz) > 0 and float(co) > 0
+            inv_u = float(oz) * float(co) if ok_or else (inv_e * taux if taux_ok else None)
+            ratio = (inv_u / inv_e if inv_e > 0 else (taux if taux_ok else None)) if inv_u is not None else None
+            usd_ok = inv_u is not None and ratio is not None
             idx = ctx.snapshots.index[_parser_dates(ctx.snapshots["Date"]) == dernier][-1]
             for cle, valeur in {
                 "patrimoine_investi_eur": inv_e, "patrimoine_total_eur": tot_e,
-                "patrimoine_investi_usd": inv_u, "patrimoine_total_usd": tot_e * ratio,
+                "patrimoine_investi_usd": inv_u if usd_ok or ok_or else None,
+                "patrimoine_total_usd": tot_e * ratio if usd_ok else None,
                 "precaution_eur": float(sr.get("precaution_eur") or 0.0),
                 "courant_eur": float(sr.get("courant_eur") or 0.0),
-                "precaution_usd": float(sr.get("precaution_eur") or 0.0) * ratio,
-                "courant_usd": float(sr.get("courant_eur") or 0.0) * ratio,
+                "precaution_usd": float(sr.get("precaution_eur") or 0.0) * ratio if usd_ok else None,
+                "courant_usd": float(sr.get("courant_eur") or 0.0) * ratio if usd_ok else None,
                 "equivalent_or_oz": oz, "cours_or_usd": co,
             }.items():
                 ctx.snapshots.at[idx, cle] = round(valeur, 2) if pd.notna(valeur) and cle.endswith(("_eur", "_usd")) else valeur
+            if not usd_ok:
+                sans_taux.append(pd.Timestamp(dernier))
 
+    ctx.dates_sans_taux = sorted(set(sans_taux))
     if not ctx.snapshots.empty:
         ctx.snapshots = ctx.snapshots.sort_values("Date", kind="stable").reset_index(drop=True)
 
@@ -987,6 +1024,12 @@ def progression_periode(
     if col_val_usd not in df_p.columns:
         col_val_usd = "patrimoine_investi_eur"
 
+    # Un point sans valeur USD (taux manquant) n'est pas tracé : c'est un trou, pas un
+    # zéro ni un point inventé. Ses dates sont remontées pour l'affichage.
+    df_p = df_p.dropna(subset=[col_val_usd]).reset_index(drop=True)
+    if df_p.empty:
+        return {"vide": True, "taux_indisponible": True, "dates_sans_taux": []}
+
     d_min = df_p["date_dt"].min().date()
     d_max = df_p["date_dt"].max().date()
     label_periode = mode_periode
@@ -1071,7 +1114,20 @@ def progression_periode(
         twr_per = 0.0
         pct_brut = 0.0
 
-    taux = ctx.taux_eur_usd if ctx.taux_eur_usd else 1.0
+    # Aucun taux de remplacement : un 1,0 transformerait des dollars en euros faux.
+    # Sans taux valide, les montants en euros sont absents (None) et la mention est
+    # affichée. Les montants en dollars ne dépendent pas du taux et restent exacts.
+    taux_ok = _taux_valide(ctx)
+
+    def _eur(montant_usd: float) -> float | None:
+        return montant_usd / ctx.taux_eur_usd if taux_ok else None
+
+    # Points du graphique non tracés (taux manquant) situés dans la période affichée.
+    sans_taux_periode: list = []
+    if not taux_ok and len(df_graphe):
+        d0, d1 = df_graphe["date_dt"].min(), df_graphe["date_dt"].max()
+        sans_taux_periode = [d for d in getattr(ctx, "dates_sans_taux", []) if d0 <= d <= d1]
+
     return {
         "vide": False,
         "df_graphe": df_graphe,
@@ -1082,13 +1138,15 @@ def progression_periode(
         "v_debut_usd": v_debut_usd,
         "v_fin_usd": v_fin_usd,
         "delta_val_usd": delta_val_usd,
-        "delta_val_eur": delta_val_usd / taux,
+        "delta_val_eur": _eur(delta_val_usd),
         "apports_periode_usd": apports_periode_usd,
-        "apports_periode_eur": apports_periode_usd / taux,
+        "apports_periode_eur": _eur(apports_periode_usd),
         "gain_marche_usd": gain_marche_usd,
-        "gain_marche_eur": gain_marche_usd / taux,
+        "gain_marche_eur": _eur(gain_marche_usd),
         "twr_per": twr_per,
         "pct_brut": pct_brut,
+        "taux_indisponible": not taux_ok,
+        "dates_sans_taux": sans_taux_periode,
     }
 
 

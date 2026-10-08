@@ -475,13 +475,10 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
             jour = date or dt.date.today().isoformat()
             prix = prices.cours(pos.ticker, date)
             taux = fx.taux(pos.devise_cotation, jour, "EUR")
-            if pos.devise_cotation == "USD":
-                taux_usd = 1.0
-            else:
-                try:
-                    taux_usd = fx.taux(pos.devise_cotation, jour, "USD")
-                except Exception:
-                    taux_usd = taux
+            # Pas de repli : sans taux USD, le titre n'est pas valorisé (échec signalé
+            # ci-dessous). Un taux EUR utilisé à la place d'un taux USD fabriquerait un
+            # chiffre plausible et faux.
+            taux_usd = 1.0 if pos.devise_cotation == "USD" else fx.taux(pos.devise_cotation, jour, "USD")
             valeur_eur = pos.quantite * prix * taux
             valeur_usd = pos.quantite * prix * taux_usd
             pos.prix = prix

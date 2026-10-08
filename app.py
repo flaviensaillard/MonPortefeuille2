@@ -232,9 +232,12 @@ if not ctx.snapshots.empty:
 
     if not prog.get("vide"):
         st.caption(f"📌 **Période analysée :** {prog['label_periode']}")
+        # Taux indisponible : les cartes montrent « — » des deux côtés (une valeur en
+        # dollars seule ferait dériver l'euro du taux de remplacement de l'affichage).
+        sans_taux = bool(prog.get("taux_indisponible"))
         p1, p2, p3, p4 = st.columns(4)
         ui.metric_usd_eur(
-            p1, f"Gain de marché ({mode_periode})", prog["gain_marche_usd"], prog["gain_marche_eur"],
+            p1, f"Gain de marché ({mode_periode})", None if sans_taux else prog["gain_marche_usd"], prog["gain_marche_eur"],
             signe=True,
             help="Gain ou perte purement généré par le marché sur la période (hors apports/retraits).",
         )
@@ -246,22 +249,38 @@ if not ctx.snapshots.empty:
             help="Rendement pondéré par le temps sur la période sélectionnée (neutralise l'effet des apports).",
         )
         ui.metric_usd_eur(
-            p3, "Variation totale de valeur", prog["delta_val_usd"], prog["delta_val_eur"],
+            p3, "Variation totale de valeur", None if sans_taux else prog["delta_val_usd"], prog["delta_val_eur"],
             signe=True,
             help=f"Passage de {ui.usd(prog['v_debut_usd'])} à {ui.usd(prog['v_fin_usd'])} sur la période.",
         )
         ui.metric_usd_eur(
-            p4, "Apports nets sur la période", prog["apports_periode_usd"], prog["apports_periode_eur"],
+            p4, "Apports nets sur la période", None if sans_taux else prog["apports_periode_usd"], prog["apports_periode_eur"],
             signe=True,
             help="Total des apports moins les retraits enregistrés durant cette période.",
         )
 
         df_graphe = prog["df_graphe"]
         col_val_usd = prog["col_val_usd"]
+        # Point sans taux : jamais un point inventé. On trace un trou (y vide) à sa date.
+        x_courbe = list(df_graphe["date_dt"])
+        y_courbe = list(df_graphe[col_val_usd])
+        for d_trou in prog.get("dates_sans_taux", []):
+            x_courbe.append(d_trou)
+            y_courbe.append(None)
+        if prog.get("dates_sans_taux"):
+            ordre = sorted(range(len(x_courbe)), key=lambda i: x_courbe[i])
+            x_courbe = [x_courbe[i] for i in ordre]
+            y_courbe = [y_courbe[i] for i in ordre]
+        if prog.get("taux_indisponible"):
+            st.caption(
+                "⚠️ taux indisponible : contre-valeurs en euros non calculées"
+                + (f" ; {len(prog['dates_sans_taux'])} point(s) du graphique non tracé(s) (trou)."
+                   if prog.get("dates_sans_taux") else ".")
+            )
         fig_prog = go.Figure()
         fig_prog.add_trace(go.Scatter(
-            x=df_graphe["date_dt"],
-            y=df_graphe[col_val_usd],
+            x=x_courbe,
+            y=y_courbe,
             name=f"{perimetre_graphe} ($)",
             mode="lines+markers" if len(df_graphe) <= 45 else "lines",
             line=dict(color=ui._couleur_variation(prog["gain_marche_usd"]), width=2.8),
@@ -296,6 +315,8 @@ if not ctx.snapshots.empty:
             hovermode="x unified",
         )
         st.plotly_chart(fig_prog, width="stretch")
+    elif prog.get("taux_indisponible"):
+        st.warning("⚠️ taux indisponible : aucun point de cette période ne peut être tracé en dollars.")
 else:
     st.info("Aucun historique de snapshots disponible.")
 
