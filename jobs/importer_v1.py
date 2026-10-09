@@ -305,9 +305,7 @@ def importer_transactions(dry_run: bool = False) -> tuple[int, list[str]]:
         #
         # On ne supprime que ce que l'import a lui-même écrit. Une transaction
         # saisie à la main dans l'application n'est pas touchée.
-        db.client().table(db.T_TRANSACTIONS).delete().eq(
-            "source", "import_v1"
-        ).execute()
+        db.supprimer_lignes(db.T_TRANSACTIONS, source="import_v1")
         log.info("Anciennes lignes d'import supprimées.")
 
         # Upsert sur l'index unique : relancer l'import ne crée pas de doublons.
@@ -373,7 +371,7 @@ def importer_apports(dry_run: bool = False) -> int:
     # Idempotence : on repart d'une base propre pour les lignes issues de la v1.
     # La table pf2_apports n'a pas de contrainte d'unicité exploitable en upsert.
     try:
-        db.client().table(db.T_APPORTS).delete().eq("compte", "import_v1").execute()
+        db.supprimer_lignes(db.T_APPORTS, compte="import_v1")
         db.ecrire(db.T_APPORTS, lignes)
         log.info("%d apports importés.", len(lignes))
     except Exception as exc:
@@ -531,12 +529,11 @@ def _purger_la_fenetre(debut: str, fin: str, conservees: set[str],
         )
         return len(a_retirer)
 
-    table = db.client().table(db.T_SNAPSHOTS)
     retires = 0
     for i in range(0, len(a_retirer), taille):
         lot = a_retirer[i:i + taille]
         try:
-            table.delete().in_("date", lot).execute()
+            db.supprimer_lignes(db.T_SNAPSHOTS, dans=("date", lot))
             retires += len(lot)
         except Exception as exc:
             log.error(

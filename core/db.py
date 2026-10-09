@@ -196,7 +196,9 @@ def verifier_ecriture() -> None:
 
     for ligne in rep.data or []:
         try:
-            client().table(T_ALERTES).delete().eq("id", ligne["id"]).execute()
+            _restreint_au_proprietaire(
+                client().table(T_ALERTES).delete().eq("id", ligne["id"]), T_ALERTES,
+            ).execute()
         except Exception:
             # La sonde reste : sans importance, elle est inoffensive et visible.
             log.warning("Sonde d'écriture non supprimée (id=%s).", ligne.get("id"))
@@ -265,8 +267,8 @@ def proprietaire_service() -> str | None:
 
     Source, dans l'ordre : la variable d'environnement `SUPABASE_USER_ID` (secret
     GitHub Actions des robots), puis `.streamlit/secrets.toml` pour l'application
-    lancée en local. Sans uid, rien n'est inventé : l'écriture échoue sur la
-    contrainte NOT NULL — c'est voulu, un robot ne doit jamais écrire de ligne
+    lancée en local. Sans uid, rien n'est inventé : l'écriture échoue AVANT l'envoi
+    (ProprietaireAbsent). C'est voulu : un robot ne doit jamais écrire de ligne
     apatride.
     """
     uid = os.environ.get("SUPABASE_USER_ID")
@@ -279,16 +281,62 @@ def proprietaire_service() -> str | None:
     return uid or None
 
 
-def _avec_proprietaire(table: str, lignes: list[dict]) -> list[dict]:
-    """Injecte `user_id` dans les écritures serveur des tables propriétaires
-    (`pf2_` et TABLES_V1_PROPRIETAIRE). Sans uid connu, les lignes partent telles
-    quelles : la base refuse alors l'écriture au lieu de la rendre apatride."""
-    if not (table.startswith("pf2_") or table in TABLES_V1_PROPRIETAIRE):
-        return lignes
+class ProprietaireAbsent(PermissionError):
+    """Écriture serveur sur une table propriétaire, alors que SUPABASE_USER_ID manque.
+
+    Levée AVANT tout envoi à la base (revue robots, 2.1.0) : rien ne part, aucun NULL
+    n'est écrit. Sous-classe de PermissionError : même famille que le refus de la base,
+    et les appelants existants (pages, tests v1) la traitent de la même façon.
+    """
+
+
+def _est_proprietaire(table: str) -> bool:
+    """Tables dont chaque ligne porte un propriétaire (migrations 004 et 008)."""
+    return table.startswith("pf2_") or table in TABLES_V1_PROPRIETAIRE
+
+
+def _uid_requis(table: str) -> str:
+    """L'uid du propriétaire, ou ProprietaireAbsent. Jamais de repli."""
     uid = proprietaire_service()
     if not uid:
+        raise ProprietaireAbsent(
+            f"Écriture sur `{table}` sans propriétaire.\n"
+            "Les robots et l'application (clé service_role) doivent connaître l'uid de "
+            "votre compte : ajoutez le secret SUPABASE_USER_ID (GitHub Actions : "
+            "Settings > Secrets and variables > Actions ; en local : .streamlit/secrets.toml).\n"
+            "Rien n'a été envoyé à la base."
+        )
+    return uid
+
+
+def _avec_proprietaire(table: str, lignes: list[dict]) -> list[dict]:
+    """Point de passage unique des insertions et upserts serveur (revue robots, 2.1.0).
+
+    Toute ligne d'une table propriétaire reçoit `user_id = SUPABASE_USER_ID`. Sans uid,
+    on lève ProprietaireAbsent AVANT l'envoi : jamais de ligne apatride, et l'échec dit
+    quoi faire. Une ligne qui désigne un AUTRE propriétaire est refusée, pas réattribuée.
+    """
+    if not _est_proprietaire(table) or not lignes:
         return lignes
-    return [{**l, "user_id": l.get("user_id") or uid} for l in lignes]
+    uid = _uid_requis(table)
+    for ligne in lignes:
+        if ligne.get("user_id") not in (None, "", uid):
+            raise ValueError(
+                f"Écriture sur `{table}` : ligne attribuée à un autre propriétaire "
+                "que SUPABASE_USER_ID. Refusée.")
+    return [{**ligne, "user_id": uid} for ligne in lignes]
+
+
+def _restreint_au_proprietaire(requete, table: str):
+    """Restreint une mise à jour ou une suppression au propriétaire (revue robots, 2.1.0).
+
+    La clé service_role contourne RLS : `delete().eq("id", 42)` supprimerait la ligne 42
+    de n'importe quel propriétaire. Tout filtre d'écriture sur une table propriétaire
+    ajoute donc `user_id = SUPABASE_USER_ID`, et échoue sans uid.
+    """
+    if not _est_proprietaire(table):
+        return requete
+    return requete.eq("user_id", _uid_requis(table))
 
 
 def ecrire(table: str, lignes: list[dict]) -> int:
@@ -320,6 +368,9 @@ def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) ->
     une méthode chaînable. `builder.upsert(...).on_conflict(...)` lève
     `AttributeError: 'SyncQueryRequestBuilder' object has no attribute
     'on_conflict'`. Il faut donc `upsert(lignes, on_conflict=...)`.
+
+    Aucune suppression ici : un upsert ne supprime rien. Le propriétaire est injecté
+    par `_avec_proprietaire`, qui échoue avant l'envoi si SUPABASE_USER_ID manque.
     """
     if not lignes:
         return
@@ -332,7 +383,33 @@ def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) ->
 
 
 def maj_ligne(table: str, id_ligne, champs: dict) -> None:
-    client().table(table).update(champs).eq("id", id_ligne).execute()
+    """Met à jour une ligne par son `id`, restreint au propriétaire (2.1.0)."""
+    try:
+        requete = client().table(table).update(champs).eq("id", id_ligne)
+        _restreint_au_proprietaire(requete, table).execute()
+    except Exception as exc:
+        raise _traduire_erreur(table, exc) from exc
+
+
+def supprimer_lignes(table: str, *, dans: tuple[str, list] | None = None, **egal) -> None:
+    """Supprime les lignes de `table` qui satisfont TOUS les filtres, et seulement celles
+    du propriétaire (revue robots, 2.1.0).
+
+    Filtres : `colonne=valeur` (égalités) et, à part, `dans=(colonne, valeurs)`.
+    Sans aucun filtre, la fonction refuse : ce module ne sait pas supprimer une table
+    entière. L'import v1 le faisait, sans filtre propriétaire.
+    """
+    if not egal and dans is None:
+        raise ValueError(f"Suppression sur `{table}` sans filtre : refusée.")
+    try:
+        requete = client().table(table).delete()
+        for colonne, valeur in egal.items():
+            requete = requete.eq(colonne, valeur)
+        if dans is not None:
+            requete = requete.in_(dans[0], list(dans[1]))
+        _restreint_au_proprietaire(requete, table).execute()
+    except Exception as exc:
+        raise _traduire_erreur(table, exc) from exc
 
 
 def existe(table: str) -> bool:
@@ -506,8 +583,11 @@ def ajouter_snapshot(ligne: dict) -> None:
     Utilise l'upsert sur la contrainte d'unicité de `date` : relancer le robot
     deux fois le même jour met à jour la ligne au lieu d'en créer une deuxième.
     """
-    ligne = _avec_proprietaire(T_SNAPSHOTS, [ligne])[0]
-    client().table(T_SNAPSHOTS).upsert(ligne, on_conflict="date").execute()
+    try:
+        ligne = _avec_proprietaire(T_SNAPSHOTS, [ligne])[0]
+        client().table(T_SNAPSHOTS).upsert(ligne, on_conflict="date").execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_SNAPSHOTS, exc) from exc
 
 
 def ajouter_alerte(titre: str, message: str, niveau: str = "info") -> None:
@@ -586,7 +666,9 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
         for k, v in modifs.items():
             val_str = "true" if v is True else ("false" if v is False else str(v))
             if k in existantes:
-                c.table("Config").update({"Valeur": val_str}).eq("id", existantes[k]).execute()
+                _restreint_au_proprietaire(
+                    c.table("Config").update({"Valeur": val_str}).eq("id", existantes[k]),
+                    "Config").execute()
             else:
                 c.table("Config").insert(
                     _avec_proprietaire("Config", [{"Clé": k, "Valeur": val_str}])[0]).execute()
@@ -609,11 +691,14 @@ def enregistrer_inventaire_crypto(lignes: list[dict], ids_supprimes: list[int]) 
     try:
         cl = client()
         for i in ids_supprimes:
-            cl.table(T_INVENTAIRE).delete().eq("id", int(i)).execute()
+            _restreint_au_proprietaire(
+                cl.table(T_INVENTAIRE).delete().eq("id", int(i)), T_INVENTAIRE).execute()
         for ligne in lignes:
             champs = {k: v for k, v in ligne.items() if k != "id" and v is not None}
             if ligne.get("id") is not None:
-                cl.table(T_INVENTAIRE).update(champs).eq("id", int(ligne["id"])).execute()
+                _restreint_au_proprietaire(
+                    cl.table(T_INVENTAIRE).update(champs).eq("id", int(ligne["id"])),
+                    T_INVENTAIRE).execute()
             else:
                 cl.table(T_INVENTAIRE).insert(_avec_proprietaire(T_INVENTAIRE, [champs])).execute()
     except Exception as exc:
@@ -813,9 +898,13 @@ def ajuster_solde_compte(
                     "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
                 }
                 if pd.notna(row.get("id")):
-                    c.table("Donnees").update(maj).eq("id", int(row["id"])).execute()
+                    _restreint_au_proprietaire(
+                        c.table("Donnees").update(maj).eq("id", int(row["id"])), "Donnees",
+                    ).execute()
                 else:
-                    c.table("Donnees").update(maj).eq("Ticker", t_up).execute()
+                    _restreint_au_proprietaire(
+                        c.table("Donnees").update(maj).eq("Ticker", t_up), "Donnees",
+                    ).execute()
                 return q_nouveau
         # Si la ligne n'existe pas encore dans Donnees
         q_nouveau = round(max(0.0, float(delta_quantite)), 6)
@@ -873,7 +962,9 @@ def ajouter_historique_v1(
 def modifier_transaction(id_ligne: int, champs: dict) -> None:
     """Met à jour une ligne existante dans `pf2_transactions` par son `id`."""
     try:
-        client().table(T_TRANSACTIONS).update(champs).eq("id", int(id_ligne)).execute()
+        _restreint_au_proprietaire(
+            client().table(T_TRANSACTIONS).update(champs).eq("id", int(id_ligne)),
+            T_TRANSACTIONS).execute()
     except Exception as exc:
         raise _traduire_erreur(T_TRANSACTIONS, exc) from exc
 
@@ -881,7 +972,9 @@ def modifier_transaction(id_ligne: int, champs: dict) -> None:
 def supprimer_transaction(id_ligne: int) -> None:
     """Supprime une ligne dans `pf2_transactions` par son `id`."""
     try:
-        client().table(T_TRANSACTIONS).delete().eq("id", int(id_ligne)).execute()
+        _restreint_au_proprietaire(
+            client().table(T_TRANSACTIONS).delete().eq("id", int(id_ligne)),
+            T_TRANSACTIONS).execute()
     except Exception as exc:
         raise _traduire_erreur(T_TRANSACTIONS, exc) from exc
 
@@ -889,7 +982,9 @@ def supprimer_transaction(id_ligne: int) -> None:
 def modifier_apport(id_ligne: int, champs: dict) -> None:
     """Met à jour un apport ou retrait existant dans `pf2_apports` par son `id`."""
     try:
-        client().table(T_APPORTS).update(champs).eq("id", int(id_ligne)).execute()
+        _restreint_au_proprietaire(
+            client().table(T_APPORTS).update(champs).eq("id", int(id_ligne)),
+            T_APPORTS).execute()
     except Exception as exc:
         raise _traduire_erreur(T_APPORTS, exc) from exc
 
@@ -897,7 +992,9 @@ def modifier_apport(id_ligne: int, champs: dict) -> None:
 def supprimer_apport(id_ligne: int) -> None:
     """Supprime un apport ou retrait dans `pf2_apports` par son `id`."""
     try:
-        client().table(T_APPORTS).delete().eq("id", int(id_ligne)).execute()
+        _restreint_au_proprietaire(
+            client().table(T_APPORTS).delete().eq("id", int(id_ligne)),
+            T_APPORTS).execute()
     except Exception as exc:
         raise _traduire_erreur(T_APPORTS, exc) from exc
 

@@ -86,10 +86,13 @@ class TestInjectionDuProprietaire:
         monkeypatch.setenv("SUPABASE_USER_ID", UID)
         assert db._avec_proprietaire("Autre", [{"x": 1}]) == [{"x": 1}]
 
-    def test_sans_uid_rien_n_est_invente(self, monkeypatch):
+    def test_sans_uid_l_ecriture_est_refusee_avant_envoi(self, monkeypatch):
+        """Revue robots (2.1.0) : sans propriétaire, rien ne part vers la base. L'ancienne
+        version rendait les lignes telles quelles, et la base refusait ensuite."""
         monkeypatch.delenv("SUPABASE_USER_ID", raising=False)
         monkeypatch.setattr("streamlit.secrets", {})
-        assert db._avec_proprietaire("Config", [{"x": 1}]) == [{"x": 1}]
+        with pytest.raises(PermissionError, match="SUPABASE_USER_ID"):
+            db._avec_proprietaire("Config", [{"x": 1}])
 
     def test_l_uid_peut_venir_des_secrets_streamlit(self, monkeypatch):
         """Même source que les identifiants : variable d'environnement, ou

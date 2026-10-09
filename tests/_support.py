@@ -17,19 +17,31 @@ class _Rep:
     data: list = []
 
 
+class _Chaine:
+    """Chaîne PostgREST inopérante : `eq` et `in_` s'enchaînent, `execute` ne fait rien.
+
+    Enchaînable comme le vrai constructeur : la purge ajoute un filtre propriétaire
+    après le filtre `source` (revue robots, 2.1.0).
+    """
+
+    def eq(self, *args):
+        return self
+
+    def in_(self, *args):
+        return self
+
+    def execute(self):
+        return _Rep()
+
+
 def simuler_supabase(monkeypatch, module) -> None:
     """Remplace `module.db.client()` par une chaîne delete/eq/execute inopérante.
 
     À appeler dans tout test qui appelle `importer_transactions(dry_run=False)`.
     """
-    def table(nom):
-        def delete():
-            def eq(*args):
-                def execute():
-                    return _Rep()
-                return type("E", (), {"execute": staticmethod(execute)})()
-            return type("D", (), {"eq": staticmethod(eq)})()
-        return type("T", (), {"delete": staticmethod(delete)})()
+    class _Table:
+        def delete(self):
+            return _Chaine()
 
-    client = type("C", (), {"table": staticmethod(table)})()
+    client = type("C", (), {"table": staticmethod(lambda nom: _Table())})()
     monkeypatch.setattr(module.db, "client", lambda: client)
