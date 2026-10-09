@@ -430,6 +430,7 @@ def verifier_maj_baremes_fiscaux(
         an_manquant = max(auj.year, cible)
         return {
             "disponible": True,
+        "etat": "nouvelle_version",
             "derniere_annee": derniere_annee,
             "url": URL_ASSISTANT_MAJ_BAREMES,
             "message": (
@@ -443,6 +444,7 @@ def verifier_maj_baremes_fiscaux(
     if "recouper" in source_cible.lower() and auj >= dt.date(cible + 1, 4, 1):
         return {
             "disponible": True,
+        "etat": "nouvelle_version",
             "derniere_annee": derniere_annee,
             "url": URL_ASSISTANT_MAJ_BAREMES,
             "message": (
@@ -459,6 +461,7 @@ def verifier_maj_baremes_fiscaux(
             return cached[1]
     else:
         trouve_remote: dict | None = None
+        sonde_erreur: str | None = None
         try:
             req = urllib.request.Request(
                 "https://www.data.gouv.fr/api/1/datasets/?q=bareme+impot+sur+le+revenu&page_size=3",
@@ -474,6 +477,7 @@ def verifier_maj_baremes_fiscaux(
                         if an_trouve > derniere_annee + 1:
                             trouve_remote = {
                                 "disponible": True,
+        "etat": "nouvelle_version",
                                 "derniere_annee": derniere_annee,
                                 "url": URL_ASSISTANT_MAJ_BAREMES,
                                 "message": (
@@ -484,14 +488,29 @@ def verifier_maj_baremes_fiscaux(
                             break
                     if trouve_remote:
                         break
-        except Exception:
-            pass
-        _CACHE_SONDE_DATAGOUV[derniere_annee] = (now_ts, trouve_remote)
+        except Exception as exc:
+            # 2.1.0 (revue T-08) : une panne n'est PAS un état « à jour ».
+            sonde_erreur = f"{type(exc).__name__} : {exc}"
+        else:
+            _CACHE_SONDE_DATAGOUV[derniere_annee] = (now_ts, trouve_remote)
         if trouve_remote is not None:
             return trouve_remote
+        if sonde_erreur is not None:
+            return {
+                "disponible": False,
+                "etat": "sonde_indisponible",
+                "derniere_annee": derniere_annee,
+                "url": URL_ASSISTANT_MAJ_BAREMES,
+                "message": (
+                    "Vérification impossible : la sonde des barèmes (data.gouv.fr) n'a pas "
+                    f"répondu ({sonde_erreur}). État inconnu — les barèmes intégrés vont "
+                    f"jusqu'aux revenus {derniere_annee}, sans contrôle de publication."
+                ),
+            }
 
     return {
         "disponible": False,
+        "etat": "a_jour",
         "derniere_annee": derniere_annee,
         "url": URL_ASSISTANT_MAJ_BAREMES,
         "message": (

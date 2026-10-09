@@ -176,6 +176,44 @@
         });
     }
 
+    /* VENTE EXCÉDENTAIRE (2.1.0, revue D-06) : validateur PARTAGÉ entre le
+       formulaire de saisie (app.js) et la déclaration 2074 (fiscal.js).
+       Quantité détenue juste avant la vente : tous les achats à la date de la
+       vente ou avant, moins toutes les ventes antérieures ou du même jour —
+       à date égale, les achats passent avant les ventes, même convention que
+       calculerPositions et les écritures triées du fiscal. Renvoie un message
+       d'erreur, ou null si la vente est possible. */
+    /* `opts.idExclu` retire la ligne en cours de modification ;
+       `opts.ignorer(t)` écarte une ligne par identité (le fiscal rejoue le
+       même tableau et les lignes n'y portent pas toujours d'id). */
+    function erreurVenteExcedentaire(transactions, ligne, opts) {
+        opts = opts || {};
+        var estVente = String((ligne && (ligne.sens || ligne.type)) || '').indexOf('vente') >= 0;
+        if (!ligne || !estVente) return null;
+        var qte = U.num(ligne.quantite, 0);
+        if (!(qte > 0)) return null;
+        var dRef = String(ligne.date);
+        var detenue = 0;
+        (transactions || []).forEach(function (t) {
+            if (t === ligne) return;
+            if (t.ticker !== ligne.ticker) return;
+            if (opts.idExclu !== null && opts.idExclu !== undefined
+                && t.id !== null && t.id !== undefined
+                && String(t.id) === String(opts.idExclu)) return;
+            if (opts.ignorer && opts.ignorer(t)) return;
+            var d = String(t.date);
+            if (d > dRef) return;                       // postérieure à la vente jugée
+            var achat = String(t.type || t.sens || '').indexOf('achat') >= 0;
+            // Une vente du même jour (autre que celle jugée) peut la précéder :
+            // elle retire des lots par prudence, comme les ventes antérieures.
+            detenue += achat ? U.num(t.quantite, 0) : -U.num(t.quantite, 0);
+        });
+        if (qte <= detenue + 1e-6) return null;
+        return 'Vente de ' + U.quantite(qte) + ' ' + ligne.ticker + ' le '
+            + U.jourMoisAnneeISO(ligne.date) + ' supérieure à la position détenue ('
+            + U.quantite(Math.max(0, detenue)) + '). Corrigez la quantité ou la saisie.';
+    }
+
     /* Valorise les positions au cours du jour. Les échecs sont listés, pas masqués. */
     function valoriser(positions, jour) {
         jour = jour || U.todayISO();
@@ -262,7 +300,9 @@
     // ------------------------------------------------- lecture des tables
 
     function lireTable(table, query) {
-        return PF.net.supabase.select(table, query).catch(function () { return []; });
+        // 2.1.0 (revue D-05) : lecture paginée — au-delà de 1 000 lignes,
+        // Supabase tronque chaque réponse ; selectTout enchaîne les pages.
+        return PF.net.supabase.selectTout(table, query).catch(function () { return []; });
     }
 
     /* La table `Config` de la v1 est un simple couple Clé / Valeur. */
@@ -366,7 +406,13 @@
             }
             ctx.etatAllocation = M.verifier(ctx.allocationCfg);
 
-            ctx.snapshotsBruts = snRows || [];
+            // COMPLÉTUDE (2.1.0, revues D-01 / F-20) : un snapshot marqué
+            // `complet = false` est une valorisation partielle (cours ou taux
+            // manquant). Il reste visible et alerté, mais n'entre JAMAIS dans
+            // les séries de performance. Les lignes antérieures à la migration
+            // 005 n'ont pas la colonne : elles restent admises (undefined).
+            var snComplets = (snRows || []).filter(function (s) { return s.complet !== false; });
+            ctx.snapshotsBruts = snComplets;
             ctx.apportsBruts = apRows || [];
             ctx.apports = chargerApports(apRows);
             ctx.config = config;
@@ -470,9 +516,9 @@
        l'écran. Une table absente ne doit pas passer pour une table vide. */
     function lireComptes() {
         var etat = { presente: false, erreur: null };
-        return PF.net.supabase.select('pf2_comptes', 'select=*').then(function (rowsC) {
+        return PF.net.supabase.selectTout('pf2_comptes', 'select=*').then(function (rowsC) {
             etat.presente = true;
-            return PF.net.supabase.select('pf2_operations_compte', 'select=*').then(function (rowsO) {
+            return PF.net.supabase.selectTout('pf2_operations_compte', 'select=*').then(function (rowsO) {
                 return { etat: etat, comptes: (rowsC || []).map(versCompte), operations: (rowsO || []).map(versOperation) };
             }, function (e) {
                 etat.erreur = e.message;
@@ -949,6 +995,7 @@
         agreger: agreger,
         chargerTransactions: chargerTransactions,
         calculerPositions: calculerPositions,
+        erreurVenteExcedentaire: erreurVenteExcedentaire,
         valoriser: valoriser,
         agregerParPoche: agregerParPoche,
         charger: charger,

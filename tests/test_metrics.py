@@ -169,14 +169,26 @@ class TestFluxParPeriode:
 
     def test_twr_sur_une_serie_mensuelle_avec_versements(self):
         """Le cas réel, chiffres ronds : 10 000 € + 1 000 € versés le 13/01,
-        portefeuille à 11 550 € fin janvier. La performance est de +5 %,
-        pas de +15,5 %."""
+        portefeuille à 11 550 € fin janvier.
+
+        2.1.0 (revue F-07) : le +5,5 % de la convention « flux en fin de
+        période » dépend du moment du versement dans le mois — il n'est PAS la
+        performance. Sans valorisation au moment du flux, le moteur strict
+        déclare l'intervalle non calculable ; avec la valorisation (marché
+        inchangé avant le versement), le rendement exact est +5 %.
+        """
         dates = [dt.date(2025, 12, 31), dt.date(2026, 1, 31)]
         valeurs = [10000.0, 11550.0]
         flux_jour = {dt.date(2026, 1, 13): 1000.0}
-        flux = metrics.flux_par_periode(dates, flux_jour)
-        rendements = metrics.rendements_periode(valeurs, flux)
-        assert metrics.twr(rendements) == pytest.approx(0.055, abs=1e-9)
+
+        rendements, non_calcules = metrics.rendements_stricts(dates, valeurs, flux_jour)
+        assert rendements == [None]
+        assert len(non_calcules) == 1
+
+        avant = {dt.date(2026, 1, 13): 10000.0}
+        twr, nc = metrics.twr_strict(dates, valeurs, flux_jour, avant)
+        assert nc == []
+        assert twr == pytest.approx(0.05, abs=1e-9)
 
     def test_une_serie_vide(self):
         assert metrics.flux_par_periode([], {dt.date(2026, 1, 1): 100.0}) == []

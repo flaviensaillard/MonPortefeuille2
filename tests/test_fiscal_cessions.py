@@ -66,8 +66,9 @@ class TestPrixCessionEnEuros:
         ligne = cessions[Classe.OBLIGATION_ETF][0]
         assert ligne["prix_cession_eur"] == pytest.approx(10 * 1000.0 * 0.006)
 
-    def test_sans_taux_le_montant_reste_brut(self, monkeypatch):
-        """Pas de taux à cette date : mieux vaut un montant brut qu'une invention."""
+    def test_sans_taux_la_cession_n_est_pas_chiffree(self, monkeypatch):
+        """2.1.0 (revue T-01) : sans taux, le montant brut ne devient JAMAIS des euros.
+        Avant, ce test verrouillait le repli sur le brut ; il est renversé."""
         from core import fx
 
         def taux_absent(devise, date, contre="EUR"):
@@ -76,7 +77,11 @@ class TestPrixCessionEnEuros:
         monkeypatch.setattr("core.fx.taux", taux_absent)
         ventes = [_tx("FLXC.L", "vente", "2025-03-01", 10, 100.0)]
         cessions = tax.cessions_de_lannee(ventes, {}, 2025)
-        assert cessions[Classe.ACTION_ETF][0]["prix_cession_eur"] == pytest.approx(1000.0)
+        ligne = cessions[Classe.ACTION_ETF][0]
+        assert ligne["prix_cession_eur"] is None
+        assert ligne.get("indisponible")
+        with pytest.raises(ValueError):
+            tax.calculer(cessions, 2025)
 
     def test_les_achats_ne_sont_pas_des_cessions(self, monkeypatch):
         monkeypatch.setattr("core.fx.taux", _faux_fx(1.0))

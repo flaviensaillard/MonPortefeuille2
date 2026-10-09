@@ -2,6 +2,12 @@
 #
 # Ces tests ne touchent jamais le réseau ni Supabase. Ils vérifient la logique
 # de calcul, qui est précisément ce que la v1 avait de faux.
+#
+# 2.1.0 : la CI lance TOUTES les suites hors réseau, y compris les tests RLS
+# (PostgreSQL embarqué via pgserver) et les suites JavaScript de sécurité,
+# d'intégrité, de TWR et de fiscalité. Les suites qui interrogent Yahoo ou
+# Supabase en direct sont exclues : elles restent exécutables à la main, mais
+# leur résultat dépend du réseau et ne doit pas bloquer une livraison.
 
 name: Tests
 
@@ -20,14 +26,28 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt pytest
-      - name: Lancer les tests
-        run: python -m pytest tests/ -v
-      # Moteur JavaScript de l'application (comptes, portefeuille, écran) : faux réseau,
-      # aucun appel réel. Même code que celui de la WebView.
-      - name: Vérifier le moteur JavaScript
+      # Python : moteur de calcul, pagination, snapshots, devises, TWR, fiscal,
+      # RLS sur PostgreSQL embarqué (pgserver, dans requirements.txt).
+      - name: Tests Python hors réseau
         run: |
-          node tests/test_js.js
-          node tests/test_comptes.js
+          python -m pytest tests/ -v \
+            --ignore=tests/test_tickers_yahoo.py \
+            --ignore=tests/test_dates_de_bout_en_bout.py \
+            --ignore=tests/test_snapshot_resilient.py \
+            --ignore=tests/test_rls_integration.py
+      # JavaScript : toutes les suites du moteur de l'application (comptes,
+      # portefeuille, écritures atomiques, pagination, TWR, fiscal, sécurité de la
+      # WebView). Faux réseau, aucun appel réel. Même code que celui de la WebView.
+      # test_rendu.js exige un DOM simulé (jsdom) absent du dépôt : exclu.
+      - name: Tests JavaScript hors réseau
+        run: |
+          for f in tests/test_*.js; do
+            case "$f" in
+              tests/test_rendu.js) continue ;;
+            esac
+            echo "== $f"
+            node "$f"
+          done
       # Les règles du service IA (phrase imposée sans passage, citation des
       # sources, indexation sans doublon) se testent en JavaScript, avec un
       # faux Cloudflare : aucun appel réseau réel.

@@ -74,6 +74,14 @@ taux_pv = c3.number_input(
 # corrigé des apports. L'inflation vient de l'INSEE : l'utilisateur choisit la
 # période, jamais le taux.
 perf_hist = S.twr_annualise_portefeuille(ctx)
+non_calcules_twr = list(getattr(ctx, "twr_non_calcules", []) or [])
+if perf_hist is None:
+    st.warning(
+        "**Rendement historique non calculable** : il n'y a pas assez "
+        "d'intervalles valorisés pour un TWR exact. **5 % est une hypothèse, "
+        "pas un rendement constaté.** Utilisez le scénario B pour choisir un "
+        "autre taux."
+    )
 rendement_a = (perf_hist if perf_hist is not None else 0.05) * 100
 inflations = S.inflation_dict(ctx)  # fractions : 2 % = 0.02
 annees_closes = sorted(
@@ -103,7 +111,14 @@ if not ctx.snapshots.empty:
         pass
 cA, cI = st.columns(2)
 cA.metric("Rendement A — calculé, non modifiable", f"{rendement_a:.2f} %/an")
-cA.caption(f"CAGR/TWR annualisé depuis le premier enregistrement ({premiere_date}), corrigé des apports.")
+cA.caption(f"TWR exact annualisé depuis le premier enregistrement ({premiere_date}), corrigé des apports.")
+if non_calcules_twr:
+    cA.caption(
+        f"⚠️ {len(non_calcules_twr)} intervalle(s) avec un apport/retrait non valorisé "
+        "ne sont pas chaînés (revue F-07) : le chiffre porte sur les seuls "
+        "intervalles mesurés exactement. Depuis la 2.1.0, chaque apport "
+        "enregistre la valeur du portefeuille au moment du geste."
+    )
 cI.metric("Inflation A — mesurée, non modifiable", f"{inflation_a:.2f} %/an")
 if annees_closes:
     cI.caption(

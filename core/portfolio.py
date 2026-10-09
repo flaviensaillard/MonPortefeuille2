@@ -210,6 +210,11 @@ def charger_transactions(df: pd.DataFrame) -> list[Transaction]:
                 raise ValueError(f"quantité ou cours non positif ({quantite}, {cours})")
 
             devise = str(row.get("Devise", "") or "").upper().strip()
+            # 2.1.0 (revue D-04) : « NAN », « NONE », « NULL » (y compris le NaN
+            # de pandas, converti en chaîne) sont des devises ABSENTES, pas des
+            # codes valides : elles passent par le même chemin qu'une cellule vide.
+            if devise in ("NAN", "NONE", "NULL"):
+                devise = ""
             if not devise:
                 devise = devise_cotation_de(ticker)
                 if not devise:
@@ -460,10 +465,121 @@ def calculer_positions(
     return positions
 
 
-def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[list[Actif], list[str]]:
+# ---------------------------------------------------------------------------
+# Ventes excédentaires — validateur PARTAGÉ (revue 2.0.1, constat 6)
+# ---------------------------------------------------------------------------
+
+def erreur_vente_excedentaire(
+    transactions: list[Transaction],
+    vente: Transaction,
+    id_exclu: int | None = None,
+) -> str | None:
+    """Renvoie un message d'erreur si `vente` excède la position détenue, sinon None.
+
+    C'est le même validateur pour le formulaire de saisie et pour les
+    déclarations 2074/2086 : une vente supérieure à la quantité détenue ne doit
+    entrer dans AUCUN calcul. La position retenue est celle juste avant la vente :
+    tous les achats à la date de la vente ou avant, moins toutes les ventes
+    antérieures OU du même jour (à date égale, un achat précède une vente, mais
+    deux ventes du même jour se disputent les mêmes lots — on les retire donc par
+    prudence). `id_exclu` permet d'écarter la ligne en cours de modification.
+    """
+    if not vente.est_vente or vente.quantite <= 0:
+        return None
+
+    d_ref = vente.date
+    detenue = 0.0
+    for t in transactions:
+        if t is vente:
+            continue
+        if t.ticker != vente.ticker:
+            continue
+        if id_exclu is not None and t.id is not None and t.id == id_exclu:
+            continue
+        if t.date > d_ref:
+            continue                      # postérieure à la vente jugée
+        detenue += t.quantite if t.est_achat else -t.quantite
+
+    if vente.quantite <= detenue + 1e-6:
+        return None
+    return (
+        f"Vente de {vente.quantite:g} {vente.ticker} le {vente.date:%d/%m/%Y} "
+        f"supérieure à la position détenue ({max(0.0, detenue):g}). "
+        f"Corrigez la quantité ou la saisie."
+    )
+
+
+def erreur_saisie_vente(
+    transactions: list[Transaction],
+    ligne: dict,
+    id_exclu: int | None = None,
+) -> str | None:
+    """Valide une saisie de formulaire AVANT écriture (constat 6, 2.1.0).
+
+    `ligne` a la forme exacte du formulaire (`ticker`, `sens`, `date` ISO, `quantite`,
+    `cours`, `frais`, `devise`, `source`). Un achat n'est jamais refusé ici ; une vente
+    passe par le validateur partagé `erreur_vente_excedentaire`. `id_exclu` désigne la
+    transaction modifiée, à retirer du calcul de la position.
+    """
+    sens = str(ligne.get("sens", "")).lower()
+    quantite = float(ligne.get("quantite") or 0.0)
+    cours = float(ligne.get("cours") or 0.0)
+    frais = float(ligne.get("frais") or 0.0)
+    jour = dt.date.fromisoformat(str(ligne["date"])[:10])
+    typ = "vente" if "vente" in sens else "achat"
+    saisie = Transaction(
+        ticker=str(ligne.get("ticker", "")).upper().strip(),
+        type=typ, date=jour, quantite=quantite, cours=cours, frais=frais,
+        devise=str(ligne.get("devise") or ""),
+        montant_net=quantite * cours + (frais if typ == "achat" else -frais),
+        source=ligne.get("source"),
+    )
+    return erreur_vente_excedentaire(transactions, saisie, id_exclu=id_exclu)
+
+
+def filtrer_ventes_excedentaires(
+    triees: list[Transaction],
+) -> tuple[list[Transaction], list[str]]:
+    """Écarte les ventes excédentaires d'une liste TRIÉE (achats avant ventes à
+    date égale), en consommant les lots dans l'ordre chronologique — exactement
+    l'ordre dans lequel les déclarations 2074/2086 les consomment.
+
+    Renvoie `(retenues, messages)` : les écritures conservées, et un message par
+    vente écartée. Une vente écartée n'est JAMAIS chiffrée ; elle est annoncée.
+    """
+    holdings: dict[str, float] = {}
+    retenues: list[Transaction] = []
+    messages: list[str] = []
+    for t in triees:
+        if t.est_achat:
+            holdings[t.ticker] = holdings.get(t.ticker, 0.0) + t.quantite
+            retenues.append(t)
+        elif t.est_vente:
+            held = holdings.get(t.ticker, 0.0)
+            if t.quantite > held + 1e-6:
+                messages.append(
+                    f"Vente de {t.quantite:g} {t.ticker} le {t.date:%d/%m/%Y} "
+                    f"supérieure à la position détenue ({max(0.0, held):g}). "
+                    f"Écartée du calcul."
+                )
+            else:
+                holdings[t.ticker] = held - t.quantite
+                retenues.append(t)
+        else:
+            retenues.append(t)
+    return retenues, messages
+
+
+def valoriser(positions: dict[str, Position], date: str | None = None,
+              references: dict | None = None) -> tuple[list[Actif], list[str]]:
     """Valorise les positions. Retourne `(actifs, echecs)`.
 
     Les échecs de cours sont renvoyés, pas masqués : l'appelant doit les afficher.
+
+    Valorisation du jour (`date` None) : le cours vient de `prices.cotation_actuelle`
+    (listing natif, substitut, puis référence saisie). Il est valorisé dans SA devise,
+    qui peut différer de celle de la position : XJSE.SW se valorise en EUR via XJSE.DE,
+    et non en yens. Valorisation datée : chemin historique inchangé.
     """
     actifs: list[Actif] = []
     echecs: list[str] = []
@@ -473,12 +589,20 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
             continue
         try:
             jour = date or dt.date.today().isoformat()
-            prix = prices.cours(pos.ticker, date)
-            taux = fx.taux(pos.devise_cotation, jour, "EUR")
+            if date is None:
+                c = prices.cotation_actuelle(pos.ticker, references)
+                prix = c.valeur
+                devise_cours = c.devise or pos.devise_cotation
+                note = c.note
+            else:
+                prix = prices.cours(pos.ticker, date)
+                devise_cours = pos.devise_cotation
+                note = ""
+            taux = fx.taux(devise_cours, jour, "EUR")
             # Pas de repli : sans taux USD, le titre n'est pas valorisé (échec signalé
             # ci-dessous). Un taux EUR utilisé à la place d'un taux USD fabriquerait un
             # chiffre plausible et faux.
-            taux_usd = 1.0 if pos.devise_cotation == "USD" else fx.taux(pos.devise_cotation, jour, "USD")
+            taux_usd = 1.0 if devise_cours == "USD" else fx.taux(devise_cours, jour, "USD")
             valeur_eur = pos.quantite * prix * taux
             valeur_usd = pos.quantite * prix * taux_usd
             pos.prix = prix
@@ -487,11 +611,12 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
             pos.valeur_usd = valeur_usd
             pos.pv_latente_usd = valeur_usd - pos.cout_total_usd
             actifs.append(Actif(
-                ticker=pos.ticker, classe=pos.classe, devise_cotation=pos.devise_cotation,
+                ticker=pos.ticker, classe=pos.classe, devise_cotation=devise_cours,
                 poche=pos.poche, quantite=pos.quantite, prix=prix,
                 valeur_eur=valeur_eur, valeur_usd=valeur_usd,
                 dernier_taux=taux, dernier_taux_usd=taux_usd,
                 variation_pct=prices.variation_recente(pos.ticker) if hasattr(prices, "variation_recente") else None,
+                note_cours=note,
             ))
         except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
             log.warning("Valorisation impossible : %s", exc)

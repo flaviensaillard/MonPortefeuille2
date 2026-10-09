@@ -282,7 +282,7 @@ def test_robot_snapshot_garde_la_devise_repartie(monkeypatch):
     monkeypatch.setattr(daily_snapshot.db, "transactions", lambda: [{"ticker": "IGLN.L"}])
     monkeypatch.setattr(daily_snapshot, "charger_transactions", lambda rows: rows)
     monkeypatch.setattr(daily_snapshot, "calculer_positions", lambda t, a: ["IGLN.L"])
-    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos: (
+    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos, **_kw: (
         [SimpleNamespace(ticker="IGLN.L", poche="rv", valeur_eur=1000.0, valeur_usd=1100.0)], []))
     monkeypatch.setattr(daily_snapshot.prices, "cours_or", lambda: 2650.0)
     monkeypatch.setattr(daily_snapshot.fx, "taux", _taux_faux)
@@ -454,7 +454,7 @@ def test_robot_taux_indisponible_est_signale_pas_avale(monkeypatch):
     monkeypatch.setattr(daily_snapshot.db, "transactions", lambda: [{"ticker": "IGLN.L"}])
     monkeypatch.setattr(daily_snapshot, "charger_transactions", lambda rows: rows)
     monkeypatch.setattr(daily_snapshot, "calculer_positions", lambda t, a: ["IGLN.L"])
-    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos: (
+    monkeypatch.setattr(daily_snapshot, "valoriser", lambda pos, **_kw: (
         [SimpleNamespace(ticker="IGLN.L", poche="rv", valeur_eur=1000.0, valeur_usd=1100.0)], []))
     monkeypatch.setattr(daily_snapshot.prices, "cours_or", lambda: 2650.0)
     monkeypatch.setattr(daily_snapshot.fx, "taux", _taux_cny_absent)

@@ -43,11 +43,24 @@ APP="$ROOT/app/src/main"
 BUILD="$ROOT/build"
 OUT="$ROOT/dist"
 
-VERSION_NAME="${VERSION_NAME:-2.0.1}"
-VERSION_CODE="${VERSION_CODE:-27}"
-KEYSTORE="$ROOT/keystore/portefeuille.jks"
-KEY_PASS="${KEY_PASS:-portefeuille}"
+VERSION_NAME="${VERSION_NAME:-2.1.0}"
+VERSION_CODE="${VERSION_CODE:-28}"
+KEYSTORE="${KEYSTORE:-$ROOT/keystore/portefeuille.jks}"
 KEY_ALIAS="${KEY_ALIAS:-portefeuille}"
+# SÉCURITÉ 2.1.0 (revue S-02) : AUCUN mot de passe par défaut. La valeur
+# « portefeuille » qui était commitée ici est considérée compromise ; le build
+# exige désormais un mot de passe fourni par l'environnement (GitHub Secrets
+# en CI, variable locale pour un build de développement).
+if [ -z "${KEY_PASS:-}" ]; then
+    echo "Erreur : KEY_PASS absent." >&2
+    echo "Aucun mot de passe de signature par défaut n'est fourni (rotation 2.1.0)." >&2
+    echo "  - En CI : configurez les secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD /" >&2
+    echo "    ANDROID_KEY_PASSWORD / ANDROID_KEY_ALIAS (voir docs/SECURITE-LIVRAISON.md)." >&2
+    echo "  - En local : export KEY_PASS=... KEYSTORE=/chemin/vers/keystore.jks" >&2
+    echo "  - Keystore local de DÉVELOPPEMENT seulement (jamais diffusé) :" >&2
+    echo "      GEN_KEYSTORE_LOCAL=1 bash build.sh   (mot de passe aléatoire, non commité)" >&2
+    exit 1
+fi
 
 # Le JDK peut ne pas être dans le PATH : on le cherche.
 if [ -z "${JAVA_HOME:-}" ]; then
@@ -103,12 +116,21 @@ echo "› Alignement"
 "$ZIPALIGN" -p -f 4 "$BUILD/app.withdex.apk" "$BUILD/app.aligned.apk"
 
 if [ ! -f "$KEYSTORE" ]; then
-    echo "› Création du keystore de signature"
+    if [ "${GEN_KEYSTORE_LOCAL:-}" != "1" ]; then
+        echo "Erreur : keystore introuvable : $KEYSTORE" >&2
+        echo "La clé de signature n'est plus générée silencieusement ni mise en cache." >&2
+        echo "  - CI : le keystore est matérialisé depuis le secret ANDROID_KEYSTORE_BASE64." >&2
+        echo "  - Local : GEN_KEYSTORE_LOCAL=1 bash build.sh pour un keystore de" >&2
+        echo "    DÉVELOPPEMENT (mot de passe fourni par KEY_PASS, jamais diffusé)." >&2
+        echo "  Voir docs/SECURITE-LIVRAISON.md." >&2
+        exit 1
+    fi
+    echo "› Création d'un keystore de DÉVELOPPEMENT local (jamais diffusé)"
     mkdir -p "$(dirname "$KEYSTORE")"
     keytool -genkeypair -v -keystore "$KEYSTORE" -alias "$KEY_ALIAS" \
         -keyalg RSA -keysize 2048 -validity 10950 \
         -storepass "$KEY_PASS" -keypass "$KEY_PASS" \
-        -dname "CN=Porte-feuille, OU=Mobile, O=Porte-feuille, L=Aix-les-Bains, C=FR" >/dev/null
+        -dname "CN=Porte-feuille DEV, OU=Mobile, O=Porte-feuille, L=Local, C=FR" >/dev/null
 fi
 
 echo "› Signature (v1 + v2 + v3)"

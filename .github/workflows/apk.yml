@@ -1,8 +1,21 @@
 name: Construire l'APK
 
+# SÉCURITÉ 2.1.0 (revue S-02) :
+# - Le keystore n'est PLUS JAMAIS mis en cache GitHub : un cache est lisible
+#   par toute personne pouvant ouvrir une PR, et le dépôt est public. Le cache
+#   historique `apk-keystore-v1` (créé le 06/10/2026 sur main) a contenu la
+#   clé de signature : il est purgé à chaque exécution et la clé est considérée
+#   compromise (rotation — voir docs/SECURITE-LIVRAISON.md).
+# - La signature vient exclusivement de GitHub Secrets chiffrés :
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD,
+#   ANDROID_KEY_ALIAS. Aucun mot de passe par défaut dans le dépôt.
+# - La release est UNIQUE et IMMUABLE : aucun écrasement possible ; un APK
+#   déjà publié depuis un autre commit fait échouer le build.
+
 on:
   workflow_dispatch:
   push:
+    branches: [main, 'arena/**']
     paths:
       - '.github/workflows/apk.yml'
       - 'app/**'
@@ -11,14 +24,15 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   construire:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '2.0.1'
-      VERSION_CODE: '27'
+      VERSION_NAME: '2.1.0'
+      VERSION_CODE: '28'
     steps:
       - uses: actions/checkout@v4
 
@@ -38,10 +52,50 @@ jobs:
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           yes | sdkmanager --install "platforms;android-35" "build-tools;34.0.0"
 
-      - uses: actions/cache@v4
-        with:
-          path: keystore
-          key: apk-keystore-v1
+      # PAS de bloc actions/cache ici : la clé de signature ne doit jamais
+      # approcher un cache GitHub (lecture possible par tout ouvreurs de PR).
+
+      - name: Purger l'ancien cache de keystore compromis (rotation 2.1.0)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Idempotent : le cache `apk-keystore-v1` a exposé la clé de signature
+          # sur le dépôt public (revue S-02). On le supprime s'il existe encore.
+          if gh cache delete apk-keystore-v1 --repo "$GITHUB_REPOSITORY" 2>/dev/null; then
+            echo "Cache apk-keystore-v1 supprimé."
+          else
+            IDS=$(gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=apk-keystore-v1" \
+                    -q '.actions_caches[].id' 2>/dev/null || true)
+            if [ -z "$IDS" ]; then
+              echo "Cache apk-keystore-v1 déjà absent (purgé)."
+            else
+              for id in $IDS; do
+                gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id"
+              done
+              echo "Cache apk-keystore-v1 supprimé via API."
+            fi
+          fi
+
+      - name: Vérifier les secrets de signature
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -e
+          MANQUANTS=""
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            if [ -z "${!v}" ]; then MANQUANTS="$MANQUANTS $v"; fi
+          done
+          if [ -n "$MANQUANTS" ]; then
+            echo "::error::Secret(s) de signature manquant(s) :$MANQUANTS"
+            echo "Procédure : docs/SECURITE-LIVRAISON.md (rotation du keystore)."
+            echo "Aucun mot de passe par défaut n'est fourni : une clé sans"
+            echo "secret configuré ne doit pas pouvoir être construite."
+            exit 1
+          fi
+          echo "Secrets de signature présents (valeurs jamais affichées)."
 
       # Empreinte : elle prouve QUEL code est parti dans l'APK. À comparer
       # avec « git rev-parse HEAD » du dépôt — et net.js doit contenir les
@@ -50,8 +104,8 @@ jobs:
         run: |
           set -e
           echo "## Empreinte du code embarqué" >> "$GITHUB_STEP_SUMMARY"
-          echo '- commit : `'"$(git rev-parse HEAD)"'`' >> "$GITHUB_STEP_SUMMARY"
-          echo '- net.js : `'"$(md5sum app/src/main/assets/www/js/net.js | cut -d" " -f1)"'`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- commit : `'$(git rev-parse HEAD)'`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- net.js : `'$(md5sum app/src/main/assets/www/js/net.js | cut -d" " -f1)'`' >> "$GITHUB_STEP_SUMMARY"
           N=$(grep -c "seuilEcart\|varJour" app/src/main/assets/www/js/net.js || true)
           echo "- garde-fous présents dans net.js : $N (attendu : 6)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$N" -lt 6 ]; then
@@ -59,27 +113,78 @@ jobs:
             exit 1
           fi
 
+      - name: Matérialiser le keystore depuis le secret
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/portefeuille.jks
+          # Contrôle d'intégrité : le secret doit bien être un keystore lisible
+          # avec le mot de passe fourni. Jamais de valeur affichée.
+          keytool -list -keystore keystore/portefeuille.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
+          echo "Keystore matérialisé et vérifié (empreinte ci-dessous)."
+          keytool -list -keystore keystore/portefeuille.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" | grep -E 'SHA256|Propriétaire|Validité' \
+            | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Construire l'APK
+        env:
+          KEYSTORE: keystore/portefeuille.jks
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: bash build.sh
 
-      - name: Publier l'APK dans une release
+      - name: Effacer le keystore matérialisé
+        if: always()
+        run: rm -rf keystore
+
+      # Release UNIQUE et IMMUABLE : si la release existe déjà avec un APK
+      # identique (même SHA256), on ne fait rien ; si elle existe avec un APK
+      # différent, on ÉCHOUE — l'écrasement d'un asset publié est interdit.
+      - name: Publier l'APK dans une release unique
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           ETIQUETTE="apk-${VERSION_NAME}"
-          cp dist/Porte-feuille.apk "dist/Porte-feuille-${VERSION_NAME}.apk"
-          gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
-                 --target "$GITHUB_SHA" \
-                 --title "APK ${VERSION_NAME}" \
-                 --notes "APK Porte-feuille ${VERSION_NAME} (code ${VERSION_CODE}), construite par GitHub Actions depuis le commit $GITHUB_SHA. Les notes détaillées sont mises à jour à la main sur la release."
-          gh release upload "$ETIQUETTE" "dist/Porte-feuille-${VERSION_NAME}.apk" \
-            --repo "$GITHUB_REPOSITORY" --clobber
+          ASSET="Porte-feuille-${VERSION_NAME}.apk"
+          cp "dist/Porte-feuille.apk" "dist/$ASSET"
+          SHA_NOUVEAU=$(sha256sum "dist/$ASSET" | cut -d' ' -f1)
+
+          if gh release view "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # La release existe : comparer l'asset déjà publié.
+            TMP=$(mktemp -d)
+            if gh release download "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
+                 --pattern "$ASSET" --dir "$TMP" >/dev/null 2>&1; then
+              SHA_PUBLIE=$(sha256sum "$TMP/$ASSET" | cut -d' ' -f1)
+              rm -rf "$TMP"
+              if [ "$SHA_PUBLIE" = "$SHA_NOUVEAU" ]; then
+                echo "Release $ETIQUETTE déjà publiée avec un APK identique (SHA256 $SHA_NOUVEAU). Rien à faire."
+                exit 0
+              fi
+              echo "::error::La release $ETIQUETTE existe déjà avec un APK DIFFÉRENT (publié : $SHA_PUBLIE, construit : $SHA_NOUVEAU)."
+              echo "Une release est unique et immuable : aucun écrasement. Publiez une nouvelle version (2.1.1…) ou supprimez la release manuellement en connaissance de cause."
+              exit 1
+            fi
+            rm -rf "$TMP"
+            echo "Release $ETIQUETTE présente sans asset : téléversement."
+            gh release upload "$ETIQUETTE" "dist/$ASSET" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "APK ${VERSION_NAME}" \
+              --notes-file telechargements/notes-2.1.0.md
+            gh release upload "$ETIQUETTE" "dist/$ASSET" --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "SHA256 de l'APK publié : $SHA_NOUVEAU" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-2.0.1.apk
+          name: Porte-feuille-2.1.0.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 

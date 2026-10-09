@@ -8,6 +8,7 @@ import importlib
 import pandas as pd
 import streamlit as st
 
+from core import foyer
 from core import db, models
 from core import fiscal_bars as fb
 from core import guide_fiscal as guide
@@ -42,28 +43,36 @@ if ctx.erreurs:
 # ---------------------------------------------------------------------------
 # Chargement de la configuration fiscale mémorisée dans Supabase (`Config`)
 # ---------------------------------------------------------------------------
-if "cfg_fiscale" not in st.session_state:
-    st.session_state.cfg_fiscale = db.lire_config_fiscale()
+try:
+    if "cfg_fiscale" not in st.session_state:
+        st.session_state.cfg_fiscale = db.lire_config_fiscale()
+except db.ErreurConfigFiscale as exc:
+    st.error(f"Configuration fiscale illisible : {exc}. Aucun calcul n'est lancé sur des valeurs de repli.")
+    st.stop()
 cfg = st.session_state.cfg_fiscale
 
 
-def _float_cfg(cle: str, defaut: float) -> float:
-    try:
-        return float(str(cfg.get(cle, defaut)).replace(",", ".").replace(" ", ""))
-    except Exception:
-        return defaut
-
-
 def _int_cfg(cle: str, defaut: int) -> int:
-    try:
-        return int(float(str(cfg.get(cle, defaut)).replace(",", ".").replace(" ", "")))
-    except Exception:
-        return defaut
+    """Donnée d'identité du foyer (sans année). Défaut neutre si absente."""
+    v = foyer.as_float(cfg.get(cle))
+    return defaut if v is None else int(v)
 
 
-def _bool_cfg(cle: str, defaut: bool = False) -> bool:
-    val = str(cfg.get(cle, str(defaut))).strip().lower()
-    return val in ("true", "1", "oui", "yes")
+# Données annuelles : TOUJOURS celles de l'année sélectionnée (voir core/foyer.py).
+# Une lacune donne le défaut neutre ; aucune valeur d'une autre année n'est lue.
+def _annuel_float(cle: str, defaut: float = 0.0) -> float:
+    v = foyer.as_float(foyer.valeur_annuelle(cfg, cle, annee))
+    return defaut if v is None else v
+
+
+def _annuel_int(cle: str, defaut: int = 0) -> int:
+    v = foyer.as_float(foyer.valeur_annuelle(cfg, cle, annee))
+    return defaut if v is None else int(v)
+
+
+def _annuel_bool(cle: str, defaut: bool = False) -> bool:
+    brut = foyer.valeur_annuelle(cfg, cle, annee)
+    return defaut if brut is None else foyer.as_bool(brut)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +107,9 @@ st.markdown(
 )
 
 etat_maj_baremes = fb.verifier_maj_baremes_fiscaux(annee)
-if etat_maj_baremes["disponible"]:
+if etat_maj_baremes.get("etat") == "sonde_indisponible":
+    st.warning("⚠️ **Veille des barèmes indisponible.** " + etat_maj_baremes["message"])
+elif etat_maj_baremes["disponible"]:
     st.markdown(
         f"""<a href="{etat_maj_baremes['url']}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
         <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:10px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
@@ -136,10 +147,10 @@ st.caption(
     "sauvegardés automatiquement dès que vous les modifiez."
 )
 
-statut_defaut = cfg.get("f_statut", "Marié(e) / Pacsé(e)")
+statut_defaut = cfg.get("f_statut", "Célibataire / Divorcé(e) / Veuf(ve)")
 options_statut = ["Marié(e) / Pacsé(e)", "Célibataire / Divorcé(e) / Veuf(ve)"]
 idx_statut = 0 if ("Mari" in statut_defaut or "Pacs" in statut_defaut) else 1
-enf_defaut = _int_cfg("f_enf", 2)
+enf_defaut = _int_cfg("f_enf", 0)
 parts_defaut = fb.parts_fiscales_auto(options_statut[idx_statut], enf_defaut)
 
 with st.expander(
@@ -162,9 +173,9 @@ with st.expander(
 
 couple = "Mari" in statut or "Pacs" in statut
 
-s1_def = _float_cfg("f_s1", 32473.0)
-s2_def = _float_cfg("f_s2", 29772.0)
-int_def = _float_cfg("f_int_net", 200.0)
+s1_def = _annuel_float("f_s1", 0.0)
+s2_def = _annuel_float("f_s2", 0.0)
+int_def = _annuel_float("f_int_net", 0.0)
 resume_base = f"1AJ : {s1_def:,.0f} €".replace(",", " ")
 if couple and s2_def > 0:
     resume_base += f" · 1BJ : {s2_def:,.0f} €".replace(",", " ")
@@ -186,28 +197,28 @@ with st.expander(
         ))
         use_frais_1 = st.checkbox(
             "Calculer mes frais réels (kilomètres + repas) — Vous",
-            value=_bool_cfg("f_u1", True),
+            value=_annuel_bool("f_u1", False),
         )
         if use_frais_1:
             k1_c1, k1_c2, k1_c3 = st.columns(3)
             km_1 = float(k1_c1.number_input(
                 "Km annuels parcourus ✍️", min_value=0, max_value=100000,
-                value=_int_cfg("f_k1", 9120), step=500, key="km1",
+                value=_annuel_int("f_k1", 0), step=500, key="km1",
             ))
-            cv_1_init = min(max(_int_cfg("f_cv1", 5), 3), 7)
+            cv_1_init = min(max(_annuel_int("f_cv1", 0), 3), 7)
             cv_1 = int(k1_c2.selectbox(
                 "Puissance fiscale (CV) ✍️", [3, 4, 5, 6, 7],
                 index=[3, 4, 5, 6, 7].index(cv_1_init), key="cv1",
             ))
             repas_1 = int(k1_c3.number_input(
                 "Jours repas hors domicile ✍️", min_value=0, max_value=365,
-                value=_int_cfg("f_r1", 240), step=10, key="rep1",
+                value=_annuel_int("f_r1", 0), step=10, key="rep1",
             ))
             elec_1 = st.checkbox(
-                "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec1", False), key="el1",
+                "Véhicule 100 % électrique (+20 %)", value=_annuel_bool("f_elec1", False), key="el1",
             )
         else:
-            km_1, cv_1, repas_1, elec_1 = float(_int_cfg("f_k1", 0)), _int_cfg("f_cv1", 5), _int_cfg("f_r1", 0), False
+            km_1, cv_1, repas_1, elec_1 = float(_annuel_int("f_k1", 0)), _annuel_int("f_cv1", 0), _annuel_int("f_r1", 0), False
 
     with col_d2:
         if couple:
@@ -218,28 +229,28 @@ with st.expander(
             ))
             use_frais_2 = st.checkbox(
                 "Calculer les frais réels (kilomètres + repas) — Conjoint",
-                value=_bool_cfg("f_u2", True),
+                value=_annuel_bool("f_u2", False),
             )
             if use_frais_2:
                 k2_c1, k2_c2, k2_c3 = st.columns(3)
                 km_2 = float(k2_c1.number_input(
                     "Km annuels parcourus ✍️", min_value=0, max_value=100000,
-                    value=_int_cfg("f_k2", 9120), step=500, key="km2",
+                    value=_annuel_int("f_k2", 0), step=500, key="km2",
                 ))
-                cv_2_init = min(max(_int_cfg("f_cv2", 5), 3), 7)
+                cv_2_init = min(max(_annuel_int("f_cv2", 0), 3), 7)
                 cv_2 = int(k2_c2.selectbox(
                     "Puissance fiscale (CV) ✍️", [3, 4, 5, 6, 7],
                     index=[3, 4, 5, 6, 7].index(cv_2_init), key="cv2",
                 ))
                 repas_2 = int(k2_c3.number_input(
                     "Jours repas hors domicile ✍️", min_value=0, max_value=365,
-                    value=_int_cfg("f_r2", 200), step=10, key="rep2",
+                    value=_annuel_int("f_r2", 0), step=10, key="rep2",
                 ))
                 elec_2 = st.checkbox(
-                    "Véhicule 100 % électrique (+20 %)", value=_bool_cfg("f_elec2", False), key="el2",
+                    "Véhicule 100 % électrique (+20 %)", value=_annuel_bool("f_elec2", False), key="el2",
                 )
             else:
-                km_2, cv_2, repas_2, elec_2 = float(_int_cfg("f_k2", 0)), _int_cfg("f_cv2", 5), _int_cfg("f_r2", 0), False
+                km_2, cv_2, repas_2, elec_2 = float(_annuel_int("f_k2", 0)), _annuel_int("f_cv2", 0), _annuel_int("f_r2", 0), False
         else:
             salaire_2, use_frais_2, km_2, cv_2, repas_2, elec_2 = 0.0, False, 0.0, 5, 0, False
 
@@ -251,7 +262,7 @@ with st.expander(
     with ce1:
         pays_etranger = st.text_input(
             "Pays d'origine des intérêts étrangers (ex. Lituanie pour Revolut) ✍️",
-            value=str(cfg.get("f_pays_etr", "Lituanie")),
+            value=str(cfg.get("f_pays_etr", "")),
         )
         interets_etrangers = float(st.number_input(
             "Intérêts nets encaissés à l'étranger (€) → 2047 Ligne 250 & 2042 Case 2TR ✍️",
@@ -272,36 +283,160 @@ with st.expander(
         if autre_compte.strip():
             choisis.extend(x.strip() for x in autre_compte.split(";") if x.strip())
 
-# Sauvegarde automatique dans `Config` si l'utilisateur a modifié un paramètre
-nouveaux_params = {
-    "f_statut": statut,
-    "f_enf": str(enfants),
-    "f_parts": str(parts),
-    "f_s1": str(salaire_1),
-    "f_s2": str(salaire_2),
-    "f_u1": use_frais_1,
-    "f_k1": str(int(km_1)),
-    "f_cv1": str(cv_1),
-    "f_r1": str(repas_1),
-    "f_elec1": elec_1,
-    "f_u2": use_frais_2,
-    "f_k2": str(int(km_2)),
-    "f_cv2": str(cv_2),
-    "f_r2": str(repas_2),
-    "f_elec2": elec_2,
-    "f_int_net": str(interets_etrangers),
-    "f_pays_etr": pays_etranger,
+# ---------------------------------------------------------------------------
+# Enregistrement EXPLICITE des données de l'année (2.1.0 — T-07)
+# ---------------------------------------------------------------------------
+# Plus d'écriture automatique : une valeur par défaut ne doit jamais devenir une donnée.
+params_foyer = {
+    "f_statut": statut, "f_enf": enfants, "f_parts": parts, "f_pays_etr": pays_etranger,
+    "f_s1": salaire_1, "f_s2": salaire_2, "f_int_net": interets_etrangers,
+    "f_u1": use_frais_1, "f_k1": int(km_1), "f_cv1": cv_1, "f_r1": repas_1, "f_elec1": elec_1,
+    "f_u2": use_frais_2, "f_k2": int(km_2), "f_cv2": cv_2, "f_r2": repas_2, "f_elec2": elec_2,
 }
-if any(str(cfg.get(k)) != str( "true" if v is True else ("false" if v is False else v) ) for k, v in nouveaux_params.items()):
-    for k, v in nouveaux_params.items():
-        cfg[k] = "true" if v is True else ("false" if v is False else str(v))
-    db.sauver_config_fiscale(nouveaux_params)
+st.divider()
+st.subheader(f"💾 Données de l'année {annee}")
+confirmee_saisie = st.checkbox(
+    f"Je confirme que ces montants et options sont ceux de l'année {annee}, et non ceux d'une autre année.",
+    value=foyer.est_confirmee(cfg, annee),
+    key=f"confirme_{annee}",
+)
+if st.button(f"Enregistrer les données de {annee}", key=f"enregistrer_{annee}", type="primary"):
+    try:
+        db.sauver_config_fiscale(foyer.modifs_sauvegarde(params_foyer, annee, confirmee_saisie))
+    except db.ErreurConfigFiscale as exc:
+        st.error(f"Enregistrement refusé : {exc}")
+    else:
+        st.session_state.cfg_fiscale = db.lire_config_fiscale()
+        st.rerun()
+
+# ---------------------------------------------------------------------------
+# Inventaire crypto hors application (formulaire 2086 — T-02)
+# ---------------------------------------------------------------------------
+COLONNES_INVENTAIRE = ["id", "date", "actif", "quantite", "cout_acquisition_eur", "source"]
+with st.expander("🪙 Crypto-actifs détenus hors de l'application (2086, valeur globale)", expanded=False):
+    st.caption(
+        "Une ligne = un solde de référence hors application : la quantité détenue à cette "
+        "date (plateforme, wallet…) et le prix d'acquisition cumulé de cette position. "
+        "Un actif déclaré sans solde à la date d'une vente bloque le calcul : déclarez un "
+        "solde à une date antérieure (quantité 0 si rien n'était détenu)."
+    )
+    try:
+        inv_brut = db.inventaire_crypto()
+    except Exception as exc:
+        st.error(f"Inventaire crypto illisible : {exc}")
+        st.stop()
+    if inv_brut is None or inv_brut.empty:
+        vue_inv = pd.DataFrame(columns=COLONNES_INVENTAIRE)
+    else:
+        vue_inv = inv_brut[COLONNES_INVENTAIRE].copy()
+        vue_inv["date"] = pd.to_datetime(vue_inv["date"]).dt.date
+    edite_inv = st.data_editor(
+        vue_inv,
+        key="editeur_inventaire_crypto",
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "id": st.column_config.NumberColumn("id", disabled=True),
+            "date": st.column_config.DateColumn("Date du solde", required=True),
+            "actif": st.column_config.TextColumn("Actif (ticker)", required=True),
+            "quantite": st.column_config.NumberColumn("Quantité", min_value=0.0, required=True),
+            "cout_acquisition_eur": st.column_config.NumberColumn(
+                "Prix d'acquisition cumulé (€)", min_value=0.0, required=True),
+            "source": st.column_config.TextColumn("Plateforme / wallet"),
+        },
+    )
+    if st.button("Enregistrer l'inventaire crypto", key="enregistrer_inventaire"):
+        apres: list[dict] = []
+        for _, r in edite_inv.iterrows():
+            if pd.isna(r["date"]) or not str(r["actif"] or "").strip():
+                continue
+            cout = r["cout_acquisition_eur"]
+            ligne = {
+                "date": pd.Timestamp(r["date"]).date().isoformat(),
+                "actif": str(r["actif"]).strip(),
+                "quantite": float(r["quantite"]),
+                "cout_acquisition_eur": None if pd.isna(cout) else float(cout),
+                "source": "" if pd.isna(r["source"]) else str(r["source"]).strip(),
+            }
+            if not pd.isna(r["id"]):
+                ligne["id"] = int(r["id"])
+            apres.append(ligne)
+        avant = [{"id": int(i)} for i in vue_inv["id"].dropna()]
+        a_ecrire, a_supprimer = foyer.diff_inventaire(avant, apres)
+        try:
+            db.enregistrer_inventaire_crypto(a_ecrire, a_supprimer)
+        except Exception as exc:
+            st.error(f"Inventaire refusé : {exc}")
+        else:
+            st.rerun()
+
+
+def _lignes_inventaire(df) -> list[dict]:
+    """Inventaire tel qu'attendu par le moteur fiscal : un manquant reste manquant."""
+    if df is None or df.empty:
+        return []
+    lignes = []
+    for r in df.to_dict("records"):
+        cout = r.get("cout_acquisition_eur")
+        source = r.get("source")
+        lignes.append({
+            "actif": r.get("actif"),
+            "date": r.get("date"),
+            "quantite": r.get("quantite"),
+            "cout_acquisition_eur": None if pd.isna(cout) else cout,
+            "source": "" if pd.isna(source) else source,
+        })
+    return lignes
+
+
+# ---------------------------------------------------------------------------
+# Le formulaire et la simulation ne s'affichent qu'avec des données ENREGISTRÉES,
+# CONFIRMÉES pour l'année choisie. Rien n'est repris d'une autre année.
+# ---------------------------------------------------------------------------
+lacunes_annee = foyer.lacunes(cfg, annee)
+if lacunes_annee:
+    st.warning(
+        f"**Aucune donnée complète enregistrée pour {annee}** (manquantes : "
+        f"{', '.join(lacunes_annee)}). Les valeurs d'une autre année ne sont PAS reprises."
+    )
+    reprise = foyer.reprise_sans_millesime(cfg, annee)
+    if reprise and st.button(f"Reprendre les anciennes valeurs sans année, pour {annee}", key=f"reprise_{annee}"):
+        db.sauver_config_fiscale(reprise)
+        st.session_state.cfg_fiscale = db.lire_config_fiscale()
+        st.rerun()
+    st.info(
+        "Saisissez les données de cette année, enregistrez-les et confirmez-les. "
+        "Les anciennes valeurs sans année ne servent qu'en cas de reprise explicite ci-dessus."
+    )
+    st.stop()
+if not foyer.est_confirmee(cfg, annee):
+    st.info(f"Confirmez les données de {annee} (case ci-dessus) pour afficher les formulaires et la simulation.")
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Calculs complets : 2074 (Actions/ETF), 2086 (Crypto), 2042 & Simulation Foyer
 # ---------------------------------------------------------------------------
 d2074 = tax.detail_2074_de_lannee(ctx.transactions, annee)
-d2086 = tax.detail_2086_de_lannee(ctx.transactions, annee)
+d2086 = tax.detail_2086_de_lannee(ctx.transactions, annee, inventaire=_lignes_inventaire(inv_brut))
+
+# 2.1.0 (revue, constat 6) : les ventes supérieures à la position détenue sont
+# écartées des formulaires et annoncées — jamais chiffrées en silence.
+_excedents = list(d2074.get("ventes_excedentaires", [])) + list(d2086.get("ventes_excedentaires", []))
+if _excedents:
+    st.warning(
+        "**Vente(s) supérieure(s) à la position détenue — écartée(s) du calcul fiscal.** "
+        "Aucun chiffre n'a été calculé dessus.\n\n" + "\n\n".join(f"- {m}" for m in _excedents)
+    )
+
+if not (d2074["calcul_complet"] and d2086["calcul_complet"]):
+    for message in d2074["indisponible"] + d2086["indisponible"]:
+        st.error(message)
+    st.error(
+        "**Calcul fiscal incomplet : aucun formulaire n'est proposé et la simulation "
+        "n'est pas affichée.** Complétez les données signalées, puis relancez."
+    )
+    st.stop()
+
 sim = tax.simuler_foyer_complet(
     annee=annee,
     statut=statut,

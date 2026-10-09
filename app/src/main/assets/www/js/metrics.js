@@ -62,6 +62,85 @@
 
     function twrDepuis(valeurs, flux) { return twr(rendementsPeriode(valeurs, flux)); }
 
+    /* TWR EXACT (2.1.0, revue F-07) : chaque flux est encadré par une
+       valorisation juste AVANT lui (enregistrée avec l'apport depuis la 2.1.0).
+
+       - un intervalle SANS flux est exact : V_i / V_{i-1}, quelle que soit sa
+         longueur ;
+       - un intervalle dont chaque flux est valorisé est chaîné exactement : le
+         flux coupe l'intervalle en deux (marché jusqu'à la valorisation, flux
+         comptable, puis marché jusqu'au snapshot suivant) ;
+       - un intervalle dont un flux n'est PAS valorisé rend `null` et figure
+         dans `nonCalcules` : jamais remplacé par la convention « flux en fin
+         de période », qui affichait +20 % là où le rendement réel était +10 %.
+
+       Retourne `{ rendements: [r ou null, ...], nonCalcules: [{de, a, flux}] }`.
+       Miroir de core/metrics.py:rendements_stricts. */
+    function rendementsStricts(dates, valeurs, fluxJour, valorisationsAvant) {
+        var n = (dates || []).length;
+        if (n < 2) return { rendements: [], nonCalcules: [] };
+        if ((valeurs || []).length !== n) throw new Error('dates et valeurs doivent avoir la même longueur');
+        valorisationsAvant = valorisationsAvant || {};
+
+        var entrees = [];
+        for (var d in (fluxJour || {})) {
+            if (fluxJour.hasOwnProperty(d)) {
+                var m = U.num(fluxJour[d], 0);
+                if (m !== 0) entrees.push([d, m]);
+            }
+        }
+        entrees.sort(function (a, b) { return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0); });
+
+        var rendements = [], nonCalcules = [];
+        var k = 0;
+        for (var i = 1; i < n; i++) {
+            var deb = dates[i - 1], fin = dates[i];
+            // Flux de l'intervalle (deb, fin] : mêmes bornes que fluxParPeriode.
+            while (k < entrees.length && !(entrees[k][0] > deb)) k++;
+            var j = k, fluxIntervalle = [];
+            while (j < entrees.length && !(entrees[j][0] > fin)) { fluxIntervalle.push(entrees[j]); j++; }
+            k = j;
+
+            if (!fluxIntervalle.length) {
+                var vPrec = valeurs[i - 1];
+                rendements.push(vPrec > 0 ? (valeurs[i] / vPrec - 1) : 0);
+                continue;
+            }
+
+            var totalFlux = 0, f;
+            for (f = 0; f < fluxIntervalle.length; f++) totalFlux += fluxIntervalle[f][1];
+
+            var prod = 1, prev = valeurs[i - 1], possible = prev > 0;
+            for (f = 0; f < fluxIntervalle.length && possible; f++) {
+                var avant = valorisationsAvant[fluxIntervalle[f][0]];
+                avant = U.num(avant, null);
+                if (avant === null || !(avant > 0)) { possible = false; break; }
+                prod *= avant / prev;
+                prev = avant + fluxIntervalle[f][1];     // valeur juste après le flux
+                if (prev <= 0) possible = false;
+            }
+            if (possible && prev > 0) {
+                prod *= valeurs[i] / prev;
+                rendements.push(prod - 1);
+            } else {
+                rendements.push(null);
+                nonCalcules.push({ de: deb, a: fin, flux: totalFlux });
+            }
+        }
+        return { rendements: rendements, nonCalcules: nonCalcules };
+    }
+
+    /* TWR chaîné sur les seuls intervalles calculables. Retourne
+       `{ twr, nonCalcules }`. Miroir de core/metrics.py:twr_strict. */
+    function twrStricts(dates, valeurs, fluxJour, valorisationsAvant) {
+        var r = rendementsStricts(dates, valeurs, fluxJour, valorisationsAvant);
+        var p = 1;
+        for (var i = 0; i < r.rendements.length; i++) {
+            if (r.rendements[i] !== null) p *= (1 + r.rendements[i]);
+        }
+        return { twr: p - 1, nonCalcules: r.nonCalcules };
+    }
+
     function annualiser(twrTotal, jours) {
         if (jours <= 0) return 0;
         var annees = jours / 365.25;
@@ -208,7 +287,7 @@
 
     function seriePerformance(snapshots, apports, fluxTitresFinal) {
         var snaps = (snapshots || []).slice();
-        if (!snaps.length) return { dates: [], valeurs: [], flux: [], useUsd: false, lignes: [] };
+        if (!snaps.length) return { dates: [], valeurs: [], flux: [], fluxJour: {}, valorisations: {}, useUsd: false, lignes: [] };
 
         var nbUsd = snaps.filter(function (s) { return U.num(s.patrimoine_investi_usd, 0) > 0; }).length;
         var useUsd = nbUsd >= 2;
@@ -228,6 +307,7 @@
                 dates: lignes.map(function (l) { return l.date; }),
                 valeurs: lignes.map(function (l) { return l.valeur; }),
                 flux: lignes.map(function () { return 0; }),
+                fluxJour: {}, valorisations: {},
                 useUsd: useUsd, lignes: lignes
             };
         }
@@ -247,6 +327,25 @@
             fluxJour[d] = (fluxJour[d] || 0) + sFlux;
         });
         var fluxAp = fluxParPeriode(dates, fluxJour, 0);
+
+        /* 2.1.0 (revue F-07) : la valeur du portefeuille JUSTE AVANT chaque
+           apport, capturée au moment du geste (colonne valeur_avant_*). Sert au
+           TWR exact ; un jour à plusieurs apports est exclu (attribution
+           ambiguë). Les apports antérieurs à la 2.1.0 n'en ont pas : leur
+           intervalle sera déclaré non calculé, jamais estimé. */
+        var colValo = useUsd ? 'valeur_avant_usd' : 'valeur_avant_eur';
+        var valorisations = {}, compteJour = {};
+        (apports || []).forEach(function (a) {
+            var d = U.parseDate(a.date || a.Date);
+            if (!d) return;
+            var v = U.num(a[colValo], null);
+            if (v === null) return;
+            compteJour[d] = (compteJour[d] || 0) + 1;
+            if (!(d in valorisations)) valorisations[d] = v;
+        });
+        for (var dj in compteJour) {
+            if (compteJour.hasOwnProperty(dj) && compteJour[dj] > 1) delete valorisations[dj];
+        }
 
         var flux;
         if (useUsd && lignes[0].ligne.capital_investi_usd !== undefined) {
@@ -273,6 +372,7 @@
 
         return {
             dates: dates, valeurs: valeurs, flux: flux,
+            fluxJour: fluxJour, valorisations: valorisations,
             fluxTitresFinal: U.num(fluxTitresFinal, 0),
             useUsd: useUsd, lignes: lignes, colVal: colVal
         };
@@ -385,7 +485,20 @@
             res.delta_val_usd = delta;
             res.apports_periode_usd = apportsPeriode;
             res.gain_marche_usd = gain;
-            res.twr_per = twrDepuis(valCalc, fluxCalc);
+            /* 2.1.0 (revue F-07) : TWR EXACT sur la période — chaque flux doit
+               être valorisé juste avant lui ; sinon l'intervalle n'est pas
+               chaîné et l'écart est annoncé, jamais estimé en fin de période. */
+            var datesCalc = dates.slice(i0, i1 + 1);
+            var fluxJourPer = {};
+            var fj = serie.fluxJour || {};
+            for (var df in fj) {
+                if (fj.hasOwnProperty(df) && df > datesCalc[0] && df <= datesCalc[datesCalc.length - 1]) {
+                    fluxJourPer[df] = fj[df];
+                }
+            }
+            var strictPer = twrStricts(datesCalc, valCalc, fluxJourPer, serie.valorisations || {});
+            res.twr_per = strictPer.twr;
+            res.twr_non_calcules = strictPer.nonCalcules;
             res.pct_brut = vDebut > 0 ? delta / vDebut : 0;
             res.d0 = dates[i0];
             res.d1 = dates[i1];
@@ -431,14 +544,24 @@
     /* Le CAGR du portefeuille, corrigé des apports : c'est la seule mesure de
        rendement qui ne prend pas vos versements pour de la performance. Sert à
        préremplir le scénario « historique » de la projection retraite. */
+    /* CAGR exact (2.1.0, revue F-07) : chaînage des seuls intervalles dont
+       chaque flux est valorisé, annualisé sur la durée effectivement mesurée.
+       Un intervalle dont l'apport n'a pas sa valorisation « avant » n'entre
+       pas dans le chaînage : il est écarté, jamais estimé en fin de période. */
     function twrAnnualise(serie) {
         if (!serie || !serie.dates || serie.dates.length < 2) return null;
-        var rends = rendementsPeriode(serie.valeurs, serie.flux);
-        if (!rends.length) return null;
-        var total = twr(rends);
-        var jours = U.diffJours(serie.dates[0], serie.dates[serie.dates.length - 1]);
-        if (jours <= 30) return null;
-        var a = annualiser(total, jours);
+        var strict = rendementsStricts(serie.dates, serie.valeurs,
+            serie.fluxJour || {}, serie.valorisations || {});
+        var p = 1, jours = 0, aucun = true;
+        for (var i = 0; i < strict.rendements.length; i++) {
+            var r = strict.rendements[i];
+            if (r === null) continue;
+            p *= (1 + r);
+            jours += U.diffJours(serie.dates[i], serie.dates[i + 1]);
+            aucun = false;
+        }
+        if (aucun || jours <= 30) return null;
+        var a = annualiser(p - 1, jours);
         if (a === null || !isFinite(a)) return null;
         if (a > 1 || a < -0.9) return null;   // historique trop court pour être annualisé
         return a;
@@ -523,6 +646,8 @@
 
     PF.metrics = {
         rendementsPeriode: rendementsPeriode,
+        rendementsStricts: rendementsStricts,
+        twrStricts: twrStricts,
         fluxParPeriode: fluxParPeriode,
         fluxPerimetre: fluxPerimetre,
         sensFlux: sensFlux, montantSigne: montantSigne,

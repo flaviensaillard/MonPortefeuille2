@@ -8,6 +8,8 @@ une seule commande.
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 
 from _support import simuler_supabase
@@ -247,13 +249,21 @@ def test_import_apports_avec_doublon_n_insere_qu_une_ligne(monkeypatch):
 
     monkeypatch.setattr(imp.db, "ecrire",
                         lambda t, l: (ecritures.append((t, l)), len(l))[1])
+    class Chaine:
+        """Chaîne PostgREST inopérante : `eq` s'enchaîne (filtre propriétaire, 2.1.0)."""
+
+        def eq(self, *a):
+            return self
+
+        def execute(self):
+            return Rep()
+
     monkeypatch.setattr(
         imp.db, "client",
         lambda: type("C", (), {"table": staticmethod(
             lambda n: type("T", (), {
                 "delete": staticmethod(lambda: type("D", (), {
-                    "eq": staticmethod(lambda *a: type("E", (), {
-                        "execute": staticmethod(lambda: Rep())})()),
+                    "eq": staticmethod(lambda *a: Chaine()),
                 })()),
             })())})(),
     )
@@ -295,16 +305,21 @@ def test_reimport_purge_avant_decrire(monkeypatch):
     class Rep:
         data = []
 
+    class Filtre:
+        """Chaînage PostgREST : un `eq` peut en suivre un autre (filtre propriétaire)."""
+
+        def eq(self, colonne, valeur):
+            filtres.append((colonne, valeur))
+            return self
+
+        def execute(self):
+            return Rep()
+
     class FauxDelete:
         def eq(self, colonne, valeur):
             filtres.append((colonne, valeur))
             journal.append("purger")
-
-            class E:
-                def execute(self):
-                    return Rep()
-
-            return E()
+            return Filtre()
 
     class FauxTable:
         def delete(self):
@@ -334,7 +349,10 @@ def test_reimport_purge_avant_decrire(monkeypatch):
     assert journal.index("purger") < journal.index("ecrire"), journal
     # Seules les lignes écrites par l'import sont purgées : une transaction
     # saisie à la main dans l'application doit survivre.
-    assert filtres == [("source", "import_v1")], filtres
+    # Purge restreinte aux lignes de l'import ET à leur propriétaire (revue robots, 2.1.0).
+    # Une suppression sans filtre propriétaire est précisément le défaut corrigé.
+    assert filtres == [("source", "import_v1"), ("user_id", os.environ["SUPABASE_USER_ID"])], \
+        filtres
 
 
 def test_la_purge_n_est_pas_faite_en_dry_run(monkeypatch):

@@ -6,12 +6,20 @@
 #   22h05 UTC — inflation annuelle
 #   22h35 UTC — alertes fiscales
 #
-# Les secrets SUPABASE_URL et SUPABASE_KEY doivent être définis dans
-# Settings > Secrets and variables > Actions du repo.
+# Secrets à définir dans Settings > Secrets and variables > Actions du repo :
+#   SUPABASE_URL      URL du projet Supabase.
+#   SUPABASE_KEY      clé SERVICE_ROLE du projet (Project Settings > API). C'est un
+#                     secret de serveur : elle contourne la RLS. Ne la mettez jamais
+#                     dans l'application Android ni dans le dépôt.
+#   SUPABASE_USER_ID  uid de VOTRE compte Supabase (Authentication > Users > colonne
+#                     User UID). Sans lui, la base refuse chaque ligne écrite (ligne
+#                     sans propriétaire) : c'est voulu. Voir migrations 004 et 008.
+#
+# Rotation des clés et procédure de révocation : docs/SECURITE-LIVRAISON.md.
 #
 # ATTENTION SÉCURITÉ : la v1 commitait ses credentials Supabase en dur dans
-# take_snapshot.py et calc_perf.py, sur un repo public. Révoquez l'ancienne clé
-# publishable et utilisez exclusivement les secrets GitHub.
+# take_snapshot.py et calc_perf.py, sur un repo public. Révoquez ces anciennes
+# clés et n'utilisez que les secrets GitHub ci-dessus.
 
 name: Robots quotidiens
 
@@ -33,6 +41,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
         run: python jobs/update_market_data.py
 
   snapshot:
@@ -48,6 +57,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
         run: python jobs/daily_snapshot.py
 
   inflation:
@@ -62,6 +72,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
         run: python jobs/update_inflation.py
 
   alertes:
@@ -77,4 +88,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
         run: python jobs/fiscal_alerts.py

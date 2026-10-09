@@ -617,7 +617,8 @@
 
     function bilanCessions(ctx, annee) {
         var txs = ecrituresTriees(ctx, annee);
-        if (!txs.length) return Promise.resolve({ t2074: vide2074(annee), t2086: vide2086(annee), indisponible: [] });
+        if (!txs.length) return Promise.resolve({ t2074: vide2074(annee), t2086: vide2086(annee),
+            indisponible: [], ventes_excedentaires: [] });
 
         var besoin = {};
         txs.forEach(function (t) {
@@ -631,14 +632,29 @@
         })).then(function (paires) {
             var taux = {};
             paires.forEach(function (p) { taux[p[0]] = PF.util.tauxValide(p[1]); });
-            var t2074 = detail2074(txs, annee, taux);
-            return besoinsPrixCrypto(txs, annee).then(function (prix) {
-                var t2086 = detail2086(txs, annee, taux, prix);
+
+            /* 2.1.0 (revue D-06) : une vente supérieure à la position détenue est
+               rejetée de la déclaration, comme du formulaire. Chaque vente est jugée
+               contre les écritures retenues avant elle (ordre de lecture) : une vente
+               excédentaire fabriquerait un PRU faux au 2074 et une cession fictive au
+               2086. Elle est écartée ET annoncée, jamais calculée en silence. */
+            var ventesExcedentaires = [];
+            var retenues = [];
+            txs.forEach(function (t) {
+                var exces = PF.portefeuille.erreurVenteExcedentaire(retenues, t, {});
+                if (exces) { ventesExcedentaires.push(exces); return; }
+                retenues.push(t);
+            });
+
+            var t2074 = detail2074(retenues, annee, taux);
+            return besoinsPrixCrypto(retenues, annee).then(function (prix) {
+                var t2086 = detail2086(retenues, annee, taux, prix);
                 // Le bilan entier attend le cours : un 2074 juste et un 2086 faux
                 // ne se présentent pas ensemble comme une déclaration complète.
                 var indisponible = ajouterManquants(
                     ajouterManquants([], t2074.indisponible || []), t2086.indisponible || []);
-                return { t2074: t2074, t2086: t2086, indisponible: indisponible };
+                return { t2074: t2074, t2086: t2086, indisponible: indisponible,
+                    ventes_excedentaires: ventesExcedentaires };
             });
         });
     }
@@ -877,7 +893,17 @@
                 bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
             });
             var f = document.getElementById('fiscFormulaires');
-            if (f) { f.innerHTML = formulaires(annee, sim, b.t2074, b.t2086, r); UI.lierAccordeons(f); }
+            if (f) {
+                var banniere = '';
+                if (b.ventes_excedentaires && b.ventes_excedentaires.length) {
+                    banniere = '<div class="erreur" style="margin:0 0 10px">'
+                        + 'Vente(s) supérieure(s) à la position détenue : écartée(s) de la déclaration, '
+                        + 'aucun chiffre n’a été calculé dessus.<br>– '
+                        + b.ventes_excedentaires.map(UI.h).join('<br>– ') + '</div>';
+                }
+                f.innerHTML = banniere + formulaires(annee, sim, b.t2074, b.t2086, r);
+                UI.lierAccordeons(f);
+            }
             var g = document.getElementById('fiscBilan');
             if (g) { g.innerHTML = bilanImpot(annee, sim, b.t2074, b.t2086); UI.lierAccordeons(g); }
         }).catch(function (err) {

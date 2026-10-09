@@ -83,7 +83,7 @@ def test_snapshot_ancien_direct_date_du_jour_et_apport_neutralise(contexte):
 def test_apport_du_jour_pas_compte_deux_fois(contexte):
     contexte.apports = pd.DataFrame([{"date": "2026-10-07", "sens": "apport", "montant_eur": 100, "montant_usd": 112.5}])
     S._enrichir_historiques_usd(contexte)
-    _, _, flux = S.serie_performance(contexte)
+    _, _, flux, _valo = S.serie_performance(contexte)
     assert flux == [0, 112.5, 0]
 
 

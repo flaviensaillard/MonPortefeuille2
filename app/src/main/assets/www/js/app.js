@@ -67,7 +67,70 @@
         }
 
         if (!PF.store.estConfigure()) { feuilleConnexion(true); return; }
+        // 2.1.0 (revue S-01) : la clé publique ne suffit plus, chaque appareil
+        // s'authentifie avec un compte Supabase. Sans session, l'écran de
+        // connexion est proposé avant tout chargement.
+        if (!PF.net.auth.aUneSession()) { feuilleCompte(true); return; }
         rafraichir(false);
+    }
+
+    /* Écran de compte (2.1.0) : connexion ou création du compte Supabase qui
+       possède les données. Les politiques RLS exigent cet utilisateur : sans
+       lui, ni lecture ni écriture. */
+    function feuilleCompte(premiereFois) {
+        var corps = ''
+            + UI.champ({ id: 'ctEmail', label: 'Adresse e-mail', valeur: '', placeholder: 'vous@exemple.fr' })
+            + UI.champ({ id: 'ctMdp', label: 'Mot de passe', valeur: '', placeholder: '8 caractères minimum', type: 'password' })
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin:-6px 0 12px;line-height:1.5">'
+            + 'Ce compte Supabase est le propriétaire de vos lignes : c’est la fin des '
+            + 'données lisibles par n’importe qui (revue S-01). Le mot de passe n’est '
+            + 'jamais stocké, seuls les jetons de session restent sur l’appareil.</div>'
+            + '<button class="btn ghost" id="ctOubli" style="margin-bottom:8px">Mot de passe oublié ?</button>';
+
+        var f = UI.feuille({
+            titre: premiereFois ? 'Votre compte' : 'Connexion à votre compte',
+            aide: premiereFois ? 'Créez votre compte avec l’e-mail de votre choix : il devient '
+                + 'le propriétaire exclusif de vos données (RLS par utilisateur).' : '',
+            corps: corps,
+            boutons: [
+                { texte: 'Plus tard', sorte: 'ghost' },
+                { texte: 'Créer mon compte', sorte: 'ghost', garder: true, action: function () { return agir('creer'); } },
+                { texte: 'Se connecter', sorte: '', garder: true, action: function () { return agir('connecter'); } }
+            ]
+        });
+
+        function agir(mode) {
+            var email = String(UI.lire('ctEmail') || '').trim();
+            var mdp = String(UI.lire('ctMdp') || '');
+            if (!email || !mdp) { UI.toast('E-mail et mot de passe sont requis'); return false; }
+            if (mdp.length < 8) { UI.toast('Mot de passe : 8 caractères minimum'); return false; }
+            var appel = mode === 'creer'
+                ? PF.net.auth.inscription(email, mdp)
+                : PF.net.auth.connexion(email, mdp);
+            return appel.then(function (res) {
+                if (res && res.confirmation) {
+                    UI.toast('Un e-mail de confirmation vous a été envoyé : validez-le puis connectez-vous.');
+                    return false;
+                }
+                var voile = document.querySelector('#voile');
+                if (voile) voile.click();          // ferme la feuille
+                UI.toast('Connecté : ' + (res.email || email));
+                etat.demo = false;
+                rafraichir(true);
+                return true;
+            }).catch(function (e) {
+                UI.toast(String((e && e.message) || 'Connexion impossible').slice(0, 90));
+                return false;
+            });
+        }
+
+        var c = f.corps;
+        if (c) {
+            var bo = c.querySelector('#ctOubli');
+            if (bo) bo.addEventListener('click', function () {
+                UI.toast('Réinitialisez depuis Supabase : Authentication > Users > Reset password.');
+            });
+        }
     }
 
     /* Une tuile qui affiche un pourcentage montre, sur un simple appui, le
@@ -820,8 +883,10 @@
 
     /* Contrôle du cloisonnement avant toute écriture : un achat exige un disponible
        de la devise du titre et un solde suffisant ; une vente exige un disponible de
-       la devise du titre. Renvoie le premier refus, ou null. */
-    function controleTitre(ligne, compte, liee) {
+       la devise du titre. Une vente supérieure à la position détenue est refusée ici,
+       au formulaire, par le validateur partagé (revue D-06). Renvoie le premier
+       refus, ou null. */
+    function controleTitre(ligne, compte, liee, idExclu) {
         var montant = PF.comptes.montantTitre(ligne.sens, ligne.quantite, ligne.cours, ligne.frais);
         var erreurs = ligne.sens === 'achat'
             ? PF.comptes.verifierAchat({
@@ -829,29 +894,37 @@
                 operations: toutesLesOperations(), idsExclus: liee ? [liee.id] : []
             })
             : PF.comptes.verifierVente({ compte: compte, devise: ligne.devise });
+        if (!erreurs.length && ligne.sens === 'vente') {
+            var exces = PF.portefeuille.erreurVenteExcedentaire(
+                (etat.ctx && etat.ctx.transactions) || [], ligne, { idExclu: idExclu || null });
+            if (exces) erreurs.push(exces);
+        }
         return erreurs.length ? erreurs[0] : null;
     }
 
-    /* Une transaction de titres ET son mouvement de compte, ou aucun des deux. Si le
-       mouvement échoue, la transaction créée est retirée : pas de titres achetés sans
-       argent débité. */
+    /* Une transaction de titres ET son mouvement de compte, ou aucun des deux.
+       2.1.0 (revue D-03) : les deux lignes sont écrites par la RPC serveur
+       pf2_enregistrer_transaction, en UNE transaction SQL. Avant, c'étaient deux
+       requêtes séparées avec une compensation qui pouvait elle-même échouer —
+       des titres achetés sans argent débité. La clé d'idempotence rend les
+       rejeux inoffensifs. */
     function creerTitreAvecCompte(ligne, compte) {
         var montant = PF.comptes.montantTitre(ligne.sens, ligne.quantite, ligne.cours, ligne.frais);
-        return PF.net.supabase.insert('pf2_transactions', [ligne]).then(function (rows) {
-            var txId = rows && rows[0] ? rows[0].id : null;
-            if (txId === null || txId === undefined) {
+        var op = PF.comptes.operationTitre({
+            compte: compte, sens: ligne.sens, montant: montant, date: ligne.date,
+            transactionId: null, note: null
+        });
+        var typeOp = PF.comptes.versLigneOperation(op).type;
+        return PF.net.ecrireTransaction({
+            ligne: ligne,
+            compteId: compte ? compte.id : null,
+            montantOperation: compte ? montant : null,
+            typeOperation: compte ? typeOp : null,
+            idempotence: PF.comptes.genererId()
+        }).then(function (r) {
+            if (!r || !r.transaction_id) {
                 throw new Error('identifiant de la transaction non reçu : aucun compte débité');
             }
-            var op = PF.comptes.operationTitre({
-                compte: compte, sens: ligne.sens, montant: montant, date: ligne.date,
-                transactionId: txId, note: null
-            });
-            return PF.net.supabase.insert('pf2_operations_compte', [PF.comptes.versLigneOperation(op)])
-                .catch(function (e) {
-                    return PF.net.supabase.supprimer('pf2_transactions', 'id=eq.' + txId).then(function () {
-                        throw new Error('compte non débité, opération annulée (' + e.message + ')');
-                    });
-                });
         });
     }
 
@@ -865,6 +938,10 @@
         var devise = String(v.txDevise || '').toUpperCase();
 
         if (!ticker || !date || !(quantite > 0) || !(cours > 0)) { UI.toast('Titre, date, quantité et cours sont requis'); return; }
+        // 2.1.0 (revue D-04) : la devise est un code ISO 4217 actif. « NAN » ou
+        // une devise vide ne doivent plus jamais être valorisés au taux 1.
+        var refusDevise = PF.comptes.erreurDevise(devise);
+        if (refusDevise) { UI.toast(refusDevise); return; }
 
         var ligne = {
             ticker: ticker, sens: v.txSens === 'vente' ? 'vente' : 'achat', date: date,
@@ -879,7 +956,7 @@
             if (!exigerComptes()) return;
             compte = compteParId(v.txCompte);
             if (!compte) { UI.toast('Choisissez un compte disponible'); return; }
-            var refus = controleTitre(ligne, compte, liee);
+            var refus = controleTitre(ligne, compte, liee, existante ? existante.id : null);
             if (refus) { UI.toast(refus); return; }
         }
 
@@ -889,16 +966,19 @@
 
         if (!existante) {
             promesse = creerTitreAvecCompte(ligne, compte);
+        } else if (historique) {
+            // Transaction antérieure à la 2.0 (sans compte lié) : une seule
+            // ligne à modifier, l'écriture directe suffit.
+            promesse = PF.net.supabase.update('pf2_transactions', ligne, 'id=eq.' + existante.id);
         } else {
-            promesse = PF.net.supabase.update('pf2_transactions', ligne, 'id=eq.' + existante.id).then(function () {
-                if (historique) return null;
-                if (liee) {
-                    return PF.net.supabase.update('pf2_operations_compte', {
-                        compte_id: compte.id, montant: montant, date: date
-                    }, 'id=eq.' + liee.id);
-                }
-                return null;
-            });
+            // 2.1.0 (revue D-03) : la transaction et son mouvement sont modifiés
+            // ensemble par la RPC serveur, en une seule transaction SQL.
+            promesse = PF.net.modifierTransaction({
+                id: existante.id, ligne: ligne, compteId: compte.id,
+                operationId: liee ? liee.id : null,
+                montantOperation: montant,
+                typeOperation: ligne.sens === 'vente' ? 'vente_titres' : 'achat_titres'
+            }).then(function () { return null; });
         }
 
         promesse.then(function () {
@@ -1015,6 +1095,20 @@
             var montantUsd = U.arrondi(montant * tx.usd, 2);
             var coursOr = (etat.ctx && etat.ctx.coursOr) || 0;
 
+            /* TWR exact (2.1.0, revue F-07) : la valeur du patrimoine JUSTE AVANT
+               ce flux. Pour un nouveau geste, le flux n'est pas encore écrit : le
+               patrimoine courant est donc la valeur d'avant. Pour la correction
+               d'un geste déjà saisi en 2.1, on garde la valeur captée à l'époque.
+               Avant la 2.1 : NULL, et l'intervalle sera déclaré non calculé. */
+            var valeurAvantEur = null, valeurAvantUsd = null;
+            if (existant) {
+                valeurAvantEur = existant.valeur_avant_eur != null ? existant.valeur_avant_eur : null;
+                valeurAvantUsd = existant.valeur_avant_usd != null ? existant.valeur_avant_usd : null;
+            } else if (etat.ctx) {
+                if (etat.ctx.patrimoineTotalEur != null) valeurAvantEur = U.arrondi(etat.ctx.patrimoineTotalEur, 2);
+                if (etat.ctx.patrimoineTotalUsd != null) valeurAvantUsd = U.arrondi(etat.ctx.patrimoineTotalUsd, 2);
+            }
+
             var ligne = {
                 date: date,
                 sens: retrait ? 'retrait' : 'apport',
@@ -1026,29 +1120,34 @@
                 note: null
             };
 
-            var promesseApport = existant && existant.id
-                ? PF.net.supabase.update('pf2_apports', ligne, 'id=eq.' + existant.id).then(function () { return existant.id; })
-                : PF.net.supabase.insert('pf2_apports', [ligne]).then(function (rows) { return rows[0].id; });
-
-            return promesseApport.then(function (apId) {
-                if (historique) return null;
-                if (liee) {
-                    return PF.net.supabase.update('pf2_operations_compte', {
-                        compte_id: compte.id, montant: retrait ? -montant : montant, date: date
-                    }, 'id=eq.' + liee.id);
-                }
-                var op = PF.comptes.operationMouvement({
-                    compte: compte, type: retrait ? 'retrait' : 'depot', montant: montant,
-                    date: date, apportId: apId, note: null
-                });
-                return PF.net.supabase.insert('pf2_operations_compte', [PF.comptes.versLigneOperation(op)])
-                    .catch(function (e) {
-                        if (existant) throw e;
-                        return PF.net.supabase.supprimer('pf2_apports', 'id=eq.' + apId).then(function () {
-                            throw new Error('compte non crédité, mouvement annulé (' + e.message + ')');
-                        });
-                    });
-            }).then(function () {
+            /* 2.1.0 (revue D-03) : apport ET mouvement de compte en UNE
+               transaction SQL via la RPC serveur, ou rien. Avant : deux
+               écritures séparées + compensation faillible. L'historique (sans
+               compte lié) reste une écriture simple unique. */
+            var promesse;
+            if (historique) {
+                promesse = (existant && existant.id
+                    ? PF.net.supabase.update('pf2_apports', ligne, 'id=eq.' + existant.id)
+                    : PF.net.supabase.insert('pf2_apports', [ligne])
+                ).then(function () { return null; });
+            } else if (liee) {
+                promesse = PF.net.modifierApport({
+                    id: existant.id, ligne: ligne, compteId: compte.id,
+                    operationId: liee.id,
+                    montantOperation: retrait ? -montant : montant,
+                    typeOperation: retrait ? 'retrait' : 'depot',
+                    valeurAvantEur: valeurAvantEur, valeurAvantUsd: valeurAvantUsd
+                }).then(function () { return null; });
+            } else {
+                promesse = PF.net.ecrireApport({
+                    ligne: ligne, compteId: compte.id,
+                    montantOperation: retrait ? -montant : montant,
+                    typeOperation: retrait ? 'retrait' : 'depot',
+                    idempotence: PF.comptes.genererId(),
+                    valeurAvantEur: valeurAvantEur, valeurAvantUsd: valeurAvantUsd
+                }).then(function () { return null; });
+            }
+            return promesse.then(function () {
                 // Miroir dans l'historique de la v1 : les deux versions restent synchronisées.
                 return ajouterHistoriqueV1(date, ligne.sens, montantUsd, montantEur,
                     coursOr ? montantUsd / coursOr : 0);
@@ -1065,9 +1164,11 @@
         valoriserEtEcrire();
     }
 
-        /* L'historique v1 porte le cumul des apports nets : on le recalcule. */
+        /* L'historique v1 porte le cumul des apports nets : on le recalcule.
+           Lecture paginée (2.1.0) : au-delà de 1 000 lignes, la réponse seule
+           serait tronquée. */
     function ajouterHistoriqueV1(dateFr, sens, montantUsd, montantEur, montantOr) {
-        return PF.net.supabase.select('Historique', 'select=*').then(function (rows) {
+        return PF.net.supabase.selectTout('Historique', 'select=*').then(function (rows) {
             var cumul = 0;
             (rows || []).forEach(function (r) {
                 var m = U.num(String(r['Montant $'] || 0).replace(/[$\s]/g, '').replace(',', '.'), 0);
@@ -1778,14 +1879,14 @@
     /* Les paramètres fiscaux vivent dans la table `Config` : c'est ce qui
        permet à l'application Android et à l'application Streamlit de partager
        les mêmes valeurs au lieu de se contredire. */
+    /* Identité du foyer (sans année) : partagée avec la page Fiscalité Streamlit.
+       2.1.0 (revue 2.0.1, T-07) : les données ANNUELLES (salaires, intérêts,
+       kilomètres, puissance, repas, frais réels) ne sont plus poussées vers
+       Config. Elles n'ont pas de millésime côté Android ; Config, sans année, les
+       faisait réutiliser d'une année à l'autre. Elles restent locales. */
     var CORRESPONDANCE_CONFIG = {
         statutFiscal: 'f_statut', partsFiscales: 'f_parts', nbEnfants: 'f_enf',
-        salaireNetImposable1: 'f_s1', salaireNetImposable2: 'f_s2',
-        interetsEtrangers: 'f_int_net', paysEtranger: 'f_pays_etr',
-        utiliserFraisReels1: 'f_u1', fraisKm1: 'f_k1', cvFiscal1: 'f_cv1',
-        joursRepas1: 'f_r1', vehiculeElectrique1: 'f_elec1',
-        utiliserFraisReels2: 'f_u2', fraisKm2: 'f_k2', cvFiscal2: 'f_cv2',
-        joursRepas2: 'f_r2', vehiculeElectrique2: 'f_elec2'
+        paysEtranger: 'f_pays_etr'
     };
 
     var REGLES_REGLAGES = {
@@ -1875,8 +1976,18 @@
 
     function feuilleReglages() {
         var r = PF.store.reglages();
+        var utilisateur = PF.net.auth.utilisateur();
+        var session = PF.net.auth.aUneSession();
+        var compte = session
+            ? '<div style="font-size:12px;color:var(--txt-2);margin-bottom:9px">Compte : <b>'
+                + UI.h(utilisateur && utilisateur.email ? utilisateur.email : 'connecté') + '</b></div>'
+            : '<div style="font-size:12px;color:var(--down);margin-bottom:9px">Non connecté : '
+                + 'vos données ne sont ni lisibles ni modifiables.</div>';
         var corps = ''
-            + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase</button>'
+            + compte
+            + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase (URL et clé)</button>'
+            + '<button class="btn sec" id="rgCompte" style="margin-bottom:9px">👤 Compte : '
+                + (session ? 'changer ou fermer la session' : 'se connecter / créer') + '</button>'
             + '<button class="btn ghost" id="rgDiag" style="margin-bottom:9px">🩺 Diagnostiquer la connexion</button>'
             + '<button class="btn sec" id="rgInflation" style="margin-bottom:9px">📈 Inflation annuelle</button>'
             + '<button class="btn sec" id="rgFiscal" style="margin-bottom:9px">§ Situation fiscale</button>'
@@ -1898,6 +2009,10 @@
             c.querySelector('#rgConnexion').addEventListener('click', function () {
                 document.querySelector('#voile').click();
                 setTimeout(function () { feuilleConnexion(false); }, 220);
+            });
+            c.querySelector('#rgCompte').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(function () { feuilleCompte(false); }, 220);
             });
             c.querySelector('#rgDiag').addEventListener('click', function () {
                 document.querySelector('#voile').click();

@@ -21,6 +21,25 @@ from core.models import Actif, POCHES_INVESTIES
 from core.portfolio import EtatPoche, Position, Transaction, classe_de
 
 
+def _config_fiscale_complete() -> dict:
+    """Configuration fiscale enregistrée et confirmée pour chaque millésime (2.1.0).
+
+    Les données sont propres à chaque année : la page ne lit que l'année choisie.
+    """
+    from core import foyer
+
+    annuel = {
+        "f_s1": "32473", "f_s2": "29772", "f_int_net": "200",
+        "f_u1": "true", "f_k1": "9120", "f_cv1": "5", "f_r1": "240", "f_elec1": "false",
+        "f_u2": "true", "f_k2": "9120", "f_cv2": "5", "f_r2": "200", "f_elec2": "false",
+    }
+    cfg = {"f_statut": "Marié(e) / Pacsé(e)", "f_enf": "2", "f_parts": "3.0", "f_pays_etr": "Lituanie"}
+    for annee in range(2015, 2041):
+        cfg.update({foyer.cle_annuelle(c, annee): v for c, v in annuel.items()})
+        cfg[f"{foyer.CLE_CONFIRMATION}_{annee}"] = "true"
+    return cfg
+
+
 def _contexte_realiste() -> S.Contexte:
     ctx = S.Contexte()
     ctx.taux_eur_usd = 1.15
@@ -195,25 +214,9 @@ def test_toutes_les_pages_s_executent_sans_erreur():
             "CHF": {"ticker": "CHF", "quantite": 8694.44},
             "CNY": {"ticker": "CNY", "quantite": 12290.0},
         }),
-        patch("core.db.lire_config_fiscale", return_value={
-            "f_statut": "Marié(e) / Pacsé(e)",
-            "f_enf": "2",
-            "f_parts": "3.0",
-            "f_s1": "32473",
-            "f_s2": "29772",
-            "f_u1": "true",
-            "f_k1": "9120",
-            "f_cv1": "5",
-            "f_r1": "240",
-            "f_elec1": "false",
-            "f_u2": "true",
-            "f_k2": "9120",
-            "f_cv2": "5",
-            "f_r2": "200",
-            "f_elec2": "false",
-            "f_int_net": "200",
-            "f_pays_etr": "Lituanie",
-        }),
+        patch("core.db.lire_config_fiscale", return_value=_config_fiscale_complete()),
+        patch("core.db.inventaire_crypto", return_value=pd.DataFrame(
+            columns=["id", "date", "actif", "quantite", "cout_acquisition_eur", "source"])),
         patch("core.db.sauver_config_fiscale", return_value=None),
         patch("core.fx.taux", return_value=1.15),
     ):

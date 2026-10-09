@@ -282,11 +282,22 @@
 
     function coursOr(dateISO) { return cours(TICKER_OR, dateISO); }
 
-    /* Taux de change devise -> contre. Yahoo cote les deux sens de la paire. */
+    /* Taux de change devise -> contre. Yahoo cote les deux sens de la paire.
+
+       2.1.0 (revue D-04) : une devise ABSENTE ou « NAN » n'est PLUS JAMAIS
+       convertie au taux 1. Elle rend `null` — comme un taux introuvable — et
+       toute valorisation qui en dépend est annoncée indisponible. Une devise
+       hors ISO 4217 est traitée de même. Seule la devise contre elle-même
+       reste 1. */
     function taux(devise, dateISO, contre) {
         devise = String(devise || '').toUpperCase().trim();
         contre = String(contre || 'EUR').toUpperCase().trim();
-        if (devise === contre || !devise || devise === 'NAN') return Promise.resolve(1);
+        if (devise === contre) return Promise.resolve(1);
+        if (!devise || !contre || devise === 'NAN' || contre === 'NAN'
+            || !PF.modele || !(PF.modele.DEVISES_ISO || []).includes(devise)
+            || !(PF.modele.DEVISES_ISO || []).includes(contre)) {
+            return Promise.resolve(null);
+        }
         var cle = devise + '-' + contre + '|' + (dateISO || '');
         if (cache_fx[cle] !== undefined) return Promise.resolve(cache_fx[cle]);
         var symbole = devise + contre + '=X';
@@ -333,57 +344,210 @@
         return { url: String(r.supabaseUrl || '').replace(/\/+$/, ''), cle: String(r.supabaseKey || '') };
     }
 
+    /* Pagination (2.1.0) : limite standard Supabase par réponse, et ordre
+       stable propre à chaque table (clé primaire ou clé naturelle). */
+    var LIMITE_PAGE = 1000;
+    var ORDRE_PAGINATION = {
+        pf2_transactions: 'id.asc',
+        pf2_apports: 'id.asc',
+        pf2_snapshots: 'date.asc,id.asc',
+        pf2_cours: 'ticker.asc,date.asc',
+        pf2_fx: 'devise.asc,contre.asc,date.asc',
+        pf2_inflation: 'annee.asc',
+        pf2_alertes: 'id.asc',
+        pf2_comptes: 'id.asc',
+        pf2_operations_compte: 'id.asc',
+        Donnees: 'id.asc',
+        Projections: 'id.asc',
+        Historique: 'id.asc',
+        Transaction: 'id.asc'
+    };
+
+    /* ------------------------------------------------------------------
+       Supabase Auth (2.1.0, revue S-01). La clé publique ne suffit plus :
+       les politiques RLS exigent un utilisateur authentifié. L'application
+       crée un compte (email/mot de passe), conserve les jetons sur
+       l'appareil et les rafraîchit automatiquement.                       */
+    var auth = {
+        url: function (chemin) { return clefs().url + '/auth/v1/' + chemin; },
+        entetes: function () {
+            return { apikey: clefs().cle, 'Content-Type': 'application/json' };
+        },
+        /* Crée un compte. Selon la configuration Supabase, la réponse porte
+           soit une session immédiate, soit une demande de confirmation par
+           e-mail (retour {confirmation: true}). */
+        inscription: function (email, motDePasse) {
+            return req('POST', auth.url('signup'), auth.entetes(),
+                JSON.stringify({ email: email, password: motDePasse }))
+                .then(function (r) {
+                    if (!r.ok) throw new Error(erreurAuth(r, 'La création du compte a échoué'));
+                    if (r.json && r.json.access_token) return enregistrerSession(r.json);
+                    return { confirmation: true };
+                });
+        },
+        connexion: function (email, motDePasse) {
+            return req('POST', auth.url('token?grant_type=password'), auth.entetes(),
+                JSON.stringify({ email: email, password: motDePasse }))
+                .then(function (r) {
+                    if (!r.ok) throw new Error(erreurAuth(r, 'Connexion refusée'));
+                    return enregistrerSession(r.json);
+                });
+        },
+        rafraichir: function () {
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            if (!s || !s.refresh_token) return Promise.resolve(null);
+            return req('POST', auth.url('token?grant_type=refresh_token'), auth.entetes(),
+                JSON.stringify({ refresh_token: s.refresh_token }))
+                .then(function (r) {
+                    if (!r.ok || !r.json || !r.json.access_token) {
+                        // Jeton de rafraîchissement révoqué ou expiré : la
+                        // session est morte, on la retire sans effacer les réglages.
+                        if (PF.store && PF.store.effacerSession) PF.store.effacerSession();
+                        return null;
+                    }
+                    return enregistrerSession(r.json);
+                });
+        },
+        /* Session utilisable : rafraîchie si l'expiration approche. */
+        sessionValide: function () {
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            if (!s || !s.access_token) return Promise.resolve(null);
+            if (s.expires_at && s.expires_at - 60000 > Date.now()) return Promise.resolve(s);
+            return auth.rafraichir();
+        },
+        deconnexion: function () {
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            var h = auth.entetes();
+            if (s && s.access_token) h.Authorization = 'Bearer ' + s.access_token;
+            if (PF.store && PF.store.effacerSession) PF.store.effacerSession();
+            return req('POST', auth.url('logout'), h, '').then(function () { return true; });
+        },
+        aUneSession: function () {
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            return !!(s && s.access_token);
+        },
+        utilisateur: function () {
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            return s ? { id: s.user_id || null, email: s.email || null } : null;
+        }
+    };
+
+    function enregistrerSession(brut) {
+        var s = {
+            access_token: brut.access_token,
+            refresh_token: brut.refresh_token,
+            expires_at: Date.now() + (Number(brut.expires_in) || 3600) * 1000,
+            user_id: brut.user ? brut.user.id : null,
+            email: brut.user ? (brut.user.email || '') : ''
+        };
+        if (PF.store && PF.store.sauverSession) PF.store.sauverSession(s);
+        return s;
+    }
+
+    function erreurAuth(r, defaut) {
+        try {
+            var j = r.json || (r.body ? JSON.parse(r.body) : null);
+            if (j && (j.error_description || j.msg || j.message)) {
+                return String(j.error_description || j.msg || j.message);
+            }
+        } catch (e) { /* corps illisible */ }
+        return defaut + ' (' + (r.status || 'réseau') + ')';
+    }
+
     var supabase = {
         url: function (table, query) {
             return clefs().url + '/rest/v1/' + table + (query ? '?' + query : '');
         },
         entetes: function (extra) {
             var k = clefs().cle;
-            var h = { apikey: k, Authorization: 'Bearer ' + k };
+            // Bearer = jeton d'accès de la session si elle existe, sinon clé
+            // publique (lecture seule après la migration 004).
+            var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
+            var jeton = (s && s.access_token) ? s.access_token : k;
+            var h = { apikey: k, Authorization: 'Bearer ' + jeton };
             if (extra) for (var e in extra) if (extra.hasOwnProperty(e)) h[e] = extra[e];
             return h;
         },
         select: function (table, query) {
-            return req('GET', supabase.url(table, query || 'select=*'), supabase.entetes({ Accept: 'application/json' }))
-                .then(function (r) {
+            return requeteAvecSession('GET', supabase.url(table, query || 'select=*'),
+                { Accept: 'application/json' }, null).then(function (r) {
                     if (!r.ok) throw new Error('Lecture ' + table + ' impossible (' + (r.status || 'réseau') + ')');
                     return r.json || [];
                 });
         },
         insert: function (table, lignes) {
-            return req('POST', supabase.url(table), supabase.entetes({
+            return requeteAvecSession('POST', supabase.url(table), {
                 'Content-Type': 'application/json', Prefer: 'return=representation'
-            }), JSON.stringify(lignes)).then(function (r) {
+            }, JSON.stringify(lignes)).then(function (r) {
                 if (!r.ok) throw new Error('Écriture ' + table + ' refusée' + (r.body ? ' : ' + String(r.body).slice(0, 160) : ''));
                 return r.json || [];
             });
         },
         upsert: function (table, lignes, onConflict) {
             var q = onConflict ? 'on_conflict=' + onConflict : '';
-            return req('POST', supabase.url(table, q), supabase.entetes({
+            return requeteAvecSession('POST', supabase.url(table, q), {
                 'Content-Type': 'application/json', Prefer: 'return=representation,resolution=merge-duplicates'
-            }), JSON.stringify(lignes)).then(function (r) {
+            }, JSON.stringify(lignes)).then(function (r) {
                 if (!r.ok) throw new Error('Mise à jour ' + table + ' refusée' + (r.body ? ' : ' + String(r.body).slice(0, 160) : ''));
                 return r.json || [];
             });
         },
         update: function (table, champs, filtre) {
-            return req('PATCH', supabase.url(table, filtre || ''), supabase.entetes({
+            return requeteAvecSession('PATCH', supabase.url(table, filtre || ''), {
                 'Content-Type': 'application/json', Prefer: 'return=representation'
-            }), JSON.stringify(champs)).then(function (r) {
+            }, JSON.stringify(champs)).then(function (r) {
                 if (!r.ok) throw new Error('Modification ' + table + ' refusée' + (r.body ? ' : ' + String(r.body).slice(0, 160) : ''));
                 return r.json || [];
             });
         },
         supprimer: function (table, filtre) {
-            return req('DELETE', supabase.url(table, filtre || ''), supabase.entetes({ Prefer: 'return=representation' }))
+            return requeteAvecSession('DELETE', supabase.url(table, filtre || ''),
+                { Prefer: 'return=representation' }, null)
                 .then(function (r) {
                     if (!r.ok) throw new Error('Suppression ' + table + ' refusée' + (r.body ? ' : ' + String(r.body).slice(0, 160) : ''));
                     return r.json || [];
                 });
         },
+        /* Fonction PostgreSQL (migrations 004) : les écritures couplées
+           (titre + mouvement de compte, apport + mouvement) passent par là —
+           une seule transaction, jamais de demi-écriture. */
+        rpc: function (fonction, parametres) {
+            return requeteAvecSession('POST', clefs().url + '/rest/v1/rpc/' + fonction,
+                { 'Content-Type': 'application/json', Accept: 'application/json' },
+                JSON.stringify(parametres || {})).then(function (r) {
+                    if (!r.ok) throw new Error('Écriture refusée par ' + fonction
+                        + (r.body ? ' : ' + String(r.body).slice(0, 160) : ''));
+                    return r.json;
+                });
+        },
+        /* LECTURE PAGINÉE (2.1.0, revue D-05) : Supabase limite chaque réponse
+           à 1 000 lignes. selectTout enchaîne les pages (limit/offset sur un
+           ordre stable propre à chaque table) jusqu'à épuisement. Une page qui
+           échoue fait échouer toute la lecture : l'historique ne doit JAMAIS
+           être tronqué en silence. À un snapshot par jour, la limite arrive en
+           ~2,7 ans ; 40 ans ≈ 14 610 lignes. */
+        selectTout: function (table, query) {
+            var ordre = ORDRE_PAGINATION[table] || null;
+            if (!ordre) {
+                // Table sans ordre connu (Config v1, petites tables) : lecture
+                // simple, comme avant.
+                return supabase.select(table, query);
+            }
+            var toutes = [];
+            function page(offset) {
+                var q = (query ? query + '&' : '')
+                    + 'order=' + ordre + '&limit=' + LIMITE_PAGE + '&offset=' + offset;
+                return supabase.select(table, q).then(function (rows) {
+                    toutes = toutes.concat(rows || []);
+                    if ((rows || []).length === LIMITE_PAGE) return page(offset + LIMITE_PAGE);
+                    return toutes;
+                });
+            }
+            return page(0);
+        },
         tester: function () {
-            return req('GET', supabase.url('pf2_transactions', 'select=id&limit=1'), supabase.entetes({ Accept: 'application/json' }))
+            return requeteAvecSession('GET', supabase.url('pf2_transactions', 'select=id&limit=1'),
+                { Accept: 'application/json' }, null)
                 .then(function (r) {
                     return { ok: !!r.ok, status: r.status, detail: r.ok ? 'Connexion établie' : (r.body ? String(r.body).slice(0, 160) : 'Réseau injoignable') };
                 });
@@ -401,11 +565,102 @@
         }
     };
 
+    /* Une requête Data API qui répond 401 alors qu'une session existe est
+       retentée UNE fois après rafraîchissement du jeton. Sans session, le
+       401/403 remonte tel quel : c'est le signal « connectez-vous ». */
+    function requeteAvecSession(method, url, extras, corps, dejaRetente) {
+        return req(method, url, supabase.entetes(extras), corps).then(function (r) {
+            if ((r.status === 401 || r.status === 403) && auth.aUneSession() && !dejaRetente) {
+                return auth.rafraichir().then(function (s) {
+                    if (!s) throw new Error('Session expirée : reconnectez-vous.');
+                    // En-têtes RECALCULÉS : ils portent le nouveau jeton.
+                    return req(method, url, supabase.entetes(extras), corps);
+                });
+            }
+            return r;
+        });
+    }
+
+    /* ÉCRITURES ATOMIQUES (2.1.0, revue D-03).
+       Avant, une saisie faisait deux requêtes séparées (la transaction puis le
+       mouvement de compte), avec une « compensation » qui pouvait elle-même
+       échouer : des titres achetés sans argent débité. Désormais tout passe par
+       les RPC de la migration 004 : les deux lignes sont écrites dans UNE
+       transaction SQL, tout passe ou rien, et la clé d'idempotence rend les
+       rejeux (réseau instable, bouton pressé deux fois) inoffensifs. */
+
+    function ecrireTransaction(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_enregistrer_transaction', {
+            p_ticker: ligne.ticker, p_sens: ligne.sens, p_date: ligne.date,
+            p_quantite: ligne.quantite, p_cours: ligne.cours, p_frais: ligne.frais || 0,
+            p_devise: ligne.devise || null, p_source: ligne.source || 'appli',
+            p_reference: ligne.reference || null, p_note: ligne.note || null,
+            p_compte_id: opts.compteId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_idempotence: opts.idempotence || null
+        });
+    }
+
+    function modifierTransaction(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_modifier_transaction', {
+            p_tx_id: opts.id,
+            p_ticker: ligne.ticker, p_sens: ligne.sens, p_date: ligne.date,
+            p_quantite: ligne.quantite, p_cours: ligne.cours, p_frais: ligne.frais || 0,
+            p_devise: ligne.devise || null, p_source: ligne.source || 'appli',
+            p_reference: ligne.reference || null, p_note: ligne.note || null,
+            p_compte_id: opts.compteId || null,
+            p_operation_id: opts.operationId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null
+        });
+    }
+
+    /* TWR exact (2.1.0, revue F-07) : chaque apport porte la valeur du
+       patrimoine juste AVANT le flux (opts.valeurAvantEur/Usd), capturée par
+       l'app au moment du geste. NULL = écriture antérieure à la 2.1.0 ou robot
+       : son intervalle sera déclaré non calculé, jamais estimé. */
+    function ecrireApport(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_enregistrer_apport', {
+            p_date: ligne.date, p_sens: ligne.sens, p_montant_eur: ligne.montant_eur,
+            p_montant_or: ligne.montant_or || null, p_cours_or: ligne.cours_or || null,
+            p_compte: ligne.compte || null, p_reference: ligne.reference || null,
+            p_compte_id: opts.compteId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_idempotence: opts.idempotence || null,
+            p_valeur_avant_eur: opts.valeurAvantEur != null ? opts.valeurAvantEur : null,
+            p_valeur_avant_usd: opts.valeurAvantUsd != null ? opts.valeurAvantUsd : null
+        });
+    }
+
+    function modifierApport(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_modifier_apport', {
+            p_apport_id: opts.id,
+            p_date: ligne.date, p_sens: ligne.sens, p_montant_eur: ligne.montant_eur,
+            p_montant_or: ligne.montant_or || null, p_cours_or: ligne.cours_or || null,
+            p_compte: ligne.compte || null, p_reference: ligne.reference || null,
+            p_compte_id: opts.compteId || null,
+            p_operation_id: opts.operationId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_valeur_avant_eur: opts.valeurAvantEur != null ? opts.valeurAvantEur : null,
+            p_valeur_avant_usd: opts.valeurAvantUsd != null ? opts.valeurAvantUsd : null
+        });
+    }
+
     PF.net = {
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
         deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, tauxMouvement: tauxMouvement, viderCache: viderCache, supabase: supabase,
+        auth: auth,
+        ecrireTransaction: ecrireTransaction, modifierTransaction: modifierTransaction,
+        ecrireApport: ecrireApport, modifierApport: modifierApport,
         setTransport: function (fn) { transport = fn; viderCache(); },
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,
         cache: { cours: cache_cours, fx: cache_fx, variation: cache_variation, serie: cache_serie }

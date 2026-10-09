@@ -58,6 +58,50 @@ public class NativeBridge {
             "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
                     + "Chrome/122.0.0.0 Mobile Safari/537.36";
 
+    /* DURCISSEMENT 2.1.0 (revue S-03) : le pont n'ouvre QUE des URL HTTPS
+       vers cette liste d'hôtes. Une entrée commençant par « . » autorise le
+       domaine et ses sous-domaines. Le projet Supabase du porteur est toujours
+       un sous-domaine de supabase.co ; les cours viennent de Yahoo Finance ;
+       l'inflation de l'INSEE ; le service IA du porteur, s'il en configure un,
+       vit sur un worker Cloudflare (.workers.dev). Toute autre destination est
+       refusée, même si le JavaScript la demande. */
+    private static final String[] HOTES_AUTORISES = {
+            ".supabase.co",
+            "query1.finance.yahoo.com",
+            "query2.finance.yahoo.com",
+            "api.insee.fr",
+            ".workers.dev"
+    };
+
+    /* Méthodes que le pont accepte : celles utilisées par l'application,
+       rien d'autre. */
+    private static final String[] METHODES_AUTORISEES = {"GET", "POST", "PATCH", "DELETE"};
+
+    static boolean hoteAutorise(String url) {
+        try {
+            URL u = new URL(url);
+            if (!"https".equalsIgnoreCase(u.getProtocol())) return false;
+            String h = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.US);
+            if (h.isEmpty()) return false;
+            for (String a : HOTES_AUTORISES) {
+                if (a.startsWith(".")) {
+                    if (h.endsWith(a) || h.equals(a.substring(1))) return true;
+                } else if (h.equals(a)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static boolean methodeAutorisee(String m) {
+        if (m == null) return false;
+        for (String a : METHODES_AUTORISEES) if (a.equals(m)) return true;
+        return false;
+    }
+
     private final Activity activity;
     private final JsRunner js;
     private final java.util.concurrent.ExecutorService pool =
@@ -111,14 +155,29 @@ public class NativeBridge {
     }
 
     private JSONObject executer(String method, String url, String headersJson, String body) {
+        // DURCISSEMENT 2.1.0 (revue S-03) : aucune requête ne part si la
+        // destination n'est pas HTTPS vers un hôte de l'allowlist, ou si la
+        // méthode n'est pas l'une des quatre attendues. Le pont n'est plus un
+        // proxy ouvert : un script injecté ne peut plus faire requêter par
+        // l'appareil un hôte arbitraire.
+        String m = method == null ? "GET" : method.toUpperCase(Locale.US);
+        if (!methodeAutorisee(m)) {
+            return erreur("Méthode HTTP non autorisée : " + m);
+        }
+        if (!hoteAutorise(url)) {
+            return erreur("Hôte non autorisé (HTTPS requis, allowlist) : " + url);
+        }
+
         HttpURLConnection conn = null;
         try {
             URL u = new URL(url);
             conn = (HttpURLConnection) u.openConnection();
-            conn.setRequestMethod(method == null ? "GET" : method.toUpperCase(Locale.US));
+            conn.setRequestMethod(m);
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
-            conn.setInstanceFollowRedirects(true);
+            // Pas de suivi de redirection : un hôte autorisé ne doit pas
+            // pouvoir renvoyer l'appareil vers une destination hors allowlist.
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestProperty("User-Agent", UA);
             conn.setRequestProperty("Accept", "application/json, text/plain, */*");
 
@@ -127,7 +186,12 @@ public class NativeBridge {
                 java.util.Iterator<String> it = h.keys();
                 while (it.hasNext()) {
                     String k = it.next();
-                    conn.setRequestProperty(k, h.optString(k, ""));
+                    // En-têtes validés : nom de jeton HTTP simple, valeur sans
+                    // retour à la ligne (pas d'injection d'en-tête).
+                    if (k == null || !k.matches("[A-Za-z0-9!#$%&'*+.^_`|-]+")) continue;
+                    String v = h.optString(k, "");
+                    if (v.indexOf('\r') >= 0 || v.indexOf('\n') >= 0) continue;
+                    conn.setRequestProperty(k, v);
                 }
             }
 
@@ -175,6 +239,20 @@ public class NativeBridge {
                 conn.disconnect();
             }
         }
+    }
+
+    /* Réponse d'erreur uniforme (destination refusée, méthode refusée, etc.). */
+    private static JSONObject erreur(String message) {
+        JSONObject res = new JSONObject();
+        try {
+            res.put("ok", false);
+            res.put("status", -1);
+            res.put("error", message);
+            res.put("body", "");
+        } catch (Exception ignore) {
+            // ne peut pas arriver sur un JSONObject neuf
+        }
+        return res;
     }
 
 
@@ -285,7 +363,13 @@ public class NativeBridge {
     }
 
     private byte[] telechargerBinaire(String url) throws Exception {
+        // Même garde-fou que le pont : HTTPS + allowlist (l'URL INSEE est une
+        // constante, mais la vérification protège toute évolution future).
+        if (!hoteAutorise(url)) {
+            throw new SecurityException("Hôte non autorisé : " + url);
+        }
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setInstanceFollowRedirects(false);
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(60000);
         conn.setRequestProperty("User-Agent", UA);
@@ -461,6 +545,12 @@ public class NativeBridge {
 
     @JavascriptInterface
     public void openExternal(String url) {
+        // DURCISSEMENT 2.1.0 : uniquement des liens https vers le navigateur.
+        // Les autres schémas (intent:, javascript:, file:, http:) sont refusés.
+        if (url == null || !url.startsWith("https://")) {
+            Log.w(TAG, "openExternal refusé (https uniquement) : " + url);
+            return;
+        }
         try {
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

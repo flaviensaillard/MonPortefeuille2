@@ -411,7 +411,12 @@
         var dates = ctx.serie.dates, valeurs = ctx.serie.lignes.map(function (l) {
             return U.num(l.ligne[col], U.num(l.ligne.patrimoine_investi_usd, 0));
         });
-        var serie = { dates: dates, valeurs: valeurs, flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre), lignes: ctx.serie.lignes };
+        var serie = {
+            dates: dates, valeurs: valeurs,
+            flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre),
+            fluxJour: ctx.serie.fluxJour || {}, valorisations: ctx.serie.valorisations || {},
+            lignes: ctx.serie.lignes
+        };
         return PF.metrics.progressionPeriode(serie, periode, valLive);
     }
 
@@ -803,18 +808,43 @@
         var valeursSerie = ctx.serie.lignes.map(function (l) {
             return U.num(l.ligne[perimetre === 'total' ? 'patrimoine_total_usd' : 'patrimoine_investi_usd'], 0);
         });
-        var rends = PF.metrics.rendementsPeriode(valeursSerie, ctx.serie.flux);
-        var parAn = PF.metrics.twrParAnnee(ctx.serie.dates, rends);
+        /* 2.1.0 (revue F-07) : TWR EXACT — un intervalle dont l'apport n'est pas
+           valorisé n'est pas chaîné, il est annoncé. Une année incomplète
+           s'affiche « — », jamais un chiffre dépendant d'une convention de fin
+           de période. */
+        var stricts = PF.metrics.rendementsStricts(ctx.serie.dates, valeursSerie,
+            ctx.serie.fluxJour || {}, ctx.serie.valorisations || {});
+        var parAn = {}, anneesIncompletes = {};
+        stricts.rendements.forEach(function (r, i) {
+            var an = String(ctx.serie.dates[i + 1]).slice(0, 4);
+            if (!(an in parAn)) parAn[an] = null;
+            if (r === null) { anneesIncompletes[an] = 1; parAn[an] = null; return; }
+            parAn[an] = parAn[an] === null ? r : (1 + parAn[an]) * (1 + r) - 1;
+        });
         var annees = Object.keys(parAn).sort();
         if (annees.length) {
             out += '<div class="titre">Performance par ann\u00e9e <span class="n">' + UI.h(nomPerimetre) + '</span></div>'
                 + '<div class="card"><table class="tableau"><tr><th>Ann\u00e9e</th><th>TWR</th></tr>';
             annees.forEach(function (a) {
+                if (parAn[a] === null) {
+                    out += '<tr><td>' + UI.h(a) + '</td><td class="dim">\u2014 \u26a0\ufe0f</td></tr>';
+                    return;
+                }
                 var f = U.fleche(parAn[a]);
                 out += '<tr><td>' + UI.h(a) + '</td><td class="' + f.classe + '">'
                     + U.pctSigne(parAn[a]) + '</td></tr>';
             });
-            out += '</table></div>';
+            out += '</table>';
+            var incompletes = Object.keys(anneesIncompletes).sort();
+            if (incompletes.length) {
+                out += '<div class="aide" style="padding:8px 12px">\u26a0\ufe0f Ann\u00e9e(s) \u00ab \u2014 \u00bb : '
+                    + incompletes.map(UI.h).join(', ')
+                    + '. Un apport ou un retrait sans valorisation du portefeuille \u00e0 ce '
+                    + 'moment-l\u00e0 rend le rendement exact incalculable ; aucun chiffre '
+                    + 'n\u2019est invent\u00e9. Depuis la 2.1.0, chaque apport enregistre la valeur '
+                    + 'du portefeuille au moment du geste.</div>';
+            }
+            out += '</div>';
         }
 
         if (ctx.equivalentOrOz) {
@@ -836,7 +866,9 @@
         });
         var p = PF.metrics.progressionPeriode({
             dates: dates, valeurs: valeurs,
-            flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre), lignes: ctx.serie.lignes
+            flux: PF.metrics.fluxPerimetre(ctx.serie, perimetre),
+            fluxJour: ctx.serie.fluxJour || {}, valorisations: ctx.serie.valorisations || {},
+            lignes: ctx.serie.lignes
         }, periode, valLive);
         var idx = p.idxGraphe || [];
         var v = idx.map(function (i) { return valeurs[i]; });

@@ -71,6 +71,11 @@ class Contexte:
     cours_or: float | None = None
     equivalent_or_oz: float | None = None
 
+    # 2.1.0 (revue F-07) : intervalles dont un flux n'est pas valorisé — le TWR
+    # ne les calcule pas, il les annonce. Chaque entrée : {de, a, flux}.
+    twr_non_calcules: list = field(default_factory=list)
+    twr_non_calcules_or: list = field(default_factory=list)
+
     echecs_cours: list[str] = field(default_factory=list)
     echecs_fx: list[str] = field(default_factory=list)
     tables_absentes: list[str] = field(default_factory=list)
@@ -272,10 +277,44 @@ def flux_instruments_final_usd(ctx: "Contexte") -> float:
     return round(total, 2)
 
 
+def _valorisations_avant_apports(ctx: "Contexte", colonne: str) -> dict:
+    """Valorisation du portefeuille JUSTE AVANT chaque apport (2.1.0, revue F-07).
+
+    Depuis la 2.1.0, l'app enregistre avec chaque apport la valeur du
+    patrimoine au moment du geste (`valeur_avant_eur` / `valeur_avant_usd`).
+    Ces valorisations permettent au TWR strict d'encadrer chaque flux. Les
+    apports antérieurs à la 2.1.0 n'en ont pas : leur intervalle est déclaré
+    non calculable, jamais estimé.
+
+    Un jour portant PLUSIEURS apports est exclu : la valorisation « avant » ne
+    peut pas être attribuée sans ambiguïté à un flux net agrégé.
+    """
+    ap = ctx.apports
+    if ap is None or getattr(ap, "empty", True) or colonne not in getattr(ap, "columns", []):
+        return {}
+    dates = pd.to_datetime(ap["date"], errors="coerce")
+    vals = pd.to_numeric(ap[colonne], errors="coerce")
+    par_jour: dict = {}
+    compte: dict = {}
+    for d, v in zip(dates, vals):
+        if pd.isna(d) or pd.isna(v):
+            continue
+        jour = d.date()
+        compte[jour] = compte.get(jour, 0) + 1
+        par_jour.setdefault(jour, float(v))
+    return {j: par_jour[j] for j in par_jour if compte[j] == 1}
+
+
 def serie_performance(
     ctx: "Contexte",
-) -> tuple[pd.DataFrame, list[float], list[float]]:
-    """Série propre `(snapshots, valeurs, flux)` pour le TWR et les diagnostics.
+) -> tuple[pd.DataFrame, list[float], list[float], dict]:
+    """Série propre `(snapshots, valeurs, flux, valorisations_avant)` pour le
+    TWR strict et les diagnostics.
+
+    `valorisations_avant` : `{date: valeur du portefeuille juste avant le flux
+    du jour}` — vide quand aucune valorisation n'a été capturée (apports
+    antérieurs à la 2.1.0). Le TWR strict s'en sert pour encadrer chaque flux ;
+    sans elle, l'intervalle est déclaré non calculable (revue F-07).
 
     CONVENTION DE L'UTILISATEUR : tout est compté en DOLLARS ($).
     - Si `patrimoine_investi_usd` est présent dans `ctx.snapshots`, c'est lui
@@ -292,7 +331,7 @@ def serie_performance(
     """
     snaps = ctx.snapshots
     if snaps is None or snaps.empty or "Date" not in snaps.columns:
-        return pd.DataFrame(), [], []
+        return pd.DataFrame(), [], [], {}
 
     use_usd = (
         "patrimoine_investi_usd" in snaps.columns
@@ -300,7 +339,7 @@ def serie_performance(
     )
     col_val = "patrimoine_investi_usd" if use_usd else "patrimoine_investi_eur"
     if col_val not in snaps.columns:
-        return pd.DataFrame(), [], []
+        return pd.DataFrame(), [], [], {}
 
     df = snaps.copy()
     df["Date"] = _parser_dates(df["Date"])
@@ -309,13 +348,17 @@ def serie_performance(
     df["_live"] = df.get("_live", pd.Series(False, index=df.index)).eq(True)
     df = df[df[col_val] > 0].sort_values(["Date", "_live"], kind="stable").reset_index(drop=True)
     if len(df) < 2:
-        return df, df[col_val].astype(float).tolist(), [0.0] * len(df)
+        return df, df[col_val].astype(float).tolist(), [0.0] * len(df), {}
 
     dates_l = [d.date() for d in df["Date"]]
     valeurs = df[col_val].astype(float).tolist()
 
     col_ap = "montant_usd" if (use_usd and ctx.apports is not None and "montant_usd" in getattr(ctx.apports, "columns", [])) else "montant_eur"
+    df.attrs["col_ap"] = col_ap
     flux_ap = metrics.flux_par_periode(dates_l, flux_par_date(ctx.apports, col_ap))
+    valorisations = _valorisations_avant_apports(
+        ctx, "valeur_avant_usd" if col_ap == "montant_usd" else "valeur_avant_eur"
+    )
 
     if use_usd and "capital_investi_usd" in df.columns:
         # `take_snapshot.py` (v1) écrit parfois `Capital investi = 0` lorsque la
@@ -344,7 +387,7 @@ def serie_performance(
     else:
         flux = flux_ap
 
-    return df, valeurs, flux
+    return df, valeurs, flux, valorisations
 
 
 def _ajouter_flux_instruments(flux: list[float], montant_final: float) -> list[float]:
@@ -362,41 +405,108 @@ def _ajouter_flux_instruments(flux: list[float], montant_final: float) -> list[f
 
 
 def twr_portefeuille(ctx: "Contexte") -> float | None:
-    """TWR depuis le premier snapshot, corrigé des apports et retraits (en $)."""
-    df, valeurs, flux = serie_performance(ctx)
+    """TWR EXACT depuis le premier snapshot (2.1.0, revue F-07).
+
+    Chaque flux doit être encadré par une valorisation juste avant lui ; un
+    intervalle dont le flux n'est pas valorisé n'est PAS calculé : il est
+    listé dans `ctx.twr_non_calcules` pour être annoncé, jamais remplacé par
+    la convention « flux en fin de période ». Renvoie None si aucun intervalle
+    n'est calculable.
+    """
+    df, valeurs, flux, valorisations = serie_performance(ctx)
     if len(valeurs) < 2:
+        ctx.twr_non_calcules = []
         return None
-    flux = _ajouter_flux_instruments(flux, flux_instruments_final_usd(ctx))
-    return metrics.twr_depuis(valeurs, flux)
+    dates = [d.date() for d in pd.to_datetime(df["Date"])]
+    col_ap = df.attrs.get("col_ap", "montant_eur")
+    rendements, non_calcules = metrics.rendements_stricts(
+        dates, valeurs, flux_par_date(ctx.apports, col_ap), valorisations
+    )
+    ctx.twr_non_calcules = non_calcules
+    if all(r is None for r in rendements):
+        return None
+    prod = 1.0
+    for r in rendements:
+        if r is not None:
+            prod *= 1.0 + r
+    return prod - 1.0
+
+
+def _jours_calcules(ctx: "Contexte") -> int:
+    """Durée cumulée des intervalles effectivement calculés par le TWR strict.
+
+    Annualiser un chaînage partiel sur la durée TOTALE (trous compris)
+    gonflerait ou écraserait le rendement annuel : on n'annualise que le temps
+    réellement mesuré.
+    """
+    df, valeurs, flux, valorisations = serie_performance(ctx)
+    if len(valeurs) < 2:
+        return 0
+    dates = [d.date() for d in pd.to_datetime(df["Date"])]
+    col_ap = df.attrs.get("col_ap", "montant_eur")
+    rendements, _ = metrics.rendements_stricts(
+        dates, valeurs, flux_par_date(ctx.apports, col_ap), valorisations
+    )
+    jours = 0
+    for i, r in enumerate(rendements):
+        if r is not None:
+            jours += (dates[i + 1] - dates[i]).days
+    return jours
 
 
 def twr_annualise_portefeuille(ctx: "Contexte") -> float | None:
-    """Le même TWR, annualisé sur la durée couverte par les snapshots."""
+    """Le même TWR exact, annualisé sur la durée effectivement mesurée."""
     snaps = ctx.snapshots
     if snaps is None or snaps.empty or len(snaps) < 2:
         return None
     dates = _parser_dates(snaps["Date"]).dropna()
     if len(dates) < 2:
         return None
-    jours = (dates.iloc[-1] - dates.iloc[0]).days
     total = twr_portefeuille(ctx)
+    jours = _jours_calcules(ctx)
     if total is None or jours <= 0:
         return None
     return metrics.annualiser(total, jours)
 
 
 def twr_en_or_portefeuille(ctx: "Contexte") -> float | None:
-    """Performance en onces d'or depuis le premier snapshot, corrigée des apports."""
-    df, valeurs, flux = serie_performance(ctx)
+    """Performance en onces d'or depuis le premier snapshot (TWR exact).
+
+    Un intervalle avec flux n'est calculable en or que si le cours du métal au
+    moment du flux est connu — il ne l'est pas : ces intervalles suivent le
+    même sort qu'en euros (non calculés, annoncés). Les intervalles sans flux
+    sont exacts : (V_i/or_i) / (V_{i-1}/or_{i-1}).
+    """
+    df, valeurs, flux, valorisations = serie_performance(ctx)
     if len(valeurs) < 2 or "equivalent_or_oz" not in df.columns:
         return None
     onces = pd.to_numeric(df["equivalent_or_oz"], errors="coerce")
     if onces.isna().any() or (onces <= 0).any():
         return None
-    try:
-        return metrics.twr_en_or(valeurs, flux, onces.astype(float).tolist())
-    except ValueError:
-        return None
+    dates = [d.date() for d in pd.to_datetime(df["Date"])]
+    col_ap = df.attrs.get("col_ap", "montant_eur")
+    flux_jour = flux_par_date(ctx.apports, col_ap)
+    oz = onces.astype(float).tolist()
+    rendements, non_calcules = metrics.rendements_stricts(
+        dates, valeurs, flux_jour, valorisations
+    )
+    prod = 1.0
+    aucun = True
+    for i, r in enumerate(rendements):
+        if r is None or flux_jour_has(dates, flux_jour, i):
+            # Intervalle avec flux : le cours de l'or au moment du flux est
+            # inconnu → non calculé, comme en euros.
+            continue
+        prod *= (valeurs[i + 1] / oz[i + 1]) / (valeurs[i] / oz[i])
+        aucun = False
+    ctx.twr_non_calcules_or = non_calcules
+    return None if aucun else prod - 1.0
+
+
+def flux_jour_has(dates: list, flux_jour: dict, i: int) -> bool:
+    """Vrai si l'intervalle (dates[i], dates[i+1]] porte un flux non nul."""
+    deb, fin = dates[i], dates[i + 1]
+    return any(deb < d <= fin and float(m) != 0.0 for d, m in (flux_jour or {}).items())
 
 
 def _parser_dates(serie) -> pd.Series:
@@ -465,8 +575,13 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
         return ctx
 
     # --- Valorisation ---
+    # Cours de référence saisis à la main (couche 2 de la valorisation, 2.1.0).
     try:
-        ctx.actifs, ctx.echecs_cours = valoriser(ctx.positions)
+        references = db.cours_de_reference()
+    except Exception:
+        references = {}
+    try:
+        ctx.actifs, ctx.echecs_cours = valoriser(ctx.positions, references=references)
     except fx.FXIndisponible as exc:
         ctx.echecs_fx.append(str(exc))
 
@@ -1003,7 +1118,7 @@ def progression_periode(
     Utilise `serie_performance(ctx)` pour garantir la cohérence absolue des flux
     d'apports (`capital_investi_usd`) et du TWR avec la page Performance.
     """
-    df_base, _, flux_base = serie_performance(ctx)
+    df_base, _, flux_base, _valorisations = serie_performance(ctx)
     if df_base.empty:
         return {"vide": True}
 

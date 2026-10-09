@@ -110,14 +110,19 @@ class _FauxTable:
 
 
 class _Suppression:
+    """Chaîne de suppression enchaînable : `eq` puis `in_` puis `eq` (propriétaire)."""
+
     def __init__(self, client):
         self.c = client
 
     def eq(self, *a, **k):
-        return _Reponse([])
+        return self
 
     def in_(self, champ, lot):
         self.c.retires.extend(lot)
+        return self
+
+    def execute(self):
         return _Reponse([])
 
 
