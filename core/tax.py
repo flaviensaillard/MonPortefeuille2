@@ -493,6 +493,10 @@ def cessions_de_lannee(
     Suit le CUMP (PRU en euros) chronologique jusqu'à chaque vente, avec repli
     sur `positions[ticker].pru_eur` lorsqu'un test unitaire ne fournit que les
     ventes sans les achats antérieurs.
+
+    2.1.0 (revue T-01) : sans taux de change, le montant n'est PAS pris en brut
+    pour des euros. La cession porte `prix_cession_eur` = None et une mention
+    `indisponible` ; `calculer` refuse alors de la chiffrer.
     """
     from . import fx
     from .portfolio import classe_de
@@ -501,21 +505,26 @@ def cessions_de_lannee(
         transactions,
         key=lambda x: (x.date, 0 if x.est_achat else 1),
     )
-    soldes: dict[str, dict[str, float]] = {}
+    soldes: dict[str, dict] = {}
     cessions: dict[Classe, list[dict]] = {}
 
     for t in triees:
         if t.date.year > annee:
             continue
+        motif_taux = None
         try:
             montant_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
         except fx.FXIndisponible:
-            montant_eur = t.montant_net
+            montant_eur = None
+            motif_taux = f"Taux {t.devise}/EUR indisponible le {t.date:%d/%m/%Y} pour {t.ticker}"
 
-        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0})
+        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0, "incertain": False})
         if t.est_achat:
             etat["qte"] += t.quantite
-            etat["cout_eur"] += montant_eur
+            if montant_eur is None:
+                etat["incertain"] = True        # coût inconnu : la suite de la position l'est aussi
+            else:
+                etat["cout_eur"] += montant_eur
         elif t.est_vente:
             pos = positions.get(t.ticker)
             if etat["qte"] > 1e-9:
@@ -526,19 +535,26 @@ def cessions_de_lannee(
                 if etat["qte"] <= 1e-6:
                     etat["qte"] = 0.0
                     etat["cout_eur"] = 0.0
+                    etat["incertain"] = False
             else:
                 pru_instant = pos.pru_eur if pos else 0.0
 
             if t.date.year == annee:
-                classe = classe_de(t.ticker)
-                cessions.setdefault(classe, []).append({
+                motif = motif_taux
+                if motif is None and etat["incertain"]:
+                    motif = (f"Coût d'acquisition incertain pour {t.ticker} "
+                             "(taux manquant sur un achat antérieur)")
+                ligne = {
                     "actif": t.ticker,
                     "date": t.date,
                     "quantite": t.quantite,
                     "pru_eur": pru_instant,
                     "prix_cession_eur": montant_eur,
                     "sens": "vente",
-                })
+                }
+                if motif:
+                    ligne["indisponible"] = motif
+                cessions.setdefault(classe_de(t.ticker), []).append(ligne)
 
     crypto = cessions.get(Classe.CRYPTO)
     if crypto:
@@ -575,6 +591,8 @@ def enrichir_crypto(lignes: list[dict], transactions: list["Transaction"]) -> No
     fractions_prises = 0.0
 
     for l in sorted(lignes, key=lambda x: x["date"]):
+        if l.get("prix_cession_eur") is None:
+            continue        # taux absent : la ligne est déjà marquée indisponible
         d = l["date"]
         iso = d.isoformat()
 
@@ -621,6 +639,11 @@ def calculer(transactions_par_classe: dict[Classe, list[dict]], annee: int,
              statut: str = "Célibataire",
              anomalies: list[str] | None = None) -> dict:
     """Calcule l'ensemble des régimes pour une année d'imposition."""
+    for lignes_classe in transactions_par_classe.values():
+        for ligne in lignes_classe or []:
+            if isinstance(ligne, dict) and ligne.get("indisponible"):
+                raise ValueError(f"Calcul non produit : {ligne['indisponible']}.")
+
     resultats: dict = {"annee": annee, "regimes": []}
 
     classes_titres = (Classe.ACTION_ETF, Classe.OBLIGATION_ETF, Classe.OR)
@@ -669,6 +692,61 @@ def calculer(transactions_par_classe: dict[Classe, list[dict]], annee: int,
 # Détails complets pour le pré-remplissage des formulaires 2074, 2086 et 2042
 # ===========================================================================
 
+# ===========================================================================
+# Garde-fous de calcul (2.1.0 — revue 2.0.1, T-01 / T-02 / priorité 5)
+# ===========================================================================
+# Règle commune : une donnée manquante RENDE LE CALCUL INCOMPLET et le dit.
+# Jamais de repli sur le montant brut étranger, jamais d'exception ravalée.
+
+
+def _montant_eur(montant: float, devise: str, date_iso: str, ticker: str,
+                 date_obj, indisponible: list[str]) -> float:
+    """Convertit en euros, ou SIGNALE l'absence de taux. Jamais de repli au brut."""
+    from . import fx
+    try:
+        return montant * fx.taux(devise, date_iso, "EUR")
+    except fx.FXIndisponible:
+        _ajouter_unique(
+            indisponible,
+            f"Taux {devise}/EUR indisponible le {date_obj:%d/%m/%Y} pour {ticker} : "
+            "montant non converti, calcul non produit.",
+        )
+        return 0.0
+
+
+def _ajouter_unique(liste: list[str], message: str) -> None:
+    if message not in liste:
+        liste.append(message)
+
+
+def _normaliser_inventaire(inventaire) -> list[dict]:
+    """Lignes d'inventaire crypto hors application, triées par actif puis date.
+
+    Chaque ligne : `actif`, `date` (date ou ISO), `quantite`, `cout_acquisition_eur`
+    (None = manquant, donc bloquant), `source`. Une ligne sans actif ni date est ignorée.
+    """
+    import datetime as _dt
+
+    sortie: list[dict] = []
+    for e in inventaire or []:
+        d = e.get("date")
+        if isinstance(d, str):
+            d = _dt.date.fromisoformat(d[:10])
+        actif = str(e.get("actif") or "").strip()
+        if d is None or not actif:
+            continue
+        cout = e.get("cout_acquisition_eur")
+        sortie.append({
+            "actif": actif,
+            "date": d,
+            "quantite": float(e.get("quantite") or 0.0),
+            "cout": None if cout in (None, "") else float(cout),
+            "source": str(e.get("source") or "").strip(),
+        })
+    sortie.sort(key=lambda x: (x["actif"], x["date"]))
+    return sortie
+
+
 def detail_2074_de_lannee(
     transactions: list["Transaction"],
     annee: int,
@@ -697,15 +775,14 @@ def detail_2074_de_lannee(
 
     soldes: dict[str, dict[str, float]] = {}
     operations: list[dict] = []
+    indisponible: list[str] = []
     pv_par_annee: dict[int, float] = {}
 
     for t in triees:
         if t.date.year > annee:
             continue
-        try:
-            net_eur = t.montant_net * fx.taux(t.devise, t.date.isoformat(), "EUR")
-        except fx.FXIndisponible:
-            net_eur = t.montant_net
+        net_eur = _montant_eur(t.montant_net, t.devise, t.date.isoformat(), t.ticker,
+                               t.date, indisponible)
 
         etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0})
         if t.est_achat:
@@ -812,6 +889,8 @@ def detail_2074_de_lannee(
 
     return {
         "annee": annee,
+        "indisponible": indisponible,
+        "calcul_complet": not indisponible,
         "operations": operations,
         "par_actif": par_actif,
         "ligne_905": round(ligne_905, 2),
@@ -829,10 +908,22 @@ def detail_2074_de_lannee(
 def detail_2086_de_lannee(
     transactions: list["Transaction"],
     annee: int,
+    inventaire: list[dict] | None = None,
 ) -> dict:
     """Calcule l'intégralité du Formulaire 2086 (cryptomonnaies, art. 150 VH bis)
     en suivant les achats et les fractions de capital déduites (ligne 221) depuis
-    l'origine du portefeuille jusqu'à la fin de `annee`."""
+    l'origine du portefeuille jusqu'à la fin de `annee`.
+
+    `inventaire` (2.1.0, revue T-02) : crypto-actifs détenus HORS des transactions
+    suivies, une ligne par solde de référence :
+    `{"actif", "date", "quantite", "cout_acquisition_eur", "source"}`.
+    Le solde valable à une date de cession est le plus récent au plus tard à cette
+    date. Un actif déclaré sans solde à la date d'une cession bloque le calcul ;
+    une position sans prix d'acquisition aussi.
+
+    Aucun cours ni aucun taux manquant n'est ravalé : chacun rend le calcul
+    incomplet (`calcul_complet` = False), et `indisponible` nomme ce qui manque.
+    """
     from . import fx, prices
     from .portfolio import classe_de, filtrer_ventes_excedentaires
 
@@ -842,10 +933,15 @@ def detail_2086_de_lannee(
     )
 
     # 2.1.0 (revue, constat 6) : comme au 2074, une vente supérieure à la
-    # position détenue est écartée et annoncée. Avant, les quantités étaient
-    # clampées à zéro en silence et la cession fictive entrait au formulaire.
+    # position détenue est écartée et annoncée.
     triees, ventes_excedentaires = filtrer_ventes_excedentaires(triees)
 
+    externes_par_actif: dict[str, list[dict]] = {}
+    for e in _normaliser_inventaire(inventaire):
+        externes_par_actif.setdefault(e["actif"], []).append(e)
+
+    indisponible: list[str] = []
+    sources_utilisees: set[str] = set()
     cout_total_brut_eur = 0.0
     somme_fractions_deduites = 0.0
     quantites: dict[str, float] = {}
@@ -855,10 +951,7 @@ def detail_2086_de_lannee(
         if t.date.year > annee:
             continue
         iso = t.date.isoformat()
-        try:
-            net_eur = t.montant_net * fx.taux(t.devise, iso, "EUR")
-        except fx.FXIndisponible:
-            net_eur = t.montant_net
+        net_eur = _montant_eur(t.montant_net, t.devise, iso, t.ticker, t.date, indisponible)
 
         if t.est_achat:
             cout_total_brut_eur += net_eur
@@ -868,24 +961,60 @@ def detail_2086_de_lannee(
             prix_unitaire_implicite_eur = (
                 prix_cession_eur / t.quantite if t.quantite > 0 else 0.0
             )
+
+            # Positions détenues HORS application, valables à la date de cession.
+            externes_qte: dict[str, float] = {}
+            cout_externe_eur = 0.0
+            for actif, entrees in externes_par_actif.items():
+                valables = [e for e in entrees if e["date"] <= t.date]
+                if not valables:
+                    _ajouter_unique(
+                        indisponible,
+                        f"Solde externe de {actif} inconnu au {t.date:%d/%m/%Y} : déclarez "
+                        "un solde à cette date ou antérieure (quantité 0 si rien n'était détenu).",
+                    )
+                    continue
+                solde = valables[-1]
+                if solde["cout"] is None:
+                    _ajouter_unique(
+                        indisponible,
+                        f"Prix d'acquisition de {actif} ({solde['source'] or 'source non précisée'}) "
+                        f"manquant au solde du {solde['date']:%d/%m/%Y}.",
+                    )
+                    continue
+                externes_qte[actif] = solde["quantite"]
+                cout_externe_eur += solde["cout"]
+                if solde["quantite"] > 1e-8 and solde["source"]:
+                    sources_utilisees.add(solde["source"])
+
+            # Valeur globale (ligne 212) : suivi + hors application.
+            qte_totale = dict(quantites)
+            for actif, q in externes_qte.items():
+                qte_totale[actif] = qte_totale.get(actif, 0.0) + q
+
             valeur_globale_eur = 0.0
-            for c_tick, c_qte in quantites.items():
+            for c_tick, c_qte in qte_totale.items():
                 if c_qte <= 1e-8:
                     continue
                 if c_tick == t.ticker and prix_unitaire_implicite_eur > 0:
                     valeur_globale_eur += c_qte * prix_unitaire_implicite_eur
-                else:
-                    try:
-                        px = prices.cours(c_tick, iso)
-                        tx = fx.taux("USD", iso, "EUR")
-                        valeur_globale_eur += c_qte * px * tx
-                    except Exception:
-                        pass
+                    continue
+                try:
+                    px = prices.cours(c_tick, iso)
+                    tx = fx.taux("USD", iso, "EUR")
+                except (prices.CoursIndisponible, fx.FXIndisponible):
+                    _ajouter_unique(
+                        indisponible,
+                        f"Cours ou taux indisponible pour {c_tick} le {t.date:%d/%m/%Y} : "
+                        "valeur globale du portefeuille incomplète.",
+                    )
+                    continue
+                valeur_globale_eur += c_qte * px * tx
 
             if valeur_globale_eur < prix_cession_eur:
                 valeur_globale_eur = prix_cession_eur
 
-            ligne_220 = cout_total_brut_eur
+            ligne_220 = cout_total_brut_eur + cout_externe_eur
             ligne_221 = somme_fractions_deduites
             ligne_223 = max(0.0, ligne_220 - ligne_221)
             fraction_capital = (
@@ -941,6 +1070,9 @@ def detail_2086_de_lannee(
         "case_3an": round(case_3an, 2),
         "case_3bn": round(case_3bn, 2),
         "ventes_excedentaires": ventes_excedentaires,
+        "indisponible": indisponible,
+        "calcul_complet": not indisponible,
+        "sources_externes": sorted(sources_utilisees),
     }
 
 

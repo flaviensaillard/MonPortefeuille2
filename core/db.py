@@ -56,6 +56,7 @@ MESSAGE_COMPTES_2_0 = (
 # Tables de la nouvelle application.
 T_TRANSACTIONS = "pf2_transactions"
 T_APPORTS = "pf2_apports"
+T_INVENTAIRE = "pf2_inventaire_crypto"   # 2.1.0 : crypto hors application (T-02)
 T_SNAPSHOTS = "pf2_snapshots"
 T_COURS = "pf2_cours"
 T_FX = "pf2_fx"
@@ -210,6 +211,7 @@ PAGE_MAX = 1000
 ORDRE_PAGINATION = {
     T_TRANSACTIONS: "id",
     T_APPORTS: "id",
+    T_INVENTAIRE: "id",
     T_SNAPSHOTS: "date,id",
     T_COURS: "ticker,date",
     T_FX: "devise,contre,date",
@@ -512,42 +514,49 @@ def ajouter_alerte(titre: str, message: str, niveau: str = "info") -> None:
 
 
 
+class ErreurConfigFiscale(RuntimeError):
+    """La configuration fiscale (table `Config`) ne peut être ni lue ni écrite.
+
+    Revue 2.0.1, T-07 : une lecture en échec ne retombe JAMAIS sur des valeurs
+    personnelles, et une écriture refusée n'est JAMAIS présentée comme réussie.
+    """
+
+
 def lire_config_fiscale() -> dict[str, str]:
-    """Lit les paramètres fiscaux mémorisés dans la table `Config` (v1)."""
+    """Lit la configuration fiscale de la table `Config` (v1), sans repli personnel.
+
+    Les clés d'identité ont un défaut NEUTRE (premier usage). Les données annuelles
+    n'ont aucun défaut : une année sans donnée reste une lacune (voir core/foyer.py).
+
+    Lève `ErreurConfigFiscale` si la lecture échoue.
+    """
     defauts = {
-        "f_statut": "Marié(e) / Pacsé(e)",
-        "f_enf": "2",
-        "f_parts": "3.0",
-        "f_s1": "32473.0",
-        "f_s2": "29772.0",
-        "f_u1": "true",
-        "f_k1": "9120",
-        "f_cv1": "5",
-        "f_r1": "240",
-        "f_elec1": "false",
-        "f_u2": "true",
-        "f_k2": "9120",
-        "f_cv2": "5",
-        "f_r2": "200",
-        "f_elec2": "false",
-        "f_int_net": "200.0",
-        "f_pays_etr": "Lituanie",
+        "f_statut": "Célibataire / Divorcé(e) / Veuf(ve)",
+        "f_enf": "0",
+        "f_parts": "1.0",
+        "f_pays_etr": "",
     }
     try:
         df = lire("Config")
-        if df is not None and not df.empty and {"Clé", "Valeur"} <= set(df.columns):
-            for _, r in df.iterrows():
-                k = str(r.get("Clé") or "").strip()
-                v = r.get("Valeur")
-                if k and v is not None and pd.notna(v):
-                    defauts[k] = str(v)
-    except Exception:
-        pass
+    except Exception as exc:
+        raise ErreurConfigFiscale(f"lecture de la table Config impossible ({exc})") from exc
+    if df is not None and not df.empty and {"Clé", "Valeur"} <= set(df.columns):
+        for _, r in df.iterrows():
+            k = str(r.get("Clé") or "").strip()
+            v = r.get("Valeur")
+            if k and v is not None and pd.notna(v):
+                defauts[k] = str(v)
     return defauts
 
 
 def sauver_config_fiscale(modifs: dict[str, object]) -> None:
-    """Met à jour les clés fiscales dans la table `Config` de Supabase."""
+    """Met à jour les clés fiscales dans la table `Config`.
+
+    Lève `ErreurConfigFiscale` à la moindre écriture refusée : l'appelant ne doit
+    jamais croire qu'une donnée est enregistrée alors qu'elle ne l'est pas.
+    """
+    if not modifs:
+        return
     try:
         c = client()
         df = lire("Config")
@@ -563,8 +572,33 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
                 c.table("Config").update({"Valeur": val_str}).eq("id", existantes[k]).execute()
             else:
                 c.table("Config").insert({"Clé": k, "Valeur": val_str}).execute()
-    except Exception:
-        pass
+    except Exception as exc:
+        raise ErreurConfigFiscale(f"écriture de la table Config impossible ({exc})") from exc
+
+
+def inventaire_crypto() -> pd.DataFrame:
+    """Soldes crypto détenus hors application (`pf2_inventaire_crypto`), 2.1.0 (T-02)."""
+    return lire(T_INVENTAIRE)
+
+
+def enregistrer_inventaire_crypto(lignes: list[dict], ids_supprimes: list[int]) -> None:
+    """Crée, met à jour et supprime les soldes d'inventaire crypto.
+
+    Une ligne sans `id` est créée, une ligne avec `id` est mise à jour, les
+    `ids_supprimes` sont effacés. Toute erreur remonte : rien n'est avalé.
+    """
+    try:
+        cl = client()
+        for i in ids_supprimes:
+            cl.table(T_INVENTAIRE).delete().eq("id", int(i)).execute()
+        for ligne in lignes:
+            champs = {k: v for k, v in ligne.items() if k != "id" and v is not None}
+            if ligne.get("id") is not None:
+                cl.table(T_INVENTAIRE).update(champs).eq("id", int(ligne["id"])).execute()
+            else:
+                cl.table(T_INVENTAIRE).insert(_avec_proprietaire(T_INVENTAIRE, [champs])).execute()
+    except Exception as exc:
+        raise _traduire_erreur(T_INVENTAIRE, exc) from exc
 
 
 def lire_allocation_personnalisee() -> dict:

@@ -77,6 +77,7 @@ def base(tmp_path_factory):
     cur.execute(sql_004.replace("<VOTRE-UID>", user_a))
     cur.execute((MIGRATIONS / "005_snapshot_complet.sql").read_text(encoding="utf-8"))
     cur.execute((MIGRATIONS / "006_twr_valorisation_flux.sql").read_text(encoding="utf-8"))
+    cur.execute((MIGRATIONS / "007_inventaire_crypto.sql").read_text(encoding="utf-8"))
 
     # Droits par défaut façon Supabase : les rôles API ont les droits de base,
     # les politiques RLS décident ensuite ligne par ligne.
@@ -458,3 +459,62 @@ def test_les_politiques_publiques_de_002_sont_supprimees():
     sql = (MIGRATIONS / "004_auth_rls.sql").read_text(encoding="utf-8")
     for table in TABLES_PF2:
         assert f"drop policy if exists pf2_acces_public on {table}" in sql
+
+
+# ---------------------------------------------------------------------------
+# Inventaire crypto hors application (revue 2.0.1 — T-02, migration 007)
+# Chaque solde est une donnée personnelle : même protection que les autres pf2_.
+# ---------------------------------------------------------------------------
+class TestInventaireCrypto:
+    def test_anon_ne_lit_aucune_position(self, base):
+        conn, _, _ = base
+        cur = conn.cursor()
+        _session(cur, "anon")
+        cur.execute("select count(*) from pf2_inventaire_crypto")
+        assert cur.fetchone()[0] == 0
+        conn.execute("rollback")
+
+    def test_anon_ne_peut_pas_ecrire(self, base):
+        conn, _, _ = base
+        cur = conn.cursor()
+        _session(cur, "anon")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cur.execute(
+                "insert into pf2_inventaire_crypto (date, actif, quantite, cout_acquisition_eur) "
+                "values ('2025-01-01', 'ETH-USD', 1, 1)"
+            )
+        conn.execute("rollback")
+
+    def test_le_proprietaire_est_renseigne_et_la_position_lui_appartient(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "insert into pf2_inventaire_crypto (date, actif, quantite, cout_acquisition_eur, source) "
+            "values ('2025-01-01', 'ETH-USD', 2, 3000, 'Kraken') returning id, user_id"
+        )
+        ligne_id, proprietaire = cur.fetchone()
+        assert str(proprietaire) == user_a
+        conn.execute("commit")
+
+        _session(cur, "authenticated", "00000000-0000-4000-8000-00000000000b")
+        cur.execute("select count(*) from pf2_inventaire_crypto where id = %s", (ligne_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("delete from pf2_inventaire_crypto where id = %s", (ligne_id,))
+        assert cur.rowcount == 0
+        conn.execute("rollback")
+
+        _session(cur, "authenticated", user_a)
+        cur.execute("delete from pf2_inventaire_crypto where id = %s", (ligne_id,))
+        conn.execute("commit")
+
+    def test_une_quantite_negative_est_refusee(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cur.execute(
+                "insert into pf2_inventaire_crypto (date, actif, quantite, cout_acquisition_eur) "
+                "values ('2025-01-01', 'ETH-USD', -1, 1)"
+            )
+        conn.execute("rollback")

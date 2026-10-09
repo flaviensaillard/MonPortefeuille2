@@ -1879,14 +1879,14 @@
     /* Les paramètres fiscaux vivent dans la table `Config` : c'est ce qui
        permet à l'application Android et à l'application Streamlit de partager
        les mêmes valeurs au lieu de se contredire. */
+    /* Identité du foyer (sans année) : partagée avec la page Fiscalité Streamlit.
+       2.1.0 (revue 2.0.1, T-07) : les données ANNUELLES (salaires, intérêts,
+       kilomètres, puissance, repas, frais réels) ne sont plus poussées vers
+       Config. Elles n'ont pas de millésime côté Android ; Config, sans année, les
+       faisait réutiliser d'une année à l'autre. Elles restent locales. */
     var CORRESPONDANCE_CONFIG = {
         statutFiscal: 'f_statut', partsFiscales: 'f_parts', nbEnfants: 'f_enf',
-        salaireNetImposable1: 'f_s1', salaireNetImposable2: 'f_s2',
-        interetsEtrangers: 'f_int_net', paysEtranger: 'f_pays_etr',
-        utiliserFraisReels1: 'f_u1', fraisKm1: 'f_k1', cvFiscal1: 'f_cv1',
-        joursRepas1: 'f_r1', vehiculeElectrique1: 'f_elec1',
-        utiliserFraisReels2: 'f_u2', fraisKm2: 'f_k2', cvFiscal2: 'f_cv2',
-        joursRepas2: 'f_r2', vehiculeElectrique2: 'f_elec2'
+        paysEtranger: 'f_pays_etr'
     };
 
     var REGLES_REGLAGES = {
