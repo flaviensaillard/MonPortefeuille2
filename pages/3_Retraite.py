@@ -274,22 +274,26 @@ st.caption(
 )
 
 lignes = []
-taux_actuel = ctx.taux_eur_usd if ctx.taux_eur_usd > 0 else 1.125
-cap_nom_usd = float(fin_a["Capital nominal"])
-cap_reel_usd = float(fin_a["Capital réel"])
-eur_base_reel = cap_reel_usd / taux_actuel
-for variation in (-0.30, -0.15, 0.0, 0.15, 0.30):
-    taux_sim = taux_actuel * (1 + variation)
-    cap_nom_eur = cap_nom_usd / taux_sim
-    cap_reel_eur = cap_reel_usd / taux_sim
-    ecart_eur_pct = (cap_reel_eur / eur_base_reel - 1.0) if eur_base_reel > 0 else 0.0
-    lignes.append({
-        "Variation EUR/USD": f"{ui.pct(variation, signe=True)} (1 € = {taux_sim:.3f} $)",
-        "Capital nominal ($ / €)": ui.usd_eur(cap_nom_usd, cap_nom_eur),
-        "Pouvoir d'achat ($ / €)": ui.usd_eur(cap_reel_usd, cap_reel_eur),
-        "Impact en € vs taux actuel": ui.pct(ecart_eur_pct, signe=True),
-    })
-ui.tableau(pd.DataFrame(lignes))
+taux_actuel = ctx.taux_eur_usd if (ctx.taux_eur_usd or 0) > 0 else None
+if taux_actuel is None:
+    # Pas de taux de remplacement : la sensibilité n'est pas calculée.
+    st.warning("Taux EUR/USD indisponible : le tableau de sensibilité au change n'est pas calculé. Rien n'a été estimé à la place.")
+else:
+    cap_nom_usd = float(fin_a["Capital nominal"])
+    cap_reel_usd = float(fin_a["Capital réel"])
+    eur_base_reel = cap_reel_usd / taux_actuel
+    for variation in (-0.30, -0.15, 0.0, 0.15, 0.30):
+        taux_sim = taux_actuel * (1 + variation)
+        cap_nom_eur = cap_nom_usd / taux_sim
+        cap_reel_eur = cap_reel_usd / taux_sim
+        ecart_eur_pct = (cap_reel_eur / eur_base_reel - 1.0) if eur_base_reel > 0 else 0.0
+        lignes.append({
+            "Variation EUR/USD": f"{ui.pct(variation, signe=True)} (1 € = {taux_sim:.3f} $)",
+            "Capital nominal ($ / €)": ui.usd_eur(cap_nom_usd, cap_nom_eur),
+            "Pouvoir d'achat ($ / €)": ui.usd_eur(cap_reel_usd, cap_reel_eur),
+            "Impact en € vs taux actuel": ui.pct(ecart_eur_pct, signe=True),
+        })
+    ui.tableau(pd.DataFrame(lignes))
 
 st.warning(
     "Une variation de 15 % du taux de change fait varier votre capital de retraite "

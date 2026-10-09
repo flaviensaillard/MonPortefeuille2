@@ -63,9 +63,13 @@ jobs:
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json, pathlib
+          # Compte des identifiants uniques du corpus, pas des lignes : un
+          # identifiant répété ne serait envoyé qu'une fois.
+          ids_corpus = {json.loads(l)["id"] for l in open("ia/corpus/chunks.jsonl", encoding="utf-8") if l.strip()}
           etat = pathlib.Path("ia/corpus/.indexation.json")
-          total = sum(1 for l in open("ia/corpus/chunks.jsonl", encoding="utf-8") if l.strip())
-          fait = json.loads(etat.read_text())["total"] if etat.exists() else 0
+          indexes = set(json.loads(etat.read_text(encoding="utf-8")).get("ids", [])) if etat.exists() else set()
+          fait = len(indexes & ids_corpus)
+          total = len(ids_corpus)
           print(f"### Corpus indexé : {fait} / {total} passages")
           print()
           if fait >= total:

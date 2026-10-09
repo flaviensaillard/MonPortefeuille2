@@ -120,7 +120,7 @@ def main() -> int:
     # BACKFILL_JOURS=30 ne reconstitue que le dernier mois.
     limite = os.environ.get("BACKFILL_JOURS", "").strip()
 
-    manquantes = [t for t, ok in db.tables_presentes().items() if not ok]
+    manquantes = db.tables_requises_manquantes()
     if manquantes:
         log.error("Tables absentes : %s. Exécutez migrations/001_init.sql.", manquantes)
         return 1

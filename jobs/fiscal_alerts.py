@@ -72,14 +72,22 @@ def main() -> int:
     ]
     if ventes_crypto:
         total = 0.0
+        sans_taux = []
         for t in ventes_crypto:
             try:
                 taux_eur = 1.0 if t.devise == "EUR" else float(fx.taux(t.devise, t.date.isoformat(), "EUR"))
             except Exception:
-                taux_eur = 1.0 / 1.125 if t.devise == "USD" else 1.0
+                # Pas de repli : sans ce cours, le total ne peut pas être comparé au seuil.
+                sans_taux.append(t.date.isoformat())
+                continue
             total += t.montant_net * taux_eur
         franchise = fb.CRYPTO_FRANCHISE_CESSIONS
-        if total <= franchise:
+        if sans_taux:
+            message = (
+                f"Taux de change indisponible pour la ou les cession(s) du {', '.join(sorted(set(sans_taux)))}. "
+                "Le total des prix de cession ne peut pas être comparé au seuil : rien n'a été estimé."
+            )
+        elif total <= franchise:
             message = (
                 f"{len(ventes_crypto)} cession(s) crypto en {annee} pour "
                 f"{total:,.0f} €. Vous êtes SOUS le seuil de {franchise:.0f} € de "
@@ -112,7 +120,20 @@ def main() -> int:
         alertes += 1
 
     # --- 4. Contrats obligataires en euros : le principe d'exclusion de Gave ---
-    positions_actives = calculer_positions(transactions, anomalies=[])
+    try:
+        positions_actives = calculer_positions(transactions, anomalies=[])
+    except fx.FXIndisponible as exc:
+        # Le calcul des positions demande un cours : sans lui, on ne vérifie pas le principe
+        # et on le dit, au lieu de planter ou de deviner.
+        log.error("Principe d'exclusion non vérifié : %s", exc)
+        positions_actives = {}
+        db.ajouter_alerte(
+            "Principe d'exclusion : non vérifié",
+            f"Taux de change indisponible ({exc}) : la vérification des contrats en euros "
+            "n'a pas été faite. Rien n'a été estimé.",
+            niveau="info",
+        )
+        alertes += 1
     en_euros = sorted({
         pos.ticker for pos in positions_actives.values()
         if pos.quantite > 0

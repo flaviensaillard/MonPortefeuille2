@@ -804,8 +804,8 @@ def calculer_rente_mensuelle_reelle(
     rendement_annuel: float,
     inflation_annuelle: float = 0.02,
     taux_imposition_pv: float = 0.314,
-    taux_eur_usd: float = 1.15,
-) -> dict[str, float]:
+    taux_eur_usd: float | None = None,
+) -> dict[str, float | None]:
     """Calcule la rente mensuelle perpétuelle en pouvoir d'achat réel (méthode de la page Retraite).
 
     Principe :
@@ -817,7 +817,11 @@ def calculer_rente_mensuelle_reelle(
     """
     cap_u = max(0.0, float(capital_usd or 0.0))
     app_u = max(0.0, float(apports_cumules_usd or 0.0))
-    fx_u = float(taux_eur_usd) if (taux_eur_usd and taux_eur_usd > 0) else 1.0
+    # Sans taux EUR/USD, les montants en euros sont None (affichés « — »), jamais divisés par 1.
+    fx_u = float(taux_eur_usd) if (taux_eur_usd and taux_eur_usd > 0) else None
+
+    def _eur(montant_usd: float) -> float | None:
+        return montant_usd / fx_u if fx_u else None
 
     r_reel = (1.0 + float(rendement_annuel)) / (1.0 + float(inflation_annuelle)) - 1.0
     pv_latente_usd = max(0.0, cap_u - app_u)
@@ -829,20 +833,20 @@ def calculer_rente_mensuelle_reelle(
 
     return {
         "capital_usd": cap_u,
-        "capital_eur": cap_u / fx_u,
+        "capital_eur": _eur(cap_u),
         "apports_cumules_usd": app_u,
-        "apports_cumules_eur": app_u / fx_u,
+        "apports_cumules_eur": _eur(app_u),
         "plus_value_usd": pv_latente_usd,
-        "plus_value_eur": pv_latente_usd / fx_u,
+        "plus_value_eur": _eur(pv_latente_usd),
         "part_pv": part_pv,
         "rendement_nominal": float(rendement_annuel),
         "inflation": float(inflation_annuelle),
         "rendement_reel": r_reel,
         "taux_imposition_pv": float(taux_imposition_pv),
         "rente_brute_usd": rente_brute_usd,
-        "rente_brute_eur": rente_brute_usd / fx_u,
+        "rente_brute_eur": _eur(rente_brute_usd),
         "impot_usd": impot_usd,
-        "impot_eur": impot_usd / fx_u,
+        "impot_eur": _eur(impot_usd),
         "rente_nette_usd": rente_nette_usd,
-        "rente_nette_eur": rente_nette_usd / fx_u,
+        "rente_nette_eur": _eur(rente_nette_usd),
     }

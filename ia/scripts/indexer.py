@@ -60,24 +60,36 @@ def appel(url, route, corps, cle, methode="POST", timeout=300):
 
 
 def lire_passages():
-    """Les passages du corpus, sans doublon d'identifiant.
+    """Les passages du corpus, un par identifiant.
 
-    Un identifiant présent deux fois dans le fichier serait embarqué deux fois :
-    les neurons sont facturés à l'entrée, le second calcul ne sert à rien.
+    Un même identifiant répété avec le même texte est un doublon : il est
+    ignoré. Le même identifiant avec un texte différent est une erreur de
+    fabrication : on refuse de continuer (None), car le garder silencieusement
+    ferait croire au corpus que ce passage est indexé alors qu'il ne l'est pas.
     """
     if not CHUNKS.exists():
         print(f"ERREUR : {CHUNKS} est introuvable. Lancez fabriquer_chunks.py d'abord.")
         return None
-    vus, passages = set(), []
+    vus, passages, doublons = {}, [], 0
     for ligne in CHUNKS.read_text(encoding="utf-8").split("\n"):
         if not ligne.strip():
             continue
         passage = json.loads(ligne)
         identifiant = str(passage.get("id") or "")
-        if not identifiant or identifiant in vus:
+        if not identifiant:
+            print("ERREUR : passage sans identifiant dans le corpus.")
+            return None
+        if identifiant in vus:
+            if vus[identifiant] != passage.get("texte"):
+                print(f"ERREUR : l'identifiant {identifiant!r} désigne deux textes différents.")
+                print("Corrigez fabriquer_chunks.py puis regénérez chunks.jsonl.")
+                return None
+            doublons += 1
             continue
-        vus.add(identifiant)
+        vus[identifiant] = passage.get("texte")
         passages.append(passage)
+    if doublons:
+        print(f"  {doublons} doublon(s) identique(s) ignoré(s) dans le corpus.")
     return passages
 
 
@@ -164,6 +176,10 @@ def principal():
         bloc = nouveaux[curseur : curseur + 100]
         presents = set(deja_presents(url, cle, [m["id"] for m in bloc]))
         ignores += len(presents)
+        if presents:
+            # Déjà dans l'index : le point de reprise doit le savoir aussi.
+            deja.update(presents)
+            ecrire_etat(deja)
         tranche.extend(m for m in bloc if m["id"] not in presents)
         curseur += len(bloc)
     tranche = tranche[:limite]
@@ -199,7 +215,8 @@ def principal():
         print(f"  {envoyes}/{len(tranche)} — index : {etat.get('vecteurs', etat.get('passages', '?'))} passages")
         time.sleep(0.25)
 
-    print("Tranche terminée. Restants :", max(0, len(nouveaux) - len(tranche)))
+    restants = sum(1 for m in morceaux if m.get("id") not in deja)
+    print("Tranche terminée. Restants :", restants)
     return 0
 
 

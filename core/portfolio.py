@@ -475,13 +475,10 @@ def valoriser(positions: dict[str, Position], date: str | None = None) -> tuple[
             jour = date or dt.date.today().isoformat()
             prix = prices.cours(pos.ticker, date)
             taux = fx.taux(pos.devise_cotation, jour, "EUR")
-            if pos.devise_cotation == "USD":
-                taux_usd = 1.0
-            else:
-                try:
-                    taux_usd = fx.taux(pos.devise_cotation, jour, "USD")
-                except Exception:
-                    taux_usd = taux
+            # Pas de repli : sans taux USD, le titre n'est pas valorisé (échec signalé
+            # ci-dessous). Un taux EUR utilisé à la place d'un taux USD fabriquerait un
+            # chiffre plausible et faux.
+            taux_usd = 1.0 if pos.devise_cotation == "USD" else fx.taux(pos.devise_cotation, jour, "USD")
             valeur_eur = pos.quantite * prix * taux
             valeur_usd = pos.quantite * prix * taux_usd
             pos.prix = prix
@@ -599,3 +596,120 @@ def patrimoine_total(actifs: list[Actif]) -> dict[str, float]:
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
         totaux[cle] += a.valeur_eur
     return totaux
+
+
+# ---------------------------------------------------------------------------
+# Comptes de liquidités (cahier 2.0)
+#
+# Le solde d'un compte est la somme signée de ses opérations : jamais stocké.
+# Ces fonctions sont pures (ni réseau, ni base) : le robot, la page et les
+# tests lisent les mêmes règles. Miroir de app/.../js/comptes.js.
+# ---------------------------------------------------------------------------
+
+def soldes_par_compte(comptes: list[dict], operations: list[dict]) -> dict[str, float]:
+    """Somme signée des opérations de chaque compte, dans sa devise.
+
+    Une opération orpheline (compte inconnu) est ignorée ici, pas comptée ailleurs :
+    `pf2_operations_compte.compte_id` est une clé étrangère, un orphelin n'existe pas.
+    """
+    soldes = {str(c["id"]): 0.0 for c in comptes}
+    for o in operations:
+        cid = str(o.get("compte_id"))
+        if cid in soldes:
+            soldes[cid] += float(o.get("montant") or 0.0)
+    return {k: round(v, 6) for k, v in soldes.items()}
+
+
+def _compte_depuis_ligne(c: dict):
+    from .models import CompteCash, TypeCompte
+    return CompteCash(
+        id=str(c["id"]),
+        nom=str(c.get("nom") or ""),
+        devise=str(c.get("devise") or "").upper(),
+        type=TypeCompte(str(c.get("type") or "")),
+        banque=c.get("banque") or None,
+        motif=c.get("motif") or None,
+        archive=bool(c.get("archive")),
+        note=c.get("note") or None,
+    )
+
+
+def grouper_liquidites(comptes: list[dict], operations: list[dict]) -> list[dict]:
+    """Liquidités regroupées par (devise, poche) : une ligne par couple.
+
+    Les comptes archivés restent comptés : leur solde est du patrimoine. Un groupe
+    dont le solde est nul n'est pas listé.
+    """
+    soldes = soldes_par_compte(comptes, operations)
+    groupes: dict[tuple[str, str], float] = {}
+    for c in comptes:
+        cc = _compte_depuis_ligne(c)
+        cle = (cc.devise, cc.perimetre.value)
+        groupes[cle] = groupes.get(cle, 0.0) + soldes[str(c["id"])]
+    return [
+        {"devise": d, "perimetre": p, "quantite": round(q, 6)}
+        for (d, p), q in sorted(groupes.items())
+        if abs(q) > 1e-9
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Affichage des comptes (lecture seule, pour Streamlit et les tests)
+# ---------------------------------------------------------------------------
+
+LIBELLE_TYPE_COMPTE_AFFICHE = {"reserve": "Réserve", "disponible": "Disponible"}
+
+LIBELLE_OPERATION_COMPTE = {
+    "ouverture": "Solde d’ouverture", "depot": "Dépôt (apport)", "retrait": "Retrait",
+    "virement": "Virement", "achat_titres": "Achat de titres",
+    "vente_titres": "Vente de titres", "frais": "Frais",
+}
+
+
+def resume_comptes(comptes, operations):
+    """Une ligne par compte, pour l'affichage : soldes calculés, jamais stockés.
+
+    Ordre : comptes actifs d'abord (disponibles, puis réserves), archivés à la fin.
+    Un compte archivé garde sa ligne et son solde : il reste dans le patrimoine.
+    """
+    soldes = soldes_par_compte(comptes, operations)
+    nb_ops = {}
+    for o in operations or []:
+        nb_ops[o.get("compte_id")] = nb_ops.get(o.get("compte_id"), 0) + 1
+    lignes = []
+    for c in comptes or []:
+        lignes.append({
+            "id": c["id"],
+            "nom": c.get("nom") or "",
+            "banque": c.get("banque") or "Banque non renseignée",
+            "devise": c.get("devise") or "",
+            "type": LIBELLE_TYPE_COMPTE_AFFICHE.get(c.get("type"), c.get("type") or ""),
+            "motif": c.get("motif") or "",
+            "archive": bool(c.get("archive")),
+            "solde": soldes.get(c["id"], 0.0),
+            "nb_operations": nb_ops.get(c["id"], 0),
+        })
+    lignes.sort(key=lambda L: (L["archive"], 0 if L["type"] == "Disponible" else 1, L["devise"], L["nom"]))
+    return lignes
+
+
+def operations_compte_affichage(compte_id, comptes, operations):
+    """Opérations d'un compte, récentes d'abord, avec le compte d'en face d'un virement :
+    « → Livret CHF » si l'argent sort vers lui, « ← Courtage USD » s'il entre depuis lui."""
+    noms = {c["id"]: c.get("nom") or "" for c in comptes or []}
+    mes_ops = [o for o in operations or [] if o.get("compte_id") == compte_id]
+    mes_ops.sort(key=lambda o: (str(o.get("date") or ""), int(o.get("id") or 0)), reverse=True)
+    lignes = []
+    for o in mes_ops:
+        montant = float(o.get("montant") or 0.0)
+        contrepartie = ""
+        if o.get("type") == "virement" and o.get("contrepartie") in noms:
+            contrepartie = ("→ " if montant < 0 else "← ") + noms[o["contrepartie"]]
+        lignes.append({
+            "date": str(o.get("date") or ""),
+            "type": LIBELLE_OPERATION_COMPTE.get(o.get("type"), o.get("type") or ""),
+            "montant": montant,
+            "contrepartie": contrepartie,
+            "note": o.get("note") or "",
+        })
+    return lignes

@@ -40,7 +40,7 @@ def main() -> int:
     aujourdhui = dt.date.today()
 
     # --- Vérifier que le schéma existe ---
-    manquantes = [t for t, ok in db.tables_presentes().items() if not ok]
+    manquantes = db.tables_requises_manquantes()
     if manquantes:
         log.error("Tables absentes : %s. Exécutez migrations/001_init.sql.", manquantes)
         return 1
@@ -103,12 +103,17 @@ def main() -> int:
         totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
 
-    # --- Complément des liquidités (épargne de précaution CHF/CNY et compte courant USD/EUR) depuis Donnees ---
+    # --- Liquidités : comptes (2.0) si pf2_comptes est renseignée, sinon Donnees (v1).
+    #     `soldes_comptes_liquidites` choisit la source ; même forme dans les deux cas. ---
+    echecs_liquidites: list[str] = []
     try:
         comptes_liq = db.soldes_comptes_liquidites()
         if isinstance(comptes_liq, dict):
             for dev_code, info in comptes_liq.items():
-                code = str(dev_code).upper()
+                # La devise est le champ `ticker`. La clé peut être « CNY:courant » quand une
+                # devise est répartie entre deux poches : s'en servir ferait échouer le cours
+                # et la ligne serait écartée sans bruit.
+                code = str(info.get("ticker") or dev_code).upper()
                 if code in tickers_deja:
                     continue
                 qte = float(info.get("quantite") or 0.0)
@@ -118,13 +123,27 @@ def main() -> int:
                 try:
                     t_eur = 1.0 if code == "EUR" else float(fx.taux(code, aujourdhui.isoformat(), "EUR"))
                     t_usd = 1.0 if code == "USD" else float(fx.taux(code, aujourdhui.isoformat(), "USD"))
-                except Exception:
+                except Exception as exc:
+                    # Taux indisponible : la ligne est écartée ET signalée. Jamais valorisée à 1,0.
+                    echecs_liquidites.append(f"{code} ({exc})")
                     continue
                 cle_p = Perimetre.PRECAUTION.value if perim == "precaution" else Perimetre.COURANT.value
                 totaux[cle_p] = totaux.get(cle_p, 0.0) + qte * t_eur
                 totaux_usd[cle_p] = totaux_usd.get(cle_p, 0.0) + qte * t_usd
     except Exception as exc:
         log.warning("Lecture des liquidités Donnees ignorée : %s", exc)
+
+    if echecs_liquidites:
+        log.warning("Liquidités absentes du snapshot, taux indisponible : %s", echecs_liquidites)
+        try:
+            db.ajouter_alerte(
+                "Liquidités absentes du snapshot",
+                "Taux indisponible pour " + ", ".join(echecs_liquidites) + ". "
+                "Le patrimoine de ce snapshot est partiel.",
+                niveau="attention",
+            )
+        except Exception as exc:      # une alerte ne doit jamais tuer le snapshot
+            log.warning("Alerte non enregistrée : %s", exc)
 
     # --- Or ---
     try:

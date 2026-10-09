@@ -9,7 +9,7 @@ const vm = require('vm');
 
 const RACINE = path.join(__dirname, '..', 'app', 'src', 'main', 'assets', 'www', 'js');
 const FICHIERS = ['util.js', 'models.js', 'net.js', 'store.js', 'metrics.js',
-    'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js', 'ia.js'];
+    'comptes.js', 'portfolio.js', 'rebalance.js', 'ui.js', 'fiscal.js', 'views.js', 'ia.js'];
 
 // --- Faux navigateur -------------------------------------------------------
 const stockage = {};
@@ -170,11 +170,11 @@ console.log('\nRééquilibrage');
 function fauxContexte() {
     const ctx = PF.portefeuille.contexteVide();
     ctx.actifs = [
-        { ticker: 'IGLN.L', classe: 'or', deviseCotation: 'USD', poche: 'rv_physique', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: 0.01 },
-        { ticker: 'XDW0.L', classe: 'action_etf', deviseCotation: 'USD', poche: 'energie', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: -0.01 },
-        { ticker: 'FLXC.L', classe: 'action_etf', deviseCotation: 'USD', poche: 'asie', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: 0 },
-        { ticker: 'BTCUSDT', classe: 'crypto', deviseCotation: 'USD', poche: 'rv_numerique', quantite: 5, prix: 40, valeurUsd: 200, valeurEur: 178, variationPct: 0 },
-        { ticker: 'XJSE.SW', classe: 'obligation_etf', deviseCotation: 'JPY', poche: 'jgb', quantite: 300, prix: 1, valeurUsd: 2000, valeurEur: 1778, variationPct: 0 }
+        { ticker: 'IGLN.L', classe: 'or', deviseCotation: 'USD', dernierTaux: 0.889, poche: 'rv_physique', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: 0.01 },
+        { ticker: 'XDW0.L', classe: 'action_etf', deviseCotation: 'USD', dernierTaux: 0.889, poche: 'energie', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: -0.01 },
+        { ticker: 'FLXC.L', classe: 'action_etf', deviseCotation: 'USD', dernierTaux: 0.889, poche: 'asie', quantite: 100, prix: 40, valeurUsd: 4000, valeurEur: 3555, variationPct: 0 },
+        { ticker: 'BTCUSDT', classe: 'crypto', deviseCotation: 'USD', dernierTaux: 0.889, poche: 'rv_numerique', quantite: 5, prix: 40, valeurUsd: 200, valeurEur: 178, variationPct: 0 },
+        { ticker: 'XJSE.SW', classe: 'obligation_etf', deviseCotation: 'JPY', dernierTaux: 0.006, poche: 'jgb', quantite: 300, prix: 1, valeurUsd: 2000, valeurEur: 1778, variationPct: 0 }
     ];
     PF.portefeuille.agreger(ctx);
     return ctx;

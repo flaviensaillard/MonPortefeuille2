@@ -22,7 +22,7 @@ ANDROID_JAR="$PLAT/android.jar"
 # dans index.html manque sur le disque, la construction s'arrete : une APK qui
 # perd un onglet sans rien dire est pire qu'une APK qui ne se construit pas.
 WWW="$ROOT/app/src/main/assets/www"
-for f in js/util.js js/models.js js/net.js js/store.js js/metrics.js js/portfolio.js js/rebalance.js js/ui.js js/fiscal.js js/views.js js/ia.js js/app.js; do
+for f in js/util.js js/models.js js/net.js js/store.js js/metrics.js js/comptes.js js/portfolio.js js/rebalance.js js/ui.js js/fiscal.js js/views.js js/ia.js js/app.js; do
     if [ ! -f "$WWW/$f" ]; then
         echo "Module manquant : $WWW/$f" >&2
         exit 1
@@ -43,8 +43,8 @@ APP="$ROOT/app/src/main"
 BUILD="$ROOT/build"
 OUT="$ROOT/dist"
 
-VERSION_NAME="${VERSION_NAME:-1.7.7}"
-VERSION_CODE="${VERSION_CODE:-23}"
+VERSION_NAME="${VERSION_NAME:-2.0.1}"
+VERSION_CODE="${VERSION_CODE:-27}"
 KEYSTORE="$ROOT/keystore/portefeuille.jks"
 KEY_PASS="${KEY_PASS:-portefeuille}"
 KEY_ALIAS="${KEY_ALIAS:-portefeuille}"

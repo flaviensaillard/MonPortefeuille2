@@ -196,11 +196,14 @@
         return s.toLowerCase().indexOf('retrait') >= 0 ? -1 : 1;
     }
 
+    /* Montant signé d'un mouvement dans la colonne demandée. Aucun repli sur
+       l'autre devise : une colonne absente donne null (flux inconnu), jamais
+       un montant en euros compté comme des dollars. */
     function montantSigne(mouvement, colonne) {
         var m = mouvement || {};
         var v = U.num(m[colonne], null);
-        if (v === null || v === undefined || !isFinite(v)) v = U.num(m.montant_eur, 0);
-        return sensFlux(m) * Math.abs(U.num(v, 0));
+        if (v === null || v === undefined || !isFinite(v)) return null;
+        return sensFlux(m) * Math.abs(v);
     }
 
     function seriePerformance(snapshots, apports, fluxTitresFinal) {
@@ -238,7 +241,10 @@
         (apports || []).forEach(function (a) {
             var d = U.parseDate(a.date || a.Date);
             if (!d) return;
-            fluxJour[d] = (fluxJour[d] || 0) + montantSigne(a, colAp);
+            var sFlux = montantSigne(a, colAp);
+            // Flux inconnu : exclu ici, et la série n'est pas tracée (voir portfolio).
+            if (sFlux === null) return;
+            fluxJour[d] = (fluxJour[d] || 0) + sFlux;
         });
         var fluxAp = fluxParPeriode(dates, fluxJour, 0);
 
@@ -401,7 +407,9 @@
     function renteMensuelle(capitalUsd, apportsCumulesUsd, rendementAnnuel, inflationAnnuelle, tauxImpositionPV, tauxEurUsd) {
         var cap = Math.max(0, U.num(capitalUsd, 0));
         var app = Math.max(0, U.num(apportsCumulesUsd, 0));
-        var fx = U.num(tauxEurUsd, 0) > 0 ? U.num(tauxEurUsd, 1) : 1;
+        // Sans cours EUR/USD, la rente en euros n'existe pas : null, jamais un taux de repli.
+        var fx = U.tauxValide(tauxEurUsd);
+        if (fx === null) return null;
         var rReel = (1 + U.num(rendementAnnuel, 0)) / (1 + U.num(inflationAnnuelle, 0)) - 1;
         var pv = Math.max(0, cap - app);
         var partPV = cap > 0 ? pv / cap : 0;
@@ -480,7 +488,9 @@
        sera en euros. Une erreur d'hypothèse de 15 % coûte plus que la plupart
        des écarts de rendement entre scénarios. */
     function sensibiliteChange(capitalNominalUsd, capitalReelUsd, tauxEurUsd) {
-        var taux = U.num(tauxEurUsd, 0) > 0 ? U.num(tauxEurUsd, 1) : 1.125;
+        // Sans taux de référence, la sensibilité n'a pas de sens : null, pas 1,125.
+        var taux = U.tauxValide(tauxEurUsd);
+        if (taux === null) return null;
         var base = capitalReelUsd / taux;
         return [-0.30, -0.15, 0, 0.15, 0.30].map(function (v) {
             var t = taux * (1 + v);

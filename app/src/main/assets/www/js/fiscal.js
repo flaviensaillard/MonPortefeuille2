@@ -274,22 +274,29 @@
        chaque transaction (jamais une conversion manuelle). */
     function cessionsAnnee(ctx, annee) {
         var txs = (ctx.transactions || []).filter(function (t) { return String(t.date).slice(0, 4) === String(annee); });
-        if (!txs.length) return Promise.resolve({ parClasse: {}, total: 0, cessions: [] });
+        if (!txs.length) return Promise.resolve({ parClasse: {}, total: 0, cessions: [], indisponible: [] });
 
+        // Les lots se reconstituent depuis le tout premier achat : les taux de
+        // tout l'historique sont demandés, pas seulement ceux de l'année.
         var besoin = {};
-        txs.forEach(function (t) { if (t.devise !== 'EUR') besoin[t.devise + '|' + t.date] = 1; });
+        (ctx.transactions || []).forEach(function (t) { if (t.devise !== 'EUR') besoin[t.devise + '|' + t.date] = 1; });
 
         return Promise.all(Object.keys(besoin).map(function (cle) {
             var p = cle.split('|');
             return PF.net.taux(p[0], p[1], 'EUR').then(function (v) { return [cle, v]; });
         })).then(function (paires) {
             var taux = {};
-            paires.forEach(function (p) { taux[p[0]] = p[1] || 1; });
+            paires.forEach(function (p) { taux[p[0]] = PF.util.tauxValide(p[1]); });
+
+            var manquants = tauxManquants(ctx.transactions || [], taux);
+            if (manquants.length) {
+                return { parClasse: {}, total: null, cessions: [], indisponible: manquants };
+            }
 
             var lots = {}, cessions = [];
             // On rejoue tout l'historique pour reconstituer les lots.
             (ctx.transactions || []).forEach(function (t) {
-                var tEur = t.devise === 'EUR' ? 1 : (taux[t.devise + '|' + t.date] || 1);
+                var tEur = tauxTransaction(t, taux);
                 if (!lots[t.ticker]) lots[t.ticker] = [];
                 if (t.type === 'achat') {
                     lots[t.ticker].push({ qte: t.quantite, cout: t.montantNet * tEur });
@@ -326,7 +333,7 @@
                 if (c.pv >= 0) o.pv += c.pv; else o.mv += -c.pv;
             });
             var total = cessions.reduce(function (s, c) { return s + c.pv; }, 0);
-            return { parClasse: parClasse, total: total, cessions: cessions };
+            return { parClasse: parClasse, total: total, cessions: cessions, indisponible: [] };
         });
     }
 
@@ -352,8 +359,36 @@
     function montantNetEur(t, taux) {
         var brut = U.num(t.quantite, 0) * U.num(t.cours, 0);
         var net = estAchat(t) ? brut + U.num(t.frais, 0) : brut - U.num(t.frais, 0);
-        var tx = t.devise === 'EUR' ? 1 : (taux[t.devise + '|' + t.date] || 1);
-        return net * tx;
+        var tx = tauxTransaction(t, taux);
+        return tx === null ? null : net * tx;
+    }
+
+    /* Taux de conversion de la transaction vers l'euro, ou null si le cours du
+       jour n'est pas disponible. Jamais de repli sur 1 : un montant en euros
+       fabriqué avec un taux inventé entre dans une base imposable. */
+    function tauxTransaction(t, taux) {
+        if (t.devise === 'EUR') return 1;
+        return PF.util.tauxValide(taux[t.devise + '|' + t.date]);
+    }
+
+    /* Liste des cours de change qui manquent pour les transactions données. */
+    function tauxManquants(txs, taux) {
+        var vus = {}, liste = [];
+        txs.forEach(function (t) {
+            if (tauxTransaction(t, taux) !== null) return;
+            var cle = t.devise + '|' + String(t.date);
+            if (!vus[cle]) { vus[cle] = 1; liste.push({ devise: t.devise, date: String(t.date) }); }
+        });
+        return liste;
+    }
+
+    function ajouterManquants(liste, ajout) {
+        var vus = {};
+        liste.forEach(function (m) { vus[m.devise + '|' + m.date] = 1; });
+        ajout.forEach(function (m) {
+            if (!vus[m.devise + '|' + m.date]) { vus[m.devise + '|' + m.date] = 1; liste.push(m); }
+        });
+        return liste;
     }
 
     function ecrituresTriees(ctx, annee) {
@@ -377,12 +412,13 @@
     /* Formulaire 2074 : synthèse 905/913, cadre 5 ligne par ligne et cadre 11
        (imputation des moins-values, colonnes A à E). */
     function detail2074(txs, annee, taux) {
-        var soldes = {}, operations = [], pvParAnnee = {};
+        var soldes = {}, operations = [], pvParAnnee = {}, manquants = [];
 
         txs.forEach(function (t) {
             if (CLASSES_2074.indexOf(PF.modele.classeDe(t.ticker)) < 0) return;
             var an = Number(String(t.date).slice(0, 4));
             var net = montantNetEur(t, taux);
+            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: String(t.date) }]); return; }
             var qte = U.num(t.quantite, 0);
             if (!soldes[t.ticker]) soldes[t.ticker] = { qte: 0, cout: 0 };
             var etat = soldes[t.ticker];
@@ -455,6 +491,9 @@
         var l905 = parActif.reduce(function (s, a) { return s + (a.ligne_524 > 0 ? a.ligne_524 : 0); }, 0);
         var l913 = Math.abs(parActif.reduce(function (s, a) { return s + (a.ligne_524 < 0 ? a.ligne_524 : 0); }, 0));
         var bilanNet = U.arrondi(l905 - l913, 2);
+        // Une seule transaction sans cours et le bilan 2074 n'est plus juste :
+        // on n'en présente aucun chiffre.
+        if (manquants.length) return Object.assign(vide2074(annee), { indisponible: manquants });
 
         // --- Cadre 11 (bloc 1133) : colonnes A à E
         var cadre11 = [], mvRestante = l913, mvAntRestante = mvAnterieures;
@@ -501,8 +540,10 @@
         return Promise.all(demandes.map(function (d) {
             return PF.net.cours(d.ticker, d.date).then(function (c) { return [d.ticker + '|' + d.date, c]; });
         })).then(function (paires) {
+            // Un cours absent reste absent : detail2086 le signale au lieu de
+            // retirer la position de la valeur globale.
             var prix = {};
-            paires.forEach(function (p) { if (p[1]) prix[p[0]] = p[1]; });
+            paires.forEach(function (p) { prix[p[0]] = PF.util.estNombre(p[1]) && p[1] > 0 ? p[1] : null; });
             return prix;
         });
     }
@@ -511,7 +552,7 @@
        (ligne 221) suit le rapport entre le prix de cession et la valeur
        globale du portefeuille d'actifs numériques au jour de la cession. */
     function detail2086(txs, annee, taux, prix) {
-        var coutTotal = 0, fractions = 0, qtes = {}, cessions = [];
+        var coutTotal = 0, fractions = 0, qtes = {}, cessions = [], manquants = [];
 
         txs.forEach(function (t) {
             if (PF.modele.classeDe(t.ticker) !== 'crypto') return;
@@ -519,6 +560,7 @@
             var q = U.num(t.quantite, 0);
             var iso = String(t.date);
 
+            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: iso }]); return; }
             if (estAchat(t)) { coutTotal += net; qtes[t.ticker] = (qtes[t.ticker] || 0) + q; return; }
 
             var prixUnitaire = q > 0 ? net / q : 0;
@@ -529,7 +571,14 @@
                 if (tk === t.ticker && prixUnitaire > 0) valeurGlobale += qte * prixUnitaire;
                 else {
                     var c = prix[tk + '|' + iso];
-                    if (c) valeurGlobale += qte * c * (taux['USD|' + iso] || 1);
+                    var tUsd = PF.util.tauxValide(taux['USD|' + iso]);
+                    if (!PF.util.estNombre(c) || !(c > 0)) {
+                        manquants = ajouterManquants(manquants, [{ devise: 'cours ' + tk, date: iso }]);
+                    } else if (tUsd === null) {
+                        manquants = ajouterManquants(manquants, [{ devise: 'USD', date: iso }]);
+                    } else {
+                        valeurGlobale += qte * c * tUsd;
+                    }
                 }
             });
             if (valeurGlobale < net) valeurGlobale = net;      // garde-fou de la v2
@@ -550,6 +599,8 @@
             }
         });
 
+        if (manquants.length) return Object.assign(vide2086(annee), { indisponible: manquants });
+
         var total213 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_213; }, 0), 2);
         var total224 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_224; }, 0), 2);
         var exonere = cessions.length > 0 && total213 <= CRYPTO_FRANCHISE_CESSIONS;
@@ -560,13 +611,13 @@
         return {
             annee: annee, cessions: cessions, total_cessions_213: total213,
             plus_value_globale_224: total224, exonere_305: exonere,
-            case_3an: U.arrondi(case3an, 2), case_3bn: U.arrondi(case3bn, 2)
+            case_3an: U.arrondi(case3an, 2), case_3bn: U.arrondi(case3bn, 2), indisponible: []
         };
     }
 
     function bilanCessions(ctx, annee) {
         var txs = ecrituresTriees(ctx, annee);
-        if (!txs.length) return Promise.resolve({ t2074: vide2074(annee), t2086: vide2086(annee) });
+        if (!txs.length) return Promise.resolve({ t2074: vide2074(annee), t2086: vide2086(annee), indisponible: [] });
 
         var besoin = {};
         txs.forEach(function (t) {
@@ -579,10 +630,15 @@
             return PF.net.taux(p[0], p[1], 'EUR').then(function (v) { return [cle, v]; });
         })).then(function (paires) {
             var taux = {};
-            paires.forEach(function (p) { taux[p[0]] = p[1] || 1; });
+            paires.forEach(function (p) { taux[p[0]] = PF.util.tauxValide(p[1]); });
             var t2074 = detail2074(txs, annee, taux);
             return besoinsPrixCrypto(txs, annee).then(function (prix) {
-                return { t2074: t2074, t2086: detail2086(txs, annee, taux, prix) };
+                var t2086 = detail2086(txs, annee, taux, prix);
+                // Le bilan entier attend le cours : un 2074 juste et un 2086 faux
+                // ne se présentent pas ensemble comme une déclaration complète.
+                var indisponible = ajouterManquants(
+                    ajouterManquants([], t2074.indisponible || []), t2086.indisponible || []);
+                return { t2074: t2074, t2086: t2086, indisponible: indisponible };
             });
         });
     }
@@ -803,6 +859,13 @@
         out += '<div id="fiscBilan"><div class="card"><div class="vide" style="padding:14px">Calcul en cours…</div></div></div>';
 
         bilanCessions(ctx, annee).then(function (b) {
+            if (b.indisponible.length) {
+                var f0 = document.getElementById('fiscFormulaires');
+                if (f0) f0.innerHTML = formulairesIndisponibles(annee, b.indisponible);
+                var g0 = document.getElementById('fiscBilan');
+                if (g0) g0.innerHTML = bilanIndisponible(annee, b.indisponible);
+                return;
+            }
             var sim = simulerFoyer({
                 annee: annee, statut: r.statutFiscal, parts: r.partsFiscales,
                 salaire1: r.salaireNetImposable1, salaire2: r.salaireNetImposable2,
@@ -831,6 +894,42 @@
         });
 
         return out;
+    }
+
+    /* Un taux ou un cours manquant : aucun montant n'est calculé à sa place.
+       La liste dit quel cours manque, et les chiffres restent à « — ». */
+    function libelleManquant(m) {
+        var quand = U.jourMoisAnneeISO(m.date);
+        return /^cours /.test(m.devise)
+            ? m.devise + ' au ' + quand
+            : 'taux ' + m.devise + '/EUR au ' + quand;
+    }
+
+    function avisIndisponible(liste) {
+        return '<div class=\"erreur\">Montant non calculé, taux indisponible au '
+            + liste.map(function (m) { return UI.h(libelleManquant(m)); }).join(' ; ')
+            + '. Réessayez plus tard, quand le cours est disponible : rien n’a été estimé à la place.</div>';
+    }
+
+    function formulairesIndisponibles(annee, liste) {
+        return '<div class=\"card\"><div class=\"lbl\">Formulaires 2074 et 2086 ' + annee + '</div>'
+            + avisIndisponible(liste)
+            + ligneResultat('Plus-values de cession (2074, case 3VG / 3VH)', '—')
+            + ligneResultat('Plus-values de cryptos-actifs (2086, case 3AN / 3BN)', '—')
+            + '</div>';
+    }
+
+    function bilanIndisponible(annee, liste) {
+        return '<div class=\"card\"><div class=\"lbl\">Flat tax (PFU) ou barème progressif ?</div>'
+            + avisIndisponible(liste)
+            + ligneResultat('Flat tax : total', '—')
+            + ligneResultat('Barème : total', '—')
+            + '</div>'
+            + '<div class=\"card\"><div class=\"lbl\">Bilan de votre impôt sur le revenu ' + annee + '</div>'
+            + ligneResultat('Impôt total du foyer', '—', true)
+            + '<div style=\"font-size:11.5px;color:var(--txt-3);margin-top:6px\">Le bilan est calculé d’un seul tenant : '
+            + 'tant que ce cours manque, aucun de ses montants n’est affiché.</div>'
+            + '</div>';
     }
 
     /* Comptes à l'étranger connus du portefeuille : écrits dans les descriptions

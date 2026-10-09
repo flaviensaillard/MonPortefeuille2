@@ -22,14 +22,6 @@
         { valeur: 'DKK', texte: 'DKK — couronne danoise' }
     ];
 
-    var COMPTES = [
-        { valeur: 'courant_usd', texte: 'Compte courant USD', ticker: 'USD' },
-        { valeur: 'courant_eur', texte: 'Compte courant EUR', ticker: 'EUR' },
-        { valeur: 'precaution_chf', texte: 'Épargne de précaution CHF', ticker: 'CHF' },
-        { valeur: 'precaution_cny', texte: 'Épargne de précaution CNY', ticker: 'CNY' },
-        { valeur: 'courtier', texte: 'Compte titres (Swissquote)', ticker: null }
-    ];
-
     var ONGLETS = {
         bord: { titre: 'Tableau de bord', sous: '' },
         portefeuille: { titre: 'Portefeuille', sous: 'positions & opérations' },
@@ -44,7 +36,11 @@
         ctx: null,
         chargement: false,
         synchroniseLe: null,
-        demo: false
+        demo: false,
+        apresChargement: [],
+        migrationEnCours: false,
+        migrationEchec: false,
+        bandeauMigration: null
     };
 
     // ------------------------------------------------------------ démarrage
@@ -223,7 +219,8 @@
         }
     }
 
-    function rafraichir(viderCours) {
+    function rafraichir(viderCours, apres) {
+        if (typeof apres === 'function') etat.apresChargement.push(apres);
         if (etat.chargement) return;
         etat.chargement = true;
         var bouton = UI.$('#btnRefresh');
@@ -239,15 +236,37 @@
             var maintenant = new Date();
             etat.synchroniseLe = String(maintenant.getHours()).padStart(2, '0') + 'h'
                 + String(maintenant.getMinutes()).padStart(2, '0');
+            ctx.bandeauMigration = etat.bandeauMigration;
             naviguer(etat.onglet, true);
             if (!etat.demo) {
                 PF.store.sauverCache({ ctx: alleger(ctx) });
             }
             var nbErr = (ctx.erreurs || []).length;
             if (nbErr) UI.toast('Données partiellement chargées');
+            // Première ouverture en 2.0 : la table des comptes est là mais vide. On y
+            // reporte les liquidités de Donnees, une seule fois (le contrôle « vide »
+            // empêche la reprise si l'écran est rafraîchi avant la fin).
+            if (!etat.demo && ctx.comptesEtat && ctx.comptesEtat.presente && !ctx.comptes.length
+                && !etat.migrationEnCours && !etat.migrationEchec) {
+                etat.migrationEnCours = true;
+                migrerComptesV2().then(function (n) {
+                    etat.migrationEnCours = false;
+                    etat.bandeauMigration = n + ' compte' + (n > 1 ? 's' : '') + ' créé' + (n > 1 ? 's' : '')
+                        + ' d’après vos soldes actuels : complétez banque et motif dans l’écran Comptes.';
+                    UI.toast('Comptes créés depuis vos liquidités');
+                    rafraichir(true);
+                }).catch(function (e) {
+                    etat.migrationEnCours = false;
+                    etat.migrationEchec = true;
+                    UI.toast('Migration des comptes impossible : ' + e.message);
+                });
+            }
+            var attente = etat.apresChargement.splice(0);
+            attente.forEach(function (fn) { fn(); });
         }).catch(function (e) {
             etat.chargement = false;
             bouton.classList.remove('spin');
+            etat.apresChargement = [];
             UI.toast('Actualisation impossible : ' + (e && e.message ? e.message : 'réseau'));
         });
     }
@@ -308,6 +327,9 @@
             return;
         }
         if (cible.closest('#btnVirement')) { feuilleVirement(); return; }
+        var carteCompte = cible.closest('[data-compte]');
+        if (carteCompte) { feuilleCompte(carteCompte.getAttribute('data-compte')); return; }
+        if (cible.closest('#btnCompteNouveau')) { feuilleCompteNouveau(null); return; }
         if (cible.closest('#btnResetA')) {
             PF.store.sauverReglages({ retraiteRendementA: null, retraiteInflationA: null });
             UI.toast('Scénario A revenu à vos chiffres observés');
@@ -442,14 +464,16 @@
         }));
 
         // 4. Tables de la v2 — elles doivent exister et être lisibles.
-        [['pf2_transactions', 'transactions'], ['pf2_apports', 'apports'],
-         ['pf2_snapshots', 'snapshots'], ['pf2_inflation', 'inflation']].forEach(function (couple) {
+        [['pf2_transactions', 'transactions', '001_init.sql'], ['pf2_apports', 'apports', '001_init.sql'],
+         ['pf2_snapshots', 'snapshots', '001_init.sql'], ['pf2_inflation', 'inflation', '001_init.sql'],
+         ['pf2_comptes', 'comptes de liquidités', '003_comptes.sql'],
+         ['pf2_operations_compte', 'opérations de compte', '003_comptes.sql']].forEach(function (couple) {
             var table = couple[0];
             taches.push(PF.net.req('GET', url + '/rest/v1/' + table + '?select=*&limit=1', entetes)
                 .then(function (res) {
                     if (res.ok) ajouter('ok', table, couple[1] + ' — accessible.');
                     else if (res.status === 404) {
-                        ajouter('err', table, 'Table absente : exécutez migrations/001_init.sql dans l’éditeur SQL.');
+                        ajouter('err', table, 'Table absente : exécutez migrations/' + couple[2] + ' dans l’éditeur SQL.');
                     } else if (res.status === 401 || res.status === 403) {
                         ajouter('err', table, 'Refusée (HTTP ' + res.status + ') : RLS activée sans politique '
                             + 'pour le rôle anon. Ajoutez la politique « pf2_acces_public » de la migration.');
@@ -635,16 +659,91 @@
 
     // ------------------------------------------------------------- opérations
 
+    /* Les écritures de compte passent toutes par ici. Sans la table des comptes, on
+       ne devine pas où mettre l'argent : on refuse, en le disant. */
+    function exigerComptes() {
+        if (etat.ctx && etat.ctx.comptesEtat && etat.ctx.comptesEtat.presente) return true;
+        UI.toast('Comptes indisponibles : exécutez migrations/003_comptes.sql dans Supabase.');
+        return false;
+    }
+
+    function tousLesComptes() { return (etat.ctx && etat.ctx.comptes) || []; }
+    function toutesLesOperations() { return (etat.ctx && etat.ctx.operationsCompte) || []; }
+
+    function compteParId(id) {
+        if (id === null || id === undefined || id === '') return null;
+        return tousLesComptes().filter(function (c) { return c.id === String(id); })[0] || null;
+    }
+
+    /* L'opération de compte liée à une transaction ou à un apport, s'il y en a une.
+       Pas d'opération liée = opération antérieure à la 2.0 : son effet est déjà dans
+       le solde d'ouverture. On ne la réaffecte à aucun compte. */
+    function operationLiee(champ, valeur) {
+        if (valeur === null || valeur === undefined || valeur === '') return null;
+        return toutesLesOperations().filter(function (o) {
+            return o[champ] !== null && o[champ] !== undefined && String(o[champ]) === String(valeur);
+        })[0] || null;
+    }
+
+    function soldeCompte(c) { return PF.comptes.soldeDuCompte(c.id, toutesLesOperations()); }
+
+    /* Remplit un <select> de comptes. Chaque option affiche le solde : on voit ce
+       qu'on peut engager avant de valider. */
+    function remplirComptes(select, liste, valeurChoisie) {
+        if (!select) return;
+        select.innerHTML = liste.map(function (c) {
+            var sel = String(c.id) === String(valeurChoisie) ? ' selected' : '';
+            return '<option value="' + UI.h(c.id) + '"' + sel + '>' + UI.h(c.nom) + ' — '
+                + U.nombre(soldeCompte(c), 2) + ' ' + UI.h(c.devise) + ' · '
+                + UI.h(PF.comptes.LIBELLE_TYPE[c.type] || c.type) + '</option>';
+        }).join('');
+        select.disabled = !liste.length;
+    }
+
+    /* Branche la liste « Compte » d'un achat, d'une vente ou d'un ordre : comptes
+       DISPONIBLES, non archivés, de la devise du titre. Une réserve n'y apparaît
+       jamais. Aucun compte convenable : un message, et la création à la volée. */
+    function branchComptesTitre(c, opts) {
+        function rafraichirListe() {
+            var devise = String(UI.lire(opts.deviseId) || '').toUpperCase();
+            var select = c.querySelector('#' + opts.selectId);
+            var zone = c.querySelector('#' + opts.zoneId);
+            if (!select || !zone) return;
+            var liste = PF.comptes.comptesPourTitre(tousLesComptes(), devise, toutesLesOperations())
+                .map(function (x) { return x.compte; });
+            // Modification : le compte déjà utilisé reste proposé, même s'il ne convient
+            // plus. Il sera alors refusé à la validation, avec la raison écrite.
+            var courant = compteParId(opts.compteCourant);
+            if (courant && !liste.some(function (x) { return x.id === courant.id; })) liste.unshift(courant);
+            remplirComptes(select, liste, opts.compteCourant || select.value);
+            if (liste.length) { zone.innerHTML = ''; return; }
+            zone.innerHTML = '<div class="erreur">Aucun compte disponible en ' + UI.h(devise)
+                + '. Un achat ou une vente ne passe jamais par une réserve.</div>'
+                + '<button class="btn sec" id="' + opts.zoneId + 'Creer" style="margin-top:8px">'
+                + '＋ Créer un compte disponible en ' + UI.h(devise) + '…</button>';
+            zone.querySelector('#' + opts.zoneId + 'Creer').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(function () {
+                    feuilleCompteNouveau({ type: 'disponible', devise: devise }, opts.surCree);
+                }, 220);
+            });
+        }
+        c.querySelector('#' + opts.deviseId).addEventListener('change', rafraichirListe);
+        rafraichirListe();
+    }
+
     function feuilleNouveau() {
         UI.choix('Que voulez-vous enregistrer ?', [
             { texte: 'Un achat de titres', icone: '＋', cle: 'achat' },
             { texte: 'Une vente de titres', icone: '－', cle: 'vente' },
             { texte: 'Un apport de fonds', icone: '↓', cle: 'apport' },
             { texte: 'Un retrait de fonds', icone: '↑', cle: 'retrait' },
-            { texte: 'Un virement entre deux comptes', icone: '↔', cle: 'virement' }
+            { texte: 'Un virement entre deux comptes', icone: '↔', cle: 'virement' },
+            { texte: 'Mes comptes et leurs soldes', icone: '▣', cle: 'comptes' }
         ], function (o) {
             if (o.cle === 'achat' || o.cle === 'vente') feuilleTransaction(null, o.cle);
             else if (o.cle === 'virement') feuilleVirement();
+            else if (o.cle === 'comptes') { PF.vues.definirOngletPortefeuille('comptes'); naviguer('portefeuille'); }
             else feuilleApport(null, o.cle);
         });
     }
@@ -660,6 +759,9 @@
         if (!tickers.length) tickers = ['IGLN.L', 'BTCUSDT', 'XDW0.L', 'FLXC.L', 'XJSE.SW'];
 
         var sens = sensForce || (existante ? existante.type : 'achat');
+        var liee = existante ? operationLiee('transaction_id', existante.id) : null;
+        var historique = !!existante && !liee;
+
         var corps = ''
             + UI.champ({ id: 'txSens', label: 'Sens', type: 'select', valeur: sens, options: [{ valeur: 'achat', texte: 'Achat' }, { valeur: 'vente', texte: 'Vente' }] })
             + UI.champ({
@@ -675,7 +777,13 @@
             + '<div style="flex:1">' + UI.champ({ id: 'txFrais', label: 'Frais', type: 'number', valeur: existante ? existante.frais : 0 }) + '</div>'
             + '</div>'
             + UI.champ({ id: 'txDevise', label: 'Devise de cotation', type: 'select', valeur: existante ? existante.devise : 'USD', options: DEVISES })
-            + UI.champ({ id: 'txCompte', label: 'Compte', type: 'select', valeur: 'courtier', options: COMPTES });
+            + (historique
+                ? '<div class="info">Opération antérieure à la 2.0 : son effet est déjà dans le solde d’ouverture de vos comptes. '
+                    + 'Elle n’est pas réaffectée à un autre compte.</div>'
+                : UI.champ({
+                    id: 'txCompte', label: sens === 'vente' ? 'Compte crédité du produit (disponible)' : 'Compte débité (disponible)',
+                    type: 'select', valeur: liee ? liee.compte_id : '', options: []
+                }) + '<div id="txAucunCompte"></div>');
 
         var f = UI.feuille({
             titre: existante ? 'Modifier l’opération' : 'Nouvelle opération',
@@ -690,11 +798,16 @@
         });
 
         var corpsEl = f.corps;
-        if (corpsEl) {
-            corpsEl.querySelector('#txTicker').addEventListener('change', function () {
-                var t = this.value;
-                var d = M.deviseDe(t);
-                if (d) corpsEl.querySelector('#txDevise').value = d;
+        if (!corpsEl) return;
+        corpsEl.querySelector('#txTicker').addEventListener('change', function () {
+            var d = M.deviseDe(this.value);
+            if (d) corpsEl.querySelector('#txDevise').value = d;
+        });
+        if (!historique) {
+            branchComptesTitre(corpsEl, {
+                selectId: 'txCompte', zoneId: 'txAucunCompte', deviseId: 'txDevise',
+                compteCourant: liee ? liee.compte_id : null,
+                surCree: function () { feuilleTransaction(null, sens); }
             });
         }
     }
@@ -703,6 +816,43 @@
         var o = {};
         noms.forEach(function (n) { o[n] = UI.lire(n); });
         return o;
+    }
+
+    /* Contrôle du cloisonnement avant toute écriture : un achat exige un disponible
+       de la devise du titre et un solde suffisant ; une vente exige un disponible de
+       la devise du titre. Renvoie le premier refus, ou null. */
+    function controleTitre(ligne, compte, liee) {
+        var montant = PF.comptes.montantTitre(ligne.sens, ligne.quantite, ligne.cours, ligne.frais);
+        var erreurs = ligne.sens === 'achat'
+            ? PF.comptes.verifierAchat({
+                compte: compte, devise: ligne.devise, montant: -montant,
+                operations: toutesLesOperations(), idsExclus: liee ? [liee.id] : []
+            })
+            : PF.comptes.verifierVente({ compte: compte, devise: ligne.devise });
+        return erreurs.length ? erreurs[0] : null;
+    }
+
+    /* Une transaction de titres ET son mouvement de compte, ou aucun des deux. Si le
+       mouvement échoue, la transaction créée est retirée : pas de titres achetés sans
+       argent débité. */
+    function creerTitreAvecCompte(ligne, compte) {
+        var montant = PF.comptes.montantTitre(ligne.sens, ligne.quantite, ligne.cours, ligne.frais);
+        return PF.net.supabase.insert('pf2_transactions', [ligne]).then(function (rows) {
+            var txId = rows && rows[0] ? rows[0].id : null;
+            if (txId === null || txId === undefined) {
+                throw new Error('identifiant de la transaction non reçu : aucun compte débité');
+            }
+            var op = PF.comptes.operationTitre({
+                compte: compte, sens: ligne.sens, montant: montant, date: ligne.date,
+                transactionId: txId, note: null
+            });
+            return PF.net.supabase.insert('pf2_operations_compte', [PF.comptes.versLigneOperation(op)])
+                .catch(function (e) {
+                    return PF.net.supabase.supprimer('pf2_transactions', 'id=eq.' + txId).then(function () {
+                        throw new Error('compte non débité, opération annulée (' + e.message + ')');
+                    });
+                });
+        });
     }
 
     function enregistrerTransaction(existante) {
@@ -721,34 +871,50 @@
             quantite: quantite, cours: cours, frais: frais, devise: devise,
             source: 'appli', reference: null, note: null
         };
+        var liee = existante ? operationLiee('transaction_id', existante.id) : null;
+        var historique = !!existante && !liee;
+        var compte = null;
 
-        var compte = COMPTES.filter(function (c) { return c.valeur === v.txCompte; })[0];
-        var montantDevise = quantite * cours + (ligne.sens === 'achat' ? frais : -frais);
+        if (!historique) {
+            if (!exigerComptes()) return;
+            compte = compteParId(v.txCompte);
+            if (!compte) { UI.toast('Choisissez un compte disponible'); return; }
+            var refus = controleTitre(ligne, compte, liee);
+            if (refus) { UI.toast(refus); return; }
+        }
 
+        var montant = PF.comptes.montantTitre(ligne.sens, quantite, cours, frais);
+        var editionAvecCompte = !!existante && !historique;
         var promesse;
-        if (existante && existante.id) {
-            promesse = PF.net.supabase.update('pf2_transactions', ligne, 'id=eq.' + existante.id);
+
+        if (!existante) {
+            promesse = creerTitreAvecCompte(ligne, compte);
         } else {
-            promesse = PF.net.supabase.insert('pf2_transactions', [ligne]);
+            promesse = PF.net.supabase.update('pf2_transactions', ligne, 'id=eq.' + existante.id).then(function () {
+                if (historique) return null;
+                if (liee) {
+                    return PF.net.supabase.update('pf2_operations_compte', {
+                        compte_id: compte.id, montant: montant, date: date
+                    }, 'id=eq.' + liee.id);
+                }
+                return null;
+            });
         }
 
         promesse.then(function () {
-            if (compte && compte.ticker) {
-                return ajusterSoldeCompte(compte.ticker, devise, montantDevise * (ligne.sens === 'achat' ? -1 : 1), date);
-            }
-            return null;
-        }).then(function () {
             UI.toast('Opération enregistrée');
             document.querySelector('#voile').click();
             rafraichir(true);
         }).catch(function (e) {
             UI.toast('Échec : ' + (e && e.message ? e.message : 'écriture refusée'));
+            if (!existante || editionAvecCompte) rafraichir(true);
         });
     }
 
     function supprimerTransaction(existante) {
         if (!existante || existante.id === null) { UI.toast('Opération non identifiable'); return; }
-        UI.confirmer('Supprimer l’opération', 'La position sera recalculée depuis les transactions restantes.',
+        UI.confirmer('Supprimer l’opération', 'La position sera recalculée depuis les transactions restantes. '
+            + 'Le mouvement sur le compte lié est annulé avec elle.',
             'Supprimer', function () {
                 PF.net.supabase.supprimer('pf2_transactions', 'id=eq.' + existante.id)
                     .then(function () { UI.toast('Supprimé'); rafraichir(true); })
@@ -756,20 +922,35 @@
             });
     }
 
-    function feuilleApport(id, sensForce) {
+    // ------------------------------------------------- apports, dépôts, retraits
+
+    /* Un dépôt ou un retrait sur un compte EST un apport ou un retrait de fonds : il
+       alimente la performance (capital investi, apports nets) ET le solde du compte.
+       Les deux écritures vont ensemble. */
+    function feuilleApport(id, sensForce, compteIdPreset) {
         var ctx = etat.ctx || {};
         var existant = null;
         if (id) existant = (ctx.apports || []).filter(function (a) { return String(a.id) === String(id); })[0] || null;
         var sens = sensForce || (existant ? (String(existant.type).indexOf('retrait') >= 0 ? 'retrait' : 'apport') : 'apport');
+        var liee = existant ? operationLiee('apport_id', existant.id) : null;
+        var historique = !!existant && !liee;
 
         var corps = ''
             + UI.champ({ id: 'apSens', label: 'Sens', type: 'select', valeur: sens, options: [{ valeur: 'apport', texte: 'Apport de fonds' }, { valeur: 'retrait', texte: 'Retrait de fonds' }] })
-            + UI.champ({ id: 'apDate', label: 'Date', type: 'date', valeur: existant ? existant.date : U.todayISO() })
-            + UI.champ({ id: 'apMontant', label: 'Montant', type: 'number', valeur: existant ? existant.montant_eur : '' })
-            + UI.champ({ id: 'apDevise', label: 'Devise du montant', type: 'select', valeur: 'EUR', options: DEVISES })
-            + UI.champ({ id: 'apCompte', label: 'Compte', type: 'select', valeur: 'courant_usd', options: COMPTES });
+            + UI.champ({ id: 'apDate', label: 'Date', type: 'date', valeur: existant ? existant.date : U.todayISO() });
+        if (historique) {
+            // Apport antérieur à la 2.0 : pas de compte. On garde la saisie en devise.
+            corps += '<div class="info">Apport antérieur à la 2.0 : il n’est lié à aucun compte, son effet est déjà '
+                + 'dans le solde d’ouverture. Vous pouvez le corriger ou le supprimer ici.</div>'
+                + UI.champ({ id: 'apMontant', label: 'Montant', type: 'number', valeur: existant ? existant.montant_eur : '' })
+                + UI.champ({ id: 'apDevise', label: 'Devise du montant', type: 'select', valeur: 'EUR', options: DEVISES });
+        } else {
+            corps += UI.champ({ id: 'apMontant', label: 'Montant (dans la devise du compte)', type: 'number', valeur: liee ? Math.abs(liee.montant) : '' })
+                + UI.champ({ id: 'apCompte', label: 'Compte', type: 'select', valeur: '', options: [] })
+                + '<div class="aide" style="margin-top:-4px">La devise est celle du compte : aucun change.</div>';
+        }
 
-        UI.feuille({
+        var f = UI.feuille({
             titre: existant ? 'Modifier le mouvement' : 'Apport ou retrait de fonds',
             corps: corps,
             boutons: existant ? [
@@ -784,113 +965,107 @@
                 { texte: 'Enregistrer', sorte: '', garder: true, action: function () { enregistrerApport(null); } }
             ]
         });
+
+        var c = f.corps;
+        if (c && !historique) {
+            var liste = PF.comptes.comptesActifs(tousLesComptes()).slice();
+            var courant = compteParId(liee ? liee.compte_id : compteIdPreset);
+            if (courant && !liste.some(function (x) { return x.id === courant.id; })) liste.unshift(courant);
+            remplirComptes(c.querySelector('#apCompte'), liste, liee ? liee.compte_id : compteIdPreset);
+            if (!liste.length) UI.toast('Aucun compte : créez-en un d’abord');
+        }
     }
 
     function enregistrerApport(existant) {
-        var v = lireForm(['apSens', 'apDate', 'apMontant', 'apDevise', 'apCompte']);
+        var v = lireForm(['apSens', 'apDate', 'apMontant', 'apCompte', 'apDevise']);
         var date = U.parseDate(v.apDate);
         var montant = U.num(v.apMontant, NaN);
-        var devise = String(v.apDevise || 'EUR').toUpperCase();
+        var retrait = v.apSens === 'retrait';
+        var liee = existant ? operationLiee('apport_id', existant.id) : null;
+        var historique = !!existant && !liee;
+        var compte = historique ? null : compteParId(v.apCompte);
+        var devise = historique ? String(v.apDevise || 'EUR').toUpperCase() : (compte ? compte.devise : '');
+
         if (!date || !(montant > 0)) { UI.toast('Date et montant sont requis'); return; }
-
-        var compte = COMPTES.filter(function (c) { return c.valeur === v.apCompte; })[0];
-
-        PF.net.taux(devise, date, 'EUR').then(function (tEur) {
-            var tauxEur = tEur || 1;
-            return PF.net.taux(devise, date, 'USD').then(function (tUsd) {
-                return { eur: tauxEur, usd: tUsd || tauxEur * (etat.ctx ? etat.ctx.tauxEurUsd : 1.125) };
+        if (!historique) {
+            if (!exigerComptes()) return;
+            if (!compte) { UI.toast('Choisissez un compte'); return; }
+            var refus = PF.comptes.verifierMouvement({
+                compte: compte, type: retrait ? 'retrait' : 'depot', montant: montant,
+                operations: toutesLesOperations(), idsExclus: liee ? [liee.id] : []
             });
-        }).then(function (tx) {
+            if (refus.length) { UI.toast(refus[0]); return; }
+        }
+
+        /* Valorisation du mouvement au cours du jour. Sans cours, rien n'est écrit
+           et rien n'est remplacé : ni 1 (un dollar pris pour un euro), ni un taux
+           de réglage. La fonction peut être relancée par le bouton « Réessayer ». */
+        function valoriserEtEcrire() {
+            return PF.net.tauxMouvement(devise, date).catch(function (e) {
+                if (!e || !e.tauxIndisponible) throw e;
+                UI.confirmer('Taux indisponible',
+                    'Le cours ' + UI.h(e.paire) + ' du ' + UI.h(U.jourMoisAnneeISO(date))
+                    + ' n’est pas disponible. Le mouvement n’est pas enregistré : aucune valeur n’a été estimée.',
+                    'Réessayer', valoriserEtEcrire);
+                var refus = new Error('taux indisponible');
+                refus.tauxIndisponible = true;
+                throw refus;
+            }).then(function (tx) {
             var montantEur = U.arrondi(montant * tx.eur, 2);
             var montantUsd = U.arrondi(montant * tx.usd, 2);
-            var signe = v.apSens === 'retrait' ? -1 : 1;
             var coursOr = (etat.ctx && etat.ctx.coursOr) || 0;
 
             var ligne = {
                 date: date,
-                sens: v.apSens === 'retrait' ? 'retrait' : 'apport',
+                sens: retrait ? 'retrait' : 'apport',
                 montant_eur: U.arrondi(montantEur, 2),
                 montant_or: coursOr ? U.arrondi(montantUsd / coursOr, 6) : null,
                 cours_or: coursOr || null,
-                compte: compte ? compte.valeur : null,
+                compte: compte ? compte.nom : null,
                 reference: montantUsd ? ('usd:' + U.arrondi(montantUsd, 2)) : null,
                 note: null
             };
 
-            var promesse = existant && existant.id
-                ? PF.net.supabase.update('pf2_apports', ligne, 'id=eq.' + existant.id)
-                : PF.net.supabase.insert('pf2_apports', [ligne]);
+            var promesseApport = existant && existant.id
+                ? PF.net.supabase.update('pf2_apports', ligne, 'id=eq.' + existant.id).then(function () { return existant.id; })
+                : PF.net.supabase.insert('pf2_apports', [ligne]).then(function (rows) { return rows[0].id; });
 
-            return promesse.then(function () {
-                // Miroir dans l'historique de la v1, pour que les deux versions
-                // du projet restent parfaitement synchronisées.
+            return promesseApport.then(function (apId) {
+                if (historique) return null;
+                if (liee) {
+                    return PF.net.supabase.update('pf2_operations_compte', {
+                        compte_id: compte.id, montant: retrait ? -montant : montant, date: date
+                    }, 'id=eq.' + liee.id);
+                }
+                var op = PF.comptes.operationMouvement({
+                    compte: compte, type: retrait ? 'retrait' : 'depot', montant: montant,
+                    date: date, apportId: apId, note: null
+                });
+                return PF.net.supabase.insert('pf2_operations_compte', [PF.comptes.versLigneOperation(op)])
+                    .catch(function (e) {
+                        if (existant) throw e;
+                        return PF.net.supabase.supprimer('pf2_apports', 'id=eq.' + apId).then(function () {
+                            throw new Error('compte non crédité, mouvement annulé (' + e.message + ')');
+                        });
+                    });
+            }).then(function () {
+                // Miroir dans l'historique de la v1 : les deux versions restent synchronisées.
                 return ajouterHistoriqueV1(date, ligne.sens, montantUsd, montantEur,
                     coursOr ? montantUsd / coursOr : 0);
-            }).then(function () {
-                if (compte && compte.ticker) {
-                    return ajusterSoldeCompte(compte.ticker, devise, montant * signe, date);
-                }
-                return null;
             });
         }).then(function () {
             UI.toast('Mouvement enregistré');
             document.querySelector('#voile').click();
             rafraichir(true);
         }).catch(function (e) {
+            if (e && e.tauxIndisponible) return;     // le dialogue « Taux indisponible » a déjà parlé
             UI.toast('Échec : ' + (e && e.message ? e.message : 'écriture refusée'));
         });
+        }
+        valoriserEtEcrire();
     }
 
-    /* Le solde d'un compte de liquidités vit dans la table `Donnees` de la v1. */
-    function ajusterSoldeCompte(tickerCompte, deviseMouvement, montant, date) {
-        return PF.net.supabase.select('Donnees', 'select=*').then(function (rows) {
-            var t = String(tickerCompte).toUpperCase();
-            var ligne = (rows || []).filter(function (r) {
-                return String(r.Ticker || r.ticker || '').toUpperCase().trim() === t;
-            })[0];
-            if (!ligne) {
-                // Le compte n'existe pas encore dans `Donnees` : on le crée,
-                // avec les mêmes colonnes que la v1, plutôt que de perdre le mouvement.
-                return PF.net.taux(t, date, 'USD').then(function (tUsd) {
-                    var q0 = U.arrondi(Math.max(0, montant), 6);
-                    return PF.net.supabase.insert('Donnees', [{
-                        Ticker: t,
-                        Type: (t === 'CHF' || t === 'CNY') ? '🏦 Cash réserve' : '💵 Cash',
-                        'Devise Cotation': 'Auto',
-                        Court: '$ ' + U.nombre(tUsd || 1, 2),
-                        Quantité: q0,
-                        'Valeur totale': '$ ' + U.nombre(U.arrondi(q0 * (tUsd || 1), 2), 2),
-                        'Pourcentage (%)': 0
-                    }]);
-                }).catch(function () { return null; });
-            }
-            var actuel = U.num(String(ligne['Quantité'] !== undefined ? ligne['Quantité'] : 0).replace(/ /g, '').replace(',', '.'), 0);
-            var taux = 1;
-            if (deviseMouvement !== t) {
-                // Conversion au taux du jour : le compte est tenu dans sa devise.
-                return PF.net.taux(deviseMouvement, date, t).then(function (tx) {
-                    return ecrireSolde(ligne, actuel + montant * (tx || 1), t, date);
-                });
-            }
-            return ecrireSolde(ligne, actuel + montant, t, date);
-        }).catch(function () { return null; });
-    }
-
-    function ecrireSolde(ligne, nouveau, ticker, date) {
-        var q = U.arrondi(Math.max(0, nouveau), 6);
-        var tauxUsd = 1;
-        return PF.net.taux(ticker, date, 'USD').then(function (t) {
-            tauxUsd = t || 1;
-            var maj = {
-                Quantité: q,
-                'Valeur totale': '$ ' + U.nombre(U.arrondi(q * tauxUsd, 2), 2)
-            };
-            var filtre = ligne.id !== undefined ? 'id=eq.' + ligne.id : 'Ticker=eq.' + encodeURIComponent(ticker);
-            return PF.net.supabase.update('Donnees', maj, filtre);
-        }).catch(function () { return null; });
-    }
-
-    /* L'historique v1 porte le cumul des apports nets : on le recalcule. */
+        /* L'historique v1 porte le cumul des apports nets : on le recalcule. */
     function ajouterHistoriqueV1(dateFr, sens, montantUsd, montantEur, montantOr) {
         return PF.net.supabase.select('Historique', 'select=*').then(function (rows) {
             var cumul = 0;
@@ -912,128 +1087,402 @@
         }).catch(function () { return null; });
     }
 
+
     // ------------------------------------------------------------------ virement
 
-    var LIBELLES_COMPTES = {
-        USD: 'Compte courant USD', EUR: 'Compte courant EUR',
-        CHF: 'Réserve CHF', CNY: 'Réserve CNY',
-        GBP: 'Compte courant GBP', JPY: 'Compte courant JPY', CAD: 'Compte courant CAD',
-        AUD: 'Compte courant AUD', HKD: 'Compte courant HKD', SGD: 'Compte courant SGD',
-        NOK: 'Compte courant NOK', SEK: 'Compte courant SEK', DKK: 'Compte courant DKK'
-    };
-
-    /* Les comptes réellement présents dans la base, puis les devises ouvrables.
-       Un solde jamais lu n'est jamais affiché : pas de compte inventé. */
-    function comptesLiquidites() {
-        var ctx = etat.ctx || {};
-        var vus = {};
-        var liste = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; }).map(function (a) {
-            vus[a.ticker] = 1;
-            return { ticker: a.ticker, nom: LIBELLES_COMPTES[a.ticker] || ('Compte ' + a.ticker), quantite: a.quantite };
-        });
-        Object.keys(LIBELLES_COMPTES).forEach(function (t) {
-            if (vus[t]) return;
-            liste.push({ ticker: t, nom: LIBELLES_COMPTES[t], quantite: 0 });
-        });
-        if (!liste.length) liste.push({ ticker: 'USD', nom: LIBELLES_COMPTES.USD, quantite: 0 });
-        return liste;
-    }
-
-    function optionsComptes(comptes) {
-        return comptes.map(function (c) {
-            return {
-                valeur: c.ticker,
-                texte: c.ticker + ' — ' + c.nom + (c.quantite ? ' (' + U.quantite(c.quantite) + ' ' + c.ticker + ')' : ' (vide)')
-            };
-        });
-    }
-
-    function feuilleVirement() {
-        var comptes = comptesLiquidites();
-        var options = optionsComptes(comptes);
-        var srcDefaut = comptes.length > 1 ? comptes[1].ticker : comptes[0].ticker;
+    /* Un virement ne se fait que dans une même devise. Deux jambes (sortie, entrée)
+       partagent un `groupe` : éditer ou supprimer l'une touche toujours l'autre. */
+    function feuilleVirement(sourceId) {
+        if (!exigerComptes()) return;
+        var actifs = PF.comptes.comptesActifs(tousLesComptes());
+        if (actifs.length < 2) {
+            UI.toast('Il faut au moins deux comptes actifs dans une même devise.');
+            return;
+        }
+        var source = compteParId(sourceId);
+        if (!source || source.archive) source = actifs[0];
 
         var corps = ''
             + UI.champ({ id: 'viDate', label: 'Date du virement', type: 'date', valeur: U.todayISO() })
-            + UI.champ({ id: 'viMontant', label: 'Montant', type: 'number', valeur: '' })
-            + UI.champ({ id: 'viDevise', label: 'Devise du montant saisi', type: 'select', valeur: 'EUR', options: DEVISES })
-            + UI.champ({ id: 'viSource', label: 'Compte débité', type: 'select', valeur: srcDefaut, options: options })
-            + UI.champ({ id: 'viCible', label: 'Compte crédité', type: 'select', valeur: comptes[0].ticker, options: options })
-            + '<div class="info" id="viApercu">Renseignez le montant : la conversion s’affiche ici, '
-            + 'de chaque côté, au taux du jour de l’opération.</div>';
+            + UI.champ({ id: 'viMontant', label: 'Montant (dans la devise des deux comptes)', type: 'number', valeur: '' })
+            + UI.champ({ id: 'viSource', label: 'Compte débité', type: 'select', valeur: source.id, options: [] })
+            + UI.champ({ id: 'viCible', label: 'Compte crédité (même devise)', type: 'select', valeur: '', options: [] })
+            + UI.champ({ id: 'viNote', label: 'Note (facultatif)', valeur: '' })
+            + '<div class="info" id="viApercu"></div>';
 
         var f = UI.feuille({
             titre: 'Virement entre deux comptes',
-            aide: 'Un virement interne ne change ni votre capital investi ni vos apports : '
-                + 'il déplace des fonds d’un compte à l’autre.',
+            aide: 'Un virement ne change ni votre capital investi ni vos apports : il déplace des fonds. '
+                + 'Aucun change n’est possible entre deux devises.',
             corps: corps,
             boutons: [
                 { texte: 'Annuler', sorte: 'ghost' },
                 { texte: 'Enregistrer', sorte: '', garder: true, action: enregistrerVirement }
             ]
         });
-
         var c = f.corps;
         if (!c) return;
 
-        function apercu() {
-            var zone = c.querySelector('#viApercu');
-            if (!zone) return;
-            var montant = U.num(UI.lire('viMontant'), 0);
-            var devise = UI.lire('viDevise');
-            var src = UI.lire('viSource'), dst = UI.lire('viCible');
-            var date = U.parseDate(UI.lire('viDate'));
-            if (src === dst) { zone.textContent = 'Choisissez deux comptes différents.'; return; }
-            if (!(montant > 0) || !date) { zone.textContent = 'Renseignez le montant : la conversion s’affiche ici.'; return; }
-            zone.textContent = 'Conversion…';
-            Promise.all([
-                src === devise ? Promise.resolve(1) : PF.net.taux(devise, date, src),
-                dst === devise ? Promise.resolve(1) : PF.net.taux(devise, date, dst)
-            ]).then(function (t) {
-                if (t[0] === null || t[1] === null) {
-                    zone.textContent = 'Taux de change indisponible à cette date : '
-                        + 'aucun montant ne sera enregistré plutôt qu’une valeur inventée.';
-                    return;
-                }
-                zone.innerHTML = '<b>' + U.nombre(montant, 2) + ' ' + UI.h(devise) + '</b> → '
-                    + '<b>' + U.nombre(montant * t[0], 2) + ' ' + UI.h(src) + '</b> débités, '
-                    + '<b>' + U.nombre(montant * t[1], 2) + ' ' + UI.h(dst) + '</b> crédités.';
-            });
+        remplirComptes(c.querySelector('#viSource'), actifs, source.id);
+
+        function majCibles() {
+            var s = compteParId(UI.lire('viSource'));
+            var liste = PF.comptes.comptesPourVirement(actifs, s);
+            remplirComptes(c.querySelector('#viCible'), liste, liste[0] ? liste[0].id : '');
+            apercu();
         }
 
-        ['viDate', 'viDevise', 'viSource', 'viCible'].forEach(function (id) {
-            var e = c.querySelector('#' + id);
-            if (e) e.addEventListener('change', apercu);
-        });
-        var m = c.querySelector('#viMontant');
-        if (m) m.addEventListener('input', U.debounce(apercu, 350));
+        function apercu() {
+            var zone = c.querySelector('#viApercu');
+            var s = compteParId(UI.lire('viSource'));
+            var d = compteParId(UI.lire('viCible'));
+            var m = U.num(UI.lire('viMontant'), 0);
+            if (!d) {
+                zone.textContent = s ? 'Aucun autre compte actif en ' + s.devise + ' : créez-en un pour virer.'
+                    : 'Choisissez un compte débité.';
+                return;
+            }
+            if (!(m > 0)) {
+                zone.textContent = 'Renseignez le montant : les soldes après virement s’affichent ici.';
+                return;
+            }
+            zone.innerHTML = '<b>' + UI.h(s.nom) + '</b> : ' + U.nombre(soldeCompte(s), 2) + ' → <b>'
+                + U.nombre(soldeCompte(s) - m, 2) + '</b> ' + UI.h(s.devise) + '<br>'
+                + '<b>' + UI.h(d.nom) + '</b> : ' + U.nombre(soldeCompte(d), 2) + ' → <b>'
+                + U.nombre(soldeCompte(d) + m, 2) + '</b> ' + UI.h(d.devise);
+        }
+
+        c.querySelector('#viSource').addEventListener('change', majCibles);
+        c.querySelector('#viCible').addEventListener('change', apercu);
+        c.querySelector('#viDate').addEventListener('change', apercu);
+        c.querySelector('#viMontant').addEventListener('input', U.debounce(apercu, 150));
+        majCibles();
     }
 
     function enregistrerVirement() {
-        var montant = U.num(UI.lire('viMontant'), 0);
-        var devise = String(UI.lire('viDevise') || '').toUpperCase();
-        var src = String(UI.lire('viSource') || '').toUpperCase();
-        var dst = String(UI.lire('viCible') || '').toUpperCase();
+        if (!exigerComptes()) return;
+        var source = compteParId(UI.lire('viSource'));
+        var cible = compteParId(UI.lire('viCible'));
+        var montant = U.num(UI.lire('viMontant'), NaN);
         var date = U.parseDate(UI.lire('viDate'));
-        if (!(montant > 0) || !date) { UI.toast('Montant et date sont requis'); return; }
-        if (src === dst) { UI.toast('Choisissez deux comptes différents'); return; }
+        var note = String(UI.lire('viNote') || '').trim() || null;
 
-        Promise.all([
-            src === devise ? Promise.resolve(1) : PF.net.taux(devise, date, src),
-            dst === devise ? Promise.resolve(1) : PF.net.taux(devise, date, dst)
-        ]).then(function (t) {
-            if (t[0] === null || t[1] === null) throw new Error('taux de change indisponible à cette date');
-            return ajusterSoldeCompte(src, src, -montant * t[0], date).then(function () {
-                return ajusterSoldeCompte(dst, dst, montant * t[1], date);
-            }).then(function () { return { debite: montant * t[0], credite: montant * t[1] }; });
-        }).then(function (r) {
-            UI.toast('Virement enregistré : ' + U.nombre(r.debite, 2) + ' ' + src
-                + ' → ' + U.nombre(r.credite, 2) + ' ' + dst);
-            document.querySelector('#voile').click();
-            rafraichir(true);
-        }).catch(function (e) {
-            UI.toast('Échec : ' + (e && e.message ? e.message : 'écriture refusée'));
+        if (!date) { UI.toast('La date est requise'); return; }
+        var refus = PF.comptes.verifierVirement({
+            source: source, cible: cible, montant: montant, operations: toutesLesOperations()
         });
+        if (refus.length) { UI.toast(refus[0]); return; }
+
+        var jambes = PF.comptes.construireVirement({ source: source, cible: cible, montant: montant, date: date, note: note });
+        // Une seule requête pour les deux jambes : elles sont écrites ensemble ou pas.
+        PF.net.supabase.insert('pf2_operations_compte', jambes.map(PF.comptes.versLigneOperation))
+            .then(function () {
+                UI.toast('Virement enregistré');
+                document.querySelector('#voile').click();
+                rafraichir(true);
+            })
+            .catch(function (e) { UI.toast('Échec : ' + e.message); });
+    }
+
+    /* Édition ou suppression d'un virement existant : les deux jambes ensemble. */
+    function feuilleVirementEdition(groupe) {
+        if (!exigerComptes()) return;
+        var jambes = PF.comptes.jambesDuVirement(toutesLesOperations(), groupe);
+        if (!jambes.sortie || !jambes.entree) {
+            UI.toast('Virement incomplet : une de ses deux jambes manque. Rien n’est modifié.');
+            return;
+        }
+        var source = compteParId(jambes.sortie.compte_id);
+        var cible = compteParId(jambes.entree.compte_id);
+        if (!source || !cible) { UI.toast('Compte du virement introuvable : actualisez.'); return; }
+
+        var corps = ''
+            + UI.champ({ id: 'viDate', label: 'Date du virement', type: 'date', valeur: jambes.sortie.date })
+            + UI.champ({ id: 'viMontant', label: 'Montant', type: 'number', valeur: Math.abs(jambes.sortie.montant) })
+            + '<div class="info">De <b>' + UI.h(source.nom) + '</b> vers <b>' + UI.h(cible.nom) + '</b> (' + UI.h(source.devise) + ').</div>'
+            + UI.champ({ id: 'viNote', label: 'Note (facultatif)', valeur: jambes.sortie.note || '' });
+
+        var f = UI.feuille({
+            titre: 'Modifier le virement',
+            corps: corps,
+            boutons: [
+                { texte: 'Supprimer', sorte: 'danger', action: function () {
+                    UI.confirmer('Supprimer le virement', 'Les deux jambes sont supprimées ensemble. Les soldes des deux comptes sont recalculés.',
+                        'Supprimer', function () {
+                            PF.net.supabase.supprimer('pf2_operations_compte', 'groupe=eq.' + encodeURIComponent(groupe))
+                                .then(function () { UI.toast('Virement supprimé'); rafraichir(true); })
+                                .catch(function (e) { UI.toast('Échec : ' + e.message); });
+                        });
+                } },
+                { texte: 'Enregistrer', sorte: '', garder: true, action: function () {
+                    var montant = U.num(UI.lire('viMontant'), NaN);
+                    var date = U.parseDate(UI.lire('viDate'));
+                    var note = String(UI.lire('viNote') || '').trim() || null;
+                    if (!date) { UI.toast('La date est requise'); return; }
+                    var refus = PF.comptes.verifierVirement({
+                        source: source, cible: cible, montant: montant, operations: toutesLesOperations(),
+                        idsExclus: [jambes.sortie.id, jambes.entree.id]
+                    });
+                    if (refus.length) { UI.toast(refus[0]); return; }
+                    var lignes = PF.comptes.construireVirement({ source: source, cible: cible, montant: montant, date: date, note: note, groupe: groupe })
+                        .map(function (l, i) {
+                            var ligne = PF.comptes.versLigneOperation(l);
+                            ligne.id = i === 0 ? jambes.sortie.id : jambes.entree.id;
+                            return ligne;
+                        });
+                    // Une seule requête (upsert sur l'id) : les deux jambes changent ensemble.
+                    PF.net.supabase.upsert('pf2_operations_compte', lignes, 'id')
+                        .then(function () {
+                            UI.toast('Virement modifié');
+                            document.querySelector('#voile').click();
+                            rafraichir(true);
+                        })
+                        .catch(function (e) { UI.toast('Échec : ' + e.message); });
+                } }
+            ]
+        });
+        return f;
+    }
+
+    // --------------------------------------------------------------- comptes
+
+    var LIBELLE_OPERATION = {
+        ouverture: 'Solde d’ouverture', depot: 'Dépôt (apport)', retrait: 'Retrait',
+        virement: 'Virement', achat_titres: 'Achat de titres', vente_titres: 'Vente de titres', frais: 'Frais'
+    };
+
+    function champsCompte(v, creation, deviseFigee) {
+        var banques = PF.comptes.banquesConnues(tousLesComptes()).map(function (b) {
+            return '<option value="' + UI.h(b) + '">';
+        }).join('');
+        var devise = deviseFigee
+            ? '<div class="champ"><label>Devise</label><div class="info" style="margin:0">' + UI.h(v.devise)
+                + ' — fixée : des opérations existent sur ce compte.</div></div>'
+            : '<div class="champ"><label for="cpDevise">Devise (code ISO)</label>'
+                + '<input id="cpDevise" list="dlDevises" value="' + UI.h(v.devise || '') + '" placeholder="USD, CHF, CNY…">'
+                + '<datalist id="dlDevises">' + PF.comptes.DEVISES_COURANTES.map(function (d) {
+                    return '<option value="' + d + '">';
+                }).join('') + '</datalist></div>';
+        return UI.champ({ id: 'cpNom', label: 'Nom du compte', valeur: v.nom || '', placeholder: 'ex. Voyage CNY' })
+            + '<div class="champ"><label for="cpBanque">Banque</label>'
+            + '<input id="cpBanque" list="dlBanques" value="' + UI.h(v.banque || '') + '" placeholder="Texte libre, ou une banque déjà saisie">'
+            + '<datalist id="dlBanques">' + banques + '</datalist></div>'
+            + devise
+            + UI.champ({
+                id: 'cpType', label: 'Type', type: 'select', valeur: v.type || 'disponible',
+                options: [
+                    { valeur: 'disponible', texte: 'Disponible — compte courant : achats et ventes' },
+                    { valeur: 'reserve', texte: 'Réserve — épargne de précaution, jamais investie' }
+                ]
+            })
+            + UI.champ({ id: 'cpMotif', label: 'Motif', valeur: v.motif || '', placeholder: 'ex. Épargne de précaution' })
+            + (creation ? UI.champ({ id: 'cpSolde', label: 'Solde d’ouverture (dans la devise du compte)', type: 'number', valeur: '' }) : '')
+            + UI.champ({ id: 'cpNote', label: 'Note (facultatif)', valeur: v.note || '' });
+    }
+
+    function lireSaisieCompte(deviseFixe) {
+        return {
+            nom: UI.lire('cpNom'),
+            banque: UI.lire('cpBanque'),
+            devise: deviseFixe || UI.lire('cpDevise'),
+            type: UI.lire('cpType'),
+            motif: UI.lire('cpMotif'),
+            note: UI.lire('cpNote'),
+            solde: UI.lire('cpSolde')
+        };
+    }
+
+    /* Fiche d'un compte : solde calculé (jamais stocké), équivalents, opérations.
+       Dépôt et retrait passent par le flux apport. */
+    function feuilleCompte(id) {
+        var c = compteParId(id);
+        if (!c) { UI.toast('Compte introuvable : actualisez.'); return; }
+        var ops = PF.comptes.operationsDuCompte(c.id, toutesLesOperations());
+        var solde = soldeCompte(c);
+
+        var equivalents = '';
+        if (c.valeurUsd !== null && c.valeurUsd !== undefined) {
+            equivalents = '<div class="sub">' + U.usd(c.valeurUsd, { dec: 0 })
+                + (c.valeurEur !== null && c.valeurEur !== undefined ? ' · ' + U.eur(c.valeurEur, { dec: 0 }) : '') + '</div>';
+        }
+
+        var lignes = ops.slice(0, 80).map(function (o) {
+            var attrs = '';
+            if (o.groupe) attrs = ' data-virement="' + UI.h(o.groupe) + '"';
+            else if (o.transaction_id) attrs = ' data-tx="' + UI.h(o.transaction_id) + '"';
+            else if (o.apport_id) attrs = ' data-apport="' + UI.h(o.apport_id) + '"';
+            var signe = o.montant > 0 ? '+' : '';
+            return '<div class="ligne"' + attrs + ' style="cursor:pointer">'
+                + '<div class="gr"><div class="tt">' + UI.h(LIBELLE_OPERATION[o.type] || o.type)
+                + (PF.comptes.libelleContrepartie(o, tousLesComptes())
+                    ? ' <span class="st">' + UI.h(PF.comptes.libelleContrepartie(o, tousLesComptes())) + '</span>' : '')
+                + '</div>'
+                + '<div class="st">' + UI.h(U.jourMoisAnneeISO(o.date)) + (o.note ? ' · ' + UI.h(o.note) : '') + '</div></div>'
+                + '<div class="dr"><div class="a ' + (o.montant >= 0 ? 'up' : 'down') + '">'
+                + signe + U.nombre(o.montant, 2) + ' ' + UI.h(c.devise) + '</div></div></div>';
+        }).join('') || '<div class="vide" style="padding:14px">Aucune opération sur ce compte.</div>';
+
+        var corps = ''
+            + '<div class="card tight"><div class="lbl">Solde' + (c.archive ? ' (archivé)' : '') + '</div>'
+            + '<div class="montant-eur">' + U.nombre(solde, 2) + ' ' + UI.h(c.devise) + '</div>' + equivalents + '</div>'
+            + '<div class="card tight">'
+            + '<div class="st">' + UI.h(c.banque || 'Banque non renseignée') + ' · ' + UI.h(PF.comptes.LIBELLE_TYPE[c.type] || c.type) + '</div>'
+            + (c.motif ? '<div class="st">Motif : ' + UI.h(c.motif) + '</div>' : '')
+            + (c.note ? '<div class="st">' + UI.h(c.note) + '</div>' : '')
+            + '</div>'
+            + '<div class="grille g2" style="margin-top:10px">'
+            + '<button class="btn sec" id="cpDepot"' + (c.archive ? ' disabled' : '') + '>＋ Dépôt</button>'
+            + '<button class="btn sec" id="cpRetrait"' + (c.archive ? ' disabled' : '') + '>－ Retrait</button>'
+            + '<button class="btn sec" id="cpVirement"' + (c.archive ? ' disabled' : '') + '>↔ Virement</button>'
+            + '<button class="btn ghost" id="cpModifier">Modifier</button>'
+            + '</div>'
+            + '<div class="titre" style="margin-top:14px">Opérations <span class="n">' + ops.length + '</span></div>'
+            + '<div class="card">' + lignes + '</div>'
+            + '<button class="btn ghost" id="cpArchive" style="margin-top:12px">'
+            + (c.archive ? 'Réactiver ce compte' : 'Archiver ce compte') + '</button>';
+
+        var f = UI.feuille({ titre: c.nom, corps: corps, boutons: [{ texte: 'Fermer', sorte: 'ghost' }] });
+        var el = f.corps;
+        if (!el) return;
+
+        function ouvrir(fn) {
+            document.querySelector('#voile').click();
+            setTimeout(fn, 220);
+        }
+        el.querySelector('#cpDepot').addEventListener('click', function () { ouvrir(function () { feuilleApport(null, 'apport', c.id); }); });
+        el.querySelector('#cpRetrait').addEventListener('click', function () { ouvrir(function () { feuilleApport(null, 'retrait', c.id); }); });
+        el.querySelector('#cpVirement').addEventListener('click', function () { ouvrir(function () { feuilleVirement(c.id); }); });
+        el.querySelector('#cpModifier').addEventListener('click', function () { ouvrir(function () { feuilleCompteModifier(c.id); }); });
+        el.querySelector('#cpArchive').addEventListener('click', function () { confirmerArchive(c); });
+        Array.prototype.forEach.call(el.querySelectorAll('[data-virement]'), function (l) {
+            l.addEventListener('click', function () { ouvrir(function () { feuilleVirementEdition(l.getAttribute('data-virement')); }); });
+        });
+        Array.prototype.forEach.call(el.querySelectorAll('[data-tx]'), function (l) {
+            l.addEventListener('click', function () { ouvrir(function () { feuilleTransaction(l.getAttribute('data-tx')); }); });
+        });
+        Array.prototype.forEach.call(el.querySelectorAll('[data-apport]'), function (l) {
+            l.addEventListener('click', function () { ouvrir(function () { feuilleApport(l.getAttribute('data-apport')); }); });
+        });
+    }
+
+    /* Création. `preset` pré-remplit (depuis un achat, par exemple). `surCree` reçoit le
+       compte créé, une fois la liste rafraîchie. */
+    function feuilleCompteNouveau(preset, surCree) {
+        if (!exigerComptes()) return;
+        preset = preset || {};
+        var f = UI.feuille({
+            titre: 'Nouveau compte',
+            aide: 'Le type décide où le compte compte : une réserve est de l’épargne de précaution, '
+                + 'jamais investie ; un disponible sert aux achats et aux ventes de sa devise.',
+            corps: champsCompte({
+                nom: '', banque: '', devise: preset.devise || 'EUR', type: preset.type || 'disponible',
+                motif: '', note: ''
+            }, true, false),
+            boutons: [
+                { texte: 'Annuler', sorte: 'ghost' },
+                { texte: 'Créer', sorte: '', garder: true, action: function () {
+                    var r = PF.comptes.nouveauCompte(lireSaisieCompte(null));
+                    if (r.erreurs.length) { UI.toast(r.erreurs[0]); return; }
+                    var solde = U.num(UI.lire('cpSolde'), 0);
+                    var op = PF.comptes.operationOuverture(r.compte, solde, U.todayISO());
+                    PF.net.supabase.insert('pf2_comptes', [PF.comptes.versLigneCompte(r.compte)]).then(function () {
+                        return PF.net.supabase.insert('pf2_operations_compte', [PF.comptes.versLigneOperation(op)])
+                            .catch(function (e) {
+                                // Pas de compte sans son solde d'ouverture : on retire le compte.
+                                return PF.net.supabase.supprimer('pf2_comptes', 'id=eq.' + r.compte.id).then(function () {
+                                    throw new Error('compte non créé (' + e.message + ')');
+                                });
+                            });
+                    }).then(function () {
+                        UI.toast('Compte créé');
+                        document.querySelector('#voile').click();
+                        rafraichir(true, function () { if (surCree) surCree(r.compte); });
+                    }).catch(function (e) { UI.toast('Échec : ' + e.message); });
+                } }
+            ]
+        });
+        if (!f.corps) return;
+    }
+
+    function feuilleCompteModifier(id) {
+        var c = compteParId(id);
+        if (!c) return;
+        var deviseFigee = toutesLesOperations().some(function (o) { return String(o.compte_id) === c.id; });
+        var f = UI.feuille({
+            titre: 'Modifier le compte',
+            aide: 'Le solde n’est pas saisi ici : il se calcule à partir des opérations.',
+            corps: champsCompte(c, false, deviseFigee),
+            boutons: [
+                { texte: 'Annuler', sorte: 'ghost' },
+                { texte: 'Enregistrer', sorte: '', garder: true, action: function () {
+                    var saisie = lireSaisieCompte(deviseFigee ? c.devise : null);
+                    var r = PF.comptes.modifierCompte(c, saisie, toutesLesOperations());
+                    if (r.erreurs.length) { UI.toast(r.erreurs[0]); return; }
+                    var champs = PF.comptes.versLigneCompte(r.compte);
+                    delete champs.id;
+                    champs.modifie_le = new Date().toISOString();
+                    PF.net.supabase.update('pf2_comptes', champs, 'id=eq.' + c.id).then(function () {
+                        UI.toast('Compte modifié');
+                        document.querySelector('#voile').click();
+                        rafraichir(true);
+                    }).catch(function (e) { UI.toast('Échec : ' + e.message); });
+                } }
+            ]
+        });
+        if (!f.corps) return;
+    }
+
+    /* Archiver : le compte sort des listes et des propositions, son historique reste,
+       son solde reste compté dans le patrimoine. Aucune suppression. */
+    function confirmerArchive(c) {
+        var archiver = !c.archive;
+        UI.confirmer(
+            archiver ? 'Archiver « ' + c.nom + ' »' : 'Réactiver « ' + c.nom + ' »',
+            archiver
+                ? 'Le compte sort des listes et des propositions d’achat et de virement. Son historique reste consultable '
+                    + 'et son solde reste compté dans votre patrimoine. Aucune opération n’y est plus possible.'
+                : 'Le compte redevient disponible pour les opérations.',
+            archiver ? 'Archiver' : 'Réactiver',
+            function () {
+                PF.net.supabase.update('pf2_comptes', { archive: archiver, modifie_le: new Date().toISOString() }, 'id=eq.' + c.id)
+                    .then(function () {
+                        UI.toast(archiver ? 'Compte archivé' : 'Compte réactivé');
+                        document.querySelector('#voile').click();
+                        rafraichir(true);
+                    })
+                    .catch(function (e) { UI.toast('Échec : ' + e.message); });
+            });
+    }
+
+    /* Migration automatique des lignes de liquidités de `Donnees` vers les comptes.
+       Donnees n'est JAMAIS modifiée. Les comptes d'abord (clé étrangère), puis leurs
+       soldes d'ouverture ; si l'écriture des soldes échoue, les comptes créés sont retirés. */
+    function migrerComptesV2() {
+        var jour = U.todayISO();
+        var plan = PF.comptes.planMigration((etat.ctx && etat.ctx.donneesV1) || [], jour);
+        if (plan.erreurs.length) return Promise.reject(new Error(plan.erreurs[0]));
+        if (!plan.comptes.length) return Promise.resolve(0);
+
+        var lignesComptes = [];
+        var lignesOps = [];
+        for (var i = 0; i < plan.comptes.length; i++) {
+            var p = plan.comptes[i];
+            var r = PF.comptes.nouveauCompte({
+                nom: p.nom, banque: p.banque, devise: p.devise, type: p.type, motif: p.motif, note: p.note
+            });
+            if (r.erreurs.length) return Promise.reject(new Error(r.erreurs[0]));
+            lignesComptes.push(PF.comptes.versLigneCompte(r.compte));
+            lignesOps.push(PF.comptes.versLigneOperation(PF.comptes.operationOuverture(r.compte, p.solde, jour)));
+        }
+        var ids = lignesComptes.map(function (l) { return l.id; });
+
+        return PF.net.supabase.insert('pf2_comptes', lignesComptes).then(function () {
+            return PF.net.supabase.insert('pf2_operations_compte', lignesOps).catch(function (e) {
+                return PF.net.supabase.supprimer('pf2_comptes', 'id=in.(' + ids.join(',') + ')').then(function () {
+                    throw new Error('migration annulée (' + e.message + ')');
+                });
+            });
+        }).then(function () { return lignesComptes.length; });
     }
 
     // ------------------------------------------------------------ allocation
@@ -1236,26 +1685,33 @@
             + UI.champ({ id: 'orCours', label: 'Cours', type: 'number', valeur: prix })
             + UI.champ({ id: 'orFrais', label: 'Frais', type: 'number', valeur: 0 })
             + UI.champ({ id: 'orDevise', label: 'Devise de cotation', type: 'select', valeur: actif ? actif.deviseCotation : 'USD', options: DEVISES })
-            + UI.champ({ id: 'orCompte', label: 'Compte', type: 'select', valeur: 'courtier', options: COMPTES });
+            + UI.champ({ id: 'orCompte', label: 'Compte débité (disponible, même devise)', type: 'select', valeur: '', options: [] })
+            + '<div id="orAucunCompte"></div>';
 
-        UI.feuille({
+        var f = UI.feuille({
             titre: 'Enregistrer l’ordre',
             corps: corps,
             boutons: [
                 { texte: 'Annuler', sorte: 'ghost' },
                 { texte: 'Enregistrer', sorte: '', garder: true, action: function () {
+                    if (!exigerComptes()) return;
                     var ticker = String(UI.lire('orTicker') || '').toUpperCase().trim();
                     var date = U.parseDate(UI.lire('orDate'));
                     var quantite = U.num(UI.lire('orQuantite'), 0);
                     var cours = U.num(UI.lire('orCours'), 0);
                     var frais = U.num(UI.lire('orFrais'), 0);
-                    var devise = UI.lire('orDevise');
+                    var devise = String(UI.lire('orDevise') || '').toUpperCase();
                     if (!ticker || !date || !(quantite > 0) || !(cours > 0)) { UI.toast('Saisie incomplète'); return; }
-                    PF.net.supabase.insert('pf2_transactions', [{
+                    var ligne = {
                         ticker: ticker, sens: UI.lire('orSens') === 'vente' ? 'vente' : 'achat',
                         date: date, quantite: quantite, cours: cours, frais: frais, devise: devise,
                         source: 'reequilibrage', reference: 'ordre proposé', note: null
-                    }]).then(function () {
+                    };
+                    var compte = compteParId(UI.lire('orCompte'));
+                    if (!compte) { UI.toast('Choisissez un compte disponible'); return; }
+                    var refus = controleTitre(ligne, compte, null);
+                    if (refus) { UI.toast(refus); return; }
+                    creerTitreAvecCompte(ligne, compte).then(function () {
                         UI.toast('Ordre enregistré');
                         document.querySelector('#voile').click();
                         rafraichir(true);
@@ -1263,6 +1719,12 @@
                 } }
             ]
         });
+        if (f.corps) {
+            branchComptesTitre(f.corps, {
+                selectId: 'orCompte', zoneId: 'orAucunCompte', deviseId: 'orDevise',
+                compteCourant: null, surCree: function () { feuilleOrdre(index); }
+            });
+        }
     }
 
     // ------------------------------------------------------------- positions
@@ -1614,6 +2076,8 @@
     /* Jeu de démonstration : des ordres de grandeur plausibles, une allocation
        au plus près des cibles, pour que l'on puisse juger l'ergonomie avant
        même d'avoir branché sa base. */
+    /* DÉMO, NE PAS IMITER : ces cours de change sont des constantes de démonstration.
+       Le code réel n'a aucun taux de repli ; il dit « taux indisponible ». */
     function demoContexte() {
         var ctx = PF.portefeuille.contexteVide();
         var aujourd = U.todayISO();
@@ -1639,7 +2103,7 @@
             return {
                 ticker: p.ticker, classe: M.classeDe(p.ticker), deviseCotation: p.devise,
                 poche: (M.pocheDe(p.ticker) || { cle: 'inconnu' }).cle, quantite: p.qte, prix: p.cours,
-                valeurUsd: valeurUsd, valeurEur: valeurUsd / 1.125,
+                valeurUsd: valeurUsd, valeurEur: valeurUsd / 1.125,   // démo, ne pas imiter : taux figé
                 dernierTaux: p.devise === 'JPY' ? 0.006 : 1, dernierTauxUsd: p.tauxUsd,
                 pruUsd: p.cours * 0.88, pruEur: p.cours * 0.88 / 1.125,
                 coutTotalUsd: valeurUsd * 0.88, coutTotalEur: valeurUsd * 0.88 / 1.125,
@@ -1659,6 +2123,34 @@
             prix: 1, valeurUsd: 1240, valeurEur: 1102, dernierTaux: 0.889, dernierTauxUsd: 1,
             pruUsd: 1, pruEur: 1, coutTotalUsd: 1240, coutTotalEur: 1102,
             pvLatenteUsd: 0, pvLatenteEur: 0, variationPct: 0
+        });
+
+        /* Comptes de démonstration, étiquetés « (démo) » : ils donnent aux écrans
+           Comptes et achat de quoi montrer leur fonctionnement avant connexion.
+           Leurs soldes sont ceux des lignes USD et CHF ci-dessus (1 240 et 8 694). */
+        var noteDemo = 'Compte de démonstration : aucune donnée réelle.';
+        ctx.comptes = [
+            { id: 'demo-usd', nom: 'Courtage USD (démo)', banque: 'Swissquote', devise: 'USD',
+              type: 'disponible', motif: null, archive: false, note: noteDemo },
+            { id: 'demo-chf', nom: 'Livret CHF (démo)', banque: 'Swissquote', devise: 'CHF',
+              type: 'reserve', motif: 'Épargne de précaution', archive: false, note: noteDemo }
+        ];
+        ctx.operationsCompte = [
+            { id: 1, compte_id: 'demo-usd', type: 'ouverture', montant: 1500, date: U.ajouterJours(aujourd, -400),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null },
+            { id: 2, compte_id: 'demo-usd', type: 'achat_titres', montant: -260, date: U.ajouterJours(aujourd, -120),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null },
+            { id: 3, compte_id: 'demo-chf', type: 'ouverture', montant: 8694, date: U.ajouterJours(aujourd, -400),
+              contrepartie: null, groupe: null, transaction_id: null, apport_id: null, note: null }
+        ];
+        ctx.comptesEtat = { presente: true, erreur: null };
+        ctx.comptesVariation = {};
+        var tauxUsdDemo = { USD: 1, CHF: 1.2 };
+        ctx.comptes.forEach(function (c) {
+            c.solde = PF.comptes.soldeDuCompte(c.id, ctx.operationsCompte);
+            c.valeurUsd = c.solde * tauxUsdDemo[c.devise];
+            c.valeurEur = c.valeurUsd / 1.125;   // démo, ne pas imiter : taux figé
+            ctx.comptesVariation[c.id] = 0;
         });
 
         var investi = ctx.actifs.filter(function (a) { return a.poche !== 'precaution' && a.poche !== 'courant'; })
@@ -1694,7 +2186,7 @@
             { id: 3, date: U.ajouterJours(aujourd, -40), type: 'apport', montant_eur: 2500, montant_usd: 2812, montant_or: 1.06, cours_or: 2650, reference: null }
         ];
         ctx.inflation = { 2023: 0.049, 2024: 0.02, 2025: 0.017, 2026: 0.015 };
-        ctx.tauxEurUsd = 1.125;
+        ctx.tauxEurUsd = 1.125;     // démo, ne pas imiter : taux figé de démonstration
         ctx.coursOr = 2650;
         ctx.capitalInvestiUsd = U.arrondi(investi * 0.84, 2);
         ctx.capitalInvestiEur = U.arrondi(investi * 0.84 / 1.125, 2);
@@ -1738,7 +2230,9 @@
         diagnostiquerConnexion: diagnostiquerConnexion,
         feuilleConnexion: feuilleConnexion,
         feuilleVirement: feuilleVirement,
-        comptesLiquidites: comptesLiquidites,
+        feuilleCompte: feuilleCompte,
+        feuilleCompteNouveau: feuilleCompteNouveau,
+        feuilleApport: feuilleApport,
         CORRESPONDANCE_CONFIG: CORRESPONDANCE_CONFIG,
         naviguer: naviguer,
         rafraichir: rafraichir,

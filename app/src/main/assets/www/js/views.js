@@ -62,6 +62,15 @@
 
     // =========================================================== TABLEAU DE BORD
 
+    /* Mention commune à tous les écrans : sans cours EUR/USD, rien n'est converti
+       à la place. Le nombre de points non tracés est écrit, pas supposé. */
+    function avisTauxEurUsd(ctx) {
+        return '<div class="erreur">Taux EUR/USD indisponible au ' + UI.h(U.jourMoisAnneeISO(U.todayISO()))
+            + ' : les montants convertis sont à « — », et les courbes en dollars ne sont pas tracées'
+            + (ctx.nbPointsSansTaux ? ' (' + ctx.nbPointsSansTaux + ' points non tracés)' : '')
+            + '. Rien n’a été estimé à la place ; le cours revient à la prochaine actualisation.</div>';
+    }
+
     function vueBord(ctx) {
         if (!ctx || (ctx.erreurs && ctx.erreurs.length && !ctx.actifs.length)) {
             return '<div class="vide"><span class="g">◈</span>' + UI.h(ctx.erreurs.join(' ')) + '</div>';
@@ -72,12 +81,13 @@
         var progInv = progression(ctx, 'Progression journalière', 'investi');
         var progTot = progression(ctx, 'Progression journalière', 'total');
         var progDebut = progression(ctx, 'Depuis le début', 'investi');
-        var perfDebut = progDebut.twr_per || 0;
+        // Pas de série : « — », pas un 0 % qui aurait l'air d'une mesure.
+        var perfDebut = progDebut.twr_per;
 
-        var fx0 = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1;
-        var gainJourUsd = U.num(progTot.gain_marche_usd, 0);
-        var gainJourInvUsd = U.num(progInv.gain_marche_usd, 0);
-        var gainDebutUsd = U.num(progDebut.gain_marche_usd, 0);
+        var fx0 = U.tauxValide(ctx.tauxEurUsd);
+        var gainJourUsd = U.num(progTot.gain_marche_usd, null);
+        var gainJourInvUsd = U.num(progInv.gain_marche_usd, null);
+        var gainDebutUsd = U.num(progDebut.gain_marche_usd, null);
 
         out += '<div class="card gold">'
             + '<div class="lbl">Patrimoine total</div>'
@@ -93,11 +103,11 @@
             + miniCarte('Portefeuille investi', ctx.totalInvestiUsd, ctx.totalInvestiEur,
                 progInv.twr_per === null ? null : UI.fleche(progInv.twr_per), null, null,
                 progInv.twr_per === null ? null : {
-                    usd: gainJourInvUsd, eur: gainJourInvUsd / fx0, legende: dernierEnregistrement(ctx, progInv)
+                    usd: gainJourInvUsd, eur: U.enEur(gainJourInvUsd, fx0), legende: dernierEnregistrement(ctx, progInv)
                 })
             + miniCarte('Performance depuis le début', null, null, null, perfDebut,
                 'TWR, apports neutralisés', {
-                    usd: gainDebutUsd, eur: gainDebutUsd / fx0, legende: 'gain de marché depuis le début'
+                    usd: gainDebutUsd, eur: U.enEur(gainDebutUsd, fx0), legende: 'gain de marché depuis le début'
                 })
             + miniCarte('Épargne de précaution', ctx.totalPrecautionUsd, ctx.totalPrecautionEur)
             + miniCarte('Cash disponible', ctx.totalCourantUsd, ctx.totalCourantEur)
@@ -161,10 +171,24 @@
         // --- Rente mensuelle (toujours en bas du tableau de bord)
         out += carteRente(ctx);
 
-        if (ctx.echecsCours && ctx.echecsCours.length) {
-            out += '<div class="erreur">Cours indisponibles : ' + UI.h(ctx.echecsCours.join(', '))
+        /* Bandeau des échecs : un titre sans cours et un titre sans taux de
+           change sont deux problèmes différents, nommés séparément. Dans les
+           deux cas la ligne est exclue des totaux, jamais remplacée. */
+        var positionsCtx = ctx.positions || {};
+        var sansCours = (ctx.echecsCours || []).filter(function (t) { return !(positionsCtx[t] && positionsCtx[t].nonCalcule); });
+        var nonCalcules = (ctx.echecsCours || []).filter(function (t) { return !!(positionsCtx[t] && positionsCtx[t].nonCalcule); });
+        var pairesSansTaux = (ctx.echecsFx || []).filter(function (e) { return e !== 'EUR/USD'; });
+        if (sansCours.length) {
+            out += '<div class="erreur">Cours indisponibles : ' + UI.h(sansCours.join(', '))
                 + '. Ces lignes sont exclues des totaux plutôt que remplacées par une valeur inventée.</div>';
         }
+        if (nonCalcules.length || pairesSansTaux.length) {
+            out += '<div class="erreur">Non calculé, taux de change indisponible'
+                + (pairesSansTaux.length ? ' (' + UI.h(pairesSansTaux.join(', ')) + ')' : '')
+                + (nonCalcules.length ? ' : ' + UI.h(nonCalcules.join(', ')) : '')
+                + '. Ces lignes sont exclues des totaux, sans conversion de remplacement.</div>';
+        }
+        if (ctx.tauxIndisponible) out = avisTauxEurUsd(ctx) + out;
         return out;
     }
 
@@ -207,7 +231,7 @@
         var pct = (U.num(a.valeurUsd, 0) / cout) - 1;
         if (!isFinite(pct) || Math.abs(pct) < 0.00005) return null;
         var pv = U.num(a.pvLatenteUsd, U.num(a.valeurUsd, 0) - cout);
-        return { pct: pct, usd: pv, eur: pv / (fx || 1) };
+        return { pct: pct, usd: pv, eur: U.enEur(pv, fx) };
     }
 
     function gainPosition(a, fx, histo) {
@@ -219,7 +243,7 @@
             var hier = a.valeurUsd / (1 + r);
             var gain = a.valeurUsd - hier;
             out += '<div class="v">' + U.usd(gain, { dec: 0, signe: true }) + '</div>'
-                + '<div class="e">' + U.eur(gain / (fx || 1), { dec: 0, signe: true }) + '</div>'
+                + '<div class="e">' + U.eur(U.enEur(gain, fx), { dec: 0, signe: true }) + '</div>'
                 + '<div class="e dim">depuis le dernier enregistrement</div>';
         }
         if (h) {
@@ -261,6 +285,11 @@
        même question selon l'écran où l'on se trouvait. */
     function carteRente(ctx) {
         var base = scenariosRetraite(ctx);
+        if (base.indisponible) {
+            return '<div class="card"><div class="lbl">Rente mensuelle</div>'
+                + '<div class="erreur">Rente non calculée : taux EUR/USD indisponible. Rien n’a été estimé à la place.</div>'
+                + '<div class="montant-eur">—</div></div>';
+        }
         var a = base.scenarios[0];
         var cap = baseCapital(ctx);
         var rente = a.renteActuelle;          // capital d'aujourd'hui, comme Streamlit
@@ -290,10 +319,10 @@
                 + '<div class="ss">à titre indicatif, le capital perd '
                 + U.pct(U.num(a.def.inflation, 0), 1) + ' de pouvoir d’achat par an</div></div>'
                 + '<div class="dr"><div class="a">' + U.usd(netteNominale, { dec: 0 }) + '</div>'
-                + '<div class="b">' + U.eur(netteNominale / fx, { dec: 0 }) + '</div></div></div>'
+                + '<div class="b">' + U.eur(U.enEur(netteNominale, fx), { dec: 0 }) + '</div></div></div>'
                 + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Capital retenu (investi + cash)</div></div>'
                 + '<div class="dr"><div class="a">' + U.usd(cap.capitalUsd, { dec: 0 }) + '</div>'
-                + '<div class="b">' + U.eur(cap.capitalUsd / fx, { dec: 0 }) + '</div></div></div>'
+                + '<div class="b">' + U.eur(U.enEur(cap.capitalUsd, fx), { dec: 0 }) + '</div></div></div>'
                 + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Rendement retenu</div>'
                 + '<div class="ss">' + UI.h(a.def.source) + '</div></div>'
                 + '<div class="dr"><div class="a">' + U.pct(a.def.rendement, 2) + '</div>'
@@ -318,13 +347,13 @@
             + '<div class="b">' + U.eur(rente.rente_brute_eur, { dec: 0 }) + '</div></div></div>'
             + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Capital retenu (investi + cash)</div></div>'
             + '<div class="dr"><div class="a">' + U.usd(cap.capitalUsd, { dec: 0 }) + '</div>'
-            + '<div class="b">' + U.eur(cap.capitalUsd / fx, { dec: 0 }) + '</div></div></div>'
+            + '<div class="b">' + U.eur(U.enEur(cap.capitalUsd, fx), { dec: 0 }) + '</div></div></div>'
             + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Apports nets versés</div></div>'
             + '<div class="dr"><div class="a">' + U.usd(cap.apportsUsd, { dec: 0 }) + '</div>'
-            + '<div class="b">' + U.eur(cap.apportsUsd / fx, { dec: 0 }) + '</div></div></div>'
+            + '<div class="b">' + U.eur(U.enEur(cap.apportsUsd, fx), { dec: 0 }) + '</div></div></div>'
             + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Plus-value dans le capital</div></div>'
             + '<div class="dr"><div class="a">' + U.usd(cap.pvCapitalUsd, { dec: 0 }) + '</div>'
-            + '<div class="b">' + U.eur(cap.pvCapitalUsd / fx, { dec: 0 }) + '</div></div></div>'
+            + '<div class="b">' + U.eur(U.enEur(cap.pvCapitalUsd, fx), { dec: 0 }) + '</div></div></div>'
             + '<div class="ligne" style="padding:6px 0"><div class="gr"><div class="st">Rendement retenu</div>'
             + '<div class="ss">' + UI.h(a.def.source) + '</div></div>'
             + '<div class="dr"><div class="a">' + U.pct(a.def.rendement, 2) + '</div>'
@@ -361,7 +390,7 @@
             apportsUsd: apports,
             pvCapitalUsd: pv,
             partPv: capital > 0 ? pv / capital : 0,
-            fx: ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125
+            fx: U.tauxValide(ctx.tauxEurUsd)
         };
     }
 
@@ -375,7 +404,8 @@
     }
 
     function progression(ctx, periode, perimetre) {
-        if (!ctx.serie || !ctx.serie.dates.length) return { twr_per: null, gain_marche_usd: 0 };
+        // Sans série (pas de cours EUR/USD, par exemple) : aucune valeur, pas un 0.
+        if (!ctx.serie || !ctx.serie.dates.length) return { twr_per: null, gain_marche_usd: null, indisponible: true };
         var valLive = perimetre === 'total' ? ctx.patrimoineTotalUsd : ctx.totalInvestiUsd;
         var col = perimetre === 'total' ? 'patrimoine_total_usd' : 'patrimoine_investi_usd';
         var dates = ctx.serie.dates, valeurs = ctx.serie.lignes.map(function (l) {
@@ -386,9 +416,9 @@
     }
 
     function performanceDepuisDebut(ctx) {
-        if (!ctx.serie || ctx.serie.dates.length < 2) return 0;
+        if (!ctx.serie || ctx.serie.dates.length < 2) return null;
         var p = progression(ctx, 'Depuis le début', 'investi');
-        return p.twr_per || 0;
+        return p.twr_per;
     }
 
     // ============================================================== PORTEFEUILLE
@@ -443,12 +473,12 @@
         var cap = baseCapital(ctx);
         out += '<div class="card tight">'
             + '<div class="lbl">Plus-value latente des positions</div>'
-            + UI.montant(pvPos, pvPos / cap.fx)
+            + UI.montant(pvPos, U.enEur(pvPos, cap.fx))
             + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Valeur actuelle moins prix '
             + 'd’achat des titres détenus : la plus-value qui serait imposée si vous vendiez aujourd’hui.</div>'
             + '<div class="sep"></div>'
             + '<div class="lbl">Plus-value dans le capital</div>'
-            + UI.montant(cap.pvCapitalUsd, cap.pvCapitalUsd / cap.fx, { petit: true })
+            + UI.montant(cap.pvCapitalUsd, U.enEur(cap.pvCapitalUsd, cap.fx), { petit: true })
             + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Capital (investi + cash '
             + 'disponible) moins vos apports nets versés, gains réalisés compris : c’est la base de la rente, '
             + 'et le chiffre que la v2 appelle « plus-value latente dans le capital ».</div>'
@@ -473,7 +503,7 @@
                     + '<div class="gr"><div class="tt">' + UI.h(a.type || 'apport') + '</div>'
                     + '<div class="st">' + U.jourMoisAnneeISO(a.date) + '</div></div>'
                     + '<div class="dr"><div class="a ' + (signe > 0 ? 'up' : 'down') + '">'
-                    + U.usd(signe * U.num(a.montant_usd, a.montant_eur), { dec: 0, signe: false }) + '</div>'
+                    + U.usd(U.num(a.montant_usd, null) === null ? null : signe * U.num(a.montant_usd, 0), { dec: 0, signe: false }) + '</div>'
                     + '<div class="b">' + U.eur(signe * a.montant_eur, { dec: 0 }) + '</div></div>'
                     + '</div>';
             });
@@ -501,40 +531,87 @@
         return out;
     }
 
-    /* Les comptes de liquidités, en devise puis en dollars et en euros : c'est
-       l'écran « Fonds & Comptes » de la v2, avec les virements internes. */
+    /* Les comptes de liquidités : disponibles, réserves, archivés. Le solde de chaque
+       compte est calculé à partir de ses opérations. Un archivé sort des listes et des
+       propositions, mais son solde reste compté dans le patrimoine. */
     function ongletComptes(ctx) {
-        var comptes = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; });
-        var out = '<div class="titre">Comptes de liquidités <span class="n">' + comptes.length + '</span></div>';
-        if (!comptes.length) {
-            return out + '<div class="vide" style="padding:18px">Aucun compte de liquidités trouvé '
-                + 'dans la table Donnees.</div>';
+        var etatC = ctx.comptesEtat || { presente: null };
+        var tous = ctx.comptes || [];
+        var out = '<div class="titre">Mes comptes <span class="n">' + tous.filter(function (c) { return !c.archive; }).length + '</span></div>';
+        if (ctx.bandeauMigration) out += '<div class="info">' + UI.h(ctx.bandeauMigration) + '</div>';
+
+        if (etatC.presente === false) {
+            out += '<div class="erreur">La table des comptes (pf2_comptes) est absente ou illisible'
+                + (etatC.erreur ? ' : ' + UI.h(etatC.erreur) : '') + '. Exécutez migrations/003_comptes.sql dans Supabase. '
+                + 'En attendant, les liquidités sont lues dans l’ancienne table Donnees, sans création ni modification de compte.</div>';
         }
-        var totalUsd = 0, totalEur = 0;
-        comptes.forEach(function (c) { totalUsd += c.valeurUsd; totalEur += c.valeurEur; });
 
-        out += '<div class="card gold"><div class="lbl">Total disponible</div>'
-            + UI.montant(totalUsd, totalEur)
-            + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Épargne de précaution : '
-            + U.usd(ctx.totalPrecautionUsd, { dec: 0 }) + ' · cash disponible : '
-            + U.usd(ctx.totalCourantUsd, { dec: 0 }) + '</div></div>';
+        if (!tous.length) {
+            // Pas encore de comptes (table présente mais vide, ou absente) : on montre les
+            // liquidités telles que la v1 les tient, sans rien y écrire.
+            var anciens = (ctx.actifs || []).filter(function (a) { return a.classe === 'espece'; });
+            if (!anciens.length) {
+                return out + '<div class="vide" style="padding:18px">Aucun compte de liquidités pour le moment.</div>'
+                    + (etatC.presente ? '<button class="btn" id="btnCompteNouveau">＋ Nouveau compte</button>' : '');
+            }
+            out += '<div class="card">';
+            anciens.forEach(function (c) {
+                out += '<div class="ligne"><div class="gr"><div class="tt">' + UI.h(c.ticker) + '</div>'
+                    + '<div class="st">Solde : ' + U.quantite(c.quantite) + ' ' + UI.h(c.ticker) + '</div></div>'
+                    + '<div class="dr"><div class="a">' + U.usd(c.valeurUsd, { dec: 0 }) + '</div>'
+                    + '<div class="b">' + U.eur(c.valeurEur, { dec: 0 }) + '</div></div></div>';
+            });
+            return out + '</div>';
+        }
 
-        out += '<div class="card">';
-        comptes.forEach(function (c) {
-            var poche = M.etat.parCle[c.poche];
-            out += '<div class="ligne"><div class="pastille" style="background:rgba(56,189,248,.14)">💵</div>'
-                + '<div class="gr"><div class="tt">' + UI.h(c.ticker) + '</div>'
-                + '<div class="st">Solde : <b style="color:var(--txt-2)">' + U.quantite(c.quantite) + ' '
-                + UI.h(c.ticker) + '</b>' + (poche ? ' · ' + UI.h(poche.nom) : '') + '</div></div>'
+        var actifs = tous.filter(function (c) { return !c.archive; });
+        var archives = tous.filter(function (c) { return c.archive; });
+        var disponibles = actifs.filter(function (c) { return c.type === 'disponible'; });
+        var reserves = actifs.filter(function (c) { return c.type === 'reserve'; });
+
+        function somme(liste, cle) {
+            return liste.reduce(function (t, c) { return t + (c[cle] === null || c[cle] === undefined ? 0 : c[cle]); }, 0);
+        }
+        var tousUsd = somme(tous, 'valeurUsd'), tousEur = somme(tous, 'valeurEur');
+
+        out += '<div class="card gold"><div class="lbl">Liquidités, total (archivés compris)</div>'
+            + UI.montant(tousUsd, tousEur)
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Disponibles : '
+            + U.usd(somme(disponibles, 'valeurUsd'), { dec: 0 }) + ' · Réserves : '
+            + U.usd(somme(reserves, 'valeurUsd'), { dec: 0 }) + '</div></div>';
+
+        function carte(c) {
+            var v = ctx.comptesVariation ? ctx.comptesVariation[c.id] : null;
+            var pastille = c.type === 'reserve' ? '🏦' : '💵';
+            var sousTitre = [c.banque || 'Banque non renseignée', c.motif].filter(Boolean).join(' · ');
+            return '<div class="ligne" data-compte="' + UI.h(c.id) + '" style="cursor:pointer">'
+                + '<div class="pastille" style="background:rgba(56,189,248,.14)">' + pastille + '</div>'
+                + '<div class="gr"><div class="tt">' + UI.h(c.nom) + (c.devise ? ' · ' + UI.h(c.devise) : '') + '</div>'
+                + '<div class="st">' + UI.h(sousTitre) + (v !== null && v !== undefined && c.devise !== 'USD'
+                    ? ' · change ' + U.flecheTexte(v) : '') + '</div></div>'
                 + '<div class="dr"><div class="a">' + U.usd(c.valeurUsd, { dec: 0 }) + '</div>'
-                + '<div class="b">' + U.eur(c.valeurEur, { dec: 0 }) + '</div></div></div>';
-        });
-        out += '</div>';
+                + '<div class="b">' + U.nombre(c.solde, 2) + ' ' + UI.h(c.devise) + '</div></div></div>';
+        }
 
-        out += '<button class="btn" id="btnVirement" style="margin-bottom:10px">↔ Virement entre deux comptes</button>';
-        out += '<div style="font-size:11.5px;color:var(--txt-3);padding:0 4px">Un virement interne ne modifie '
-            + 'ni votre capital investi ni vos apports : il déplace simplement des fonds d’un compte à l’autre, '
-            + 'au taux de change du jour de l’opération.</div>';
+        out += '<div class="titre" style="margin-top:14px">Disponibles <span class="n">' + disponibles.length + '</span></div>'
+            + '<div class="st" style="padding:0 4px 6px">Achats et ventes de titres se font ici, dans la devise du titre.</div>'
+            + '<div class="card">' + (disponibles.map(carte).join('') || '<div class="vide" style="padding:14px">Aucun compte disponible.</div>') + '</div>';
+        out += '<div class="titre" style="margin-top:14px">Réserves <span class="n">' + reserves.length + '</span></div>'
+            + '<div class="st" style="padding:0 4px 6px">Épargne de précaution : jamais investie, hors du calcul de rééquilibrage.</div>'
+            + '<div class="card">' + (reserves.map(carte).join('') || '<div class="vide" style="padding:14px">Aucune réserve.</div>') + '</div>';
+        if (archives.length) {
+            out += '<div class="titre" style="margin-top:14px">Archivés <span class="n">' + archives.length + '</span></div>'
+                + '<div class="st" style="padding:0 4px 6px">Historique consultable. Solde toujours compté dans le patrimoine.</div>'
+                + '<div class="card">' + archives.map(carte).join('') + '</div>';
+        }
+
+        if (etatC.presente) {
+            out += '<div class="grille g2" style="margin-top:12px">'
+                + '<button class="btn" id="btnCompteNouveau">＋ Nouveau compte</button>'
+                + '<button class="btn sec" id="btnVirement">↔ Virement</button></div>';
+        }
+        out += '<div style="font-size:11.5px;color:var(--txt-3);padding:8px 4px 0">Un virement déplace des fonds '
+            + 'd’un compte à l’autre dans une même devise, sans change. Il ne modifie ni votre capital investi ni vos apports.</div>';
         return out;
     }
 
@@ -572,6 +649,12 @@
                     + '<div class="b">' + U.quantite(o.quantite) + '</div></div></div>';
             });
             out += '</div><button class="btn sec" id="btnExecuter" style="margin-bottom:8px">Enregistrer un ordre</button>';
+        }
+
+        if (gen.sansTaux && gen.sansTaux.length) {
+            out += '<div class="erreur">Ordre non calculé, cours de change indisponible : '
+                + UI.h(gen.sansTaux.map(function (o) { return o.ticker; }).join(', '))
+                + '. Aucune quantité n’est proposée sans ce cours.</div>';
         }
 
         if (gen.aSurveiller.length) {
@@ -653,11 +736,14 @@
             + '" data-perimetre="total">Patrimoine total</button>'
             + '</div>';
 
+        if (ctx.tauxIndisponible) {
+            return out + avisTauxEurUsd(ctx);
+        }
         if (!ctx.serie || ctx.serie.dates.length < 2) {
             return out + '<div class="vide"><span class="g">\u25e2</span>Pas encore assez d\u2019historique de snapshots.</div>';
         }
 
-        var fx = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125;
+        var fx = U.tauxValide(ctx.tauxEurUsd);
         var affiches = 0;
 
         /* Sur la progression journalière, on écrit noir sur blanc la valeur de
@@ -673,7 +759,7 @@
 
         BLOCS_PERF.forEach(function (b) {
             var p = progression(ctx, b.cle, perimetre);
-            if (p.vide) return;
+            if (p.vide || p.indisponible) return;
             var courbe = valeursPeriode(ctx, b.cle, perimetre);
             if (courbe.valeurs.length < 2) return;
             affiches++;
@@ -688,7 +774,7 @@
                 + U.usd(p.gain_marche_usd, { dec: 0, signe: true }) + '</span>'
                 + '<span class="dim" style="font-size:11.5px">'
                 + '<span style="color:var(--euro)">'
-                + U.eur(p.gain_marche_usd / fx, { dec: 0, signe: true }) + '</span> \u00b7 '
+                + U.eur(U.enEur(p.gain_marche_usd, fx), { dec: 0, signe: true }) + '</span> \u00b7 '
                 + UI.h(b.sous) + '</span>'
                 + '</div>'
                 + '<div style="font-size:11px;color:var(--txt-3);margin:3px 0 9px">'
@@ -696,7 +782,7 @@
                 + U.jourMoisAnneeISO(courbe.dates[courbe.dates.length - 1])
                 + ' \u00b7 ' + courbe.valeurs.length + ' points \u00b7 valeur fin de p\u00e9riode '
                 + U.usd(p.v_fin_usd, { dec: 0 })
-                + ' <span style="color:var(--euro)">(' + U.eur(p.v_fin_usd / fx, { dec: 0 }) + ')</span>'
+                + ' <span style="color:var(--euro)">(' + U.eur(U.enEur(p.v_fin_usd, fx), { dec: 0 }) + ')</span>'
                 + ligneRepere(ctx, b.cle, p) + '</div>'
                 + UI.graphique([{
                     nom: nomPerimetre,
@@ -876,7 +962,11 @@
         var r = PF.store.reglages();
         var anneeCourante = new Date().getFullYear();
         var anneeDepart = Math.max(anneeCourante + 1, U.num(r.anneeDepartRetraite, anneeCourante + 20));
-        var fx = ctx.tauxEurUsd > 0 ? ctx.tauxEurUsd : 1.125;
+        var fx = U.tauxValide(ctx.tauxEurUsd);
+        if (fx === null) {
+            // Les scénarios sont en dollars : sans cours, ils ne peuvent pas être lus en euros.
+            return { indisponible: true, fx: null, anneeDepart: anneeDepart, anneeCourante: anneeCourante, scenarios: [] };
+        }
         var apportMensuelUsd = U.num(r.apportMensuelEur, 250) * fx;
         var cagr = PF.metrics.twrAnnualise(ctx.serie);
         var inflConnue = inflationObservee(ctx);
@@ -959,6 +1049,9 @@
     function vueRetraite(ctx) {
         var r = PF.store.reglages();
         var base = scenariosRetraite(ctx);
+        if (base.indisponible) {
+            return avisTauxEurUsd(ctx) + '<div class="vide">La projection retraite attend le cours EUR/USD : aucune rente n’est affichée.</div>';
+        }
         var cle = scenarioActif || 'A';
         var courant = base.scenarios.filter(function (s) { return s.def.cle === cle; })[0] || base.scenarios[0];
         var fx = base.fx;
@@ -1001,10 +1094,10 @@
         // --- Capital projeté
         out += '<div class="card gold">'
             + '<div class="lbl">Capital au 1ᵉʳ janvier ' + base.anneeDepart + ' — scénario ' + UI.h(courant.def.cle) + '</div>'
-            + UI.montant(courant.fin.capital_nominal, courant.fin.capital_nominal / fx)
+            + UI.montant(courant.fin.capital_nominal, U.enEur(courant.fin.capital_nominal, fx))
             + '<div style="font-size:12.5px;color:var(--txt-3);margin-top:7px">'
             + 'soit <b style="color:var(--txt-2)">' + U.usd(courant.fin.pouvoir_achat, { dec: 0 }) + '</b>'
-            + ' <span style="color:var(--euro)">(' + U.eur(courant.fin.pouvoir_achat / fx, { dec: 0 }) + ')</span> '
+            + ' <span style="color:var(--euro)">(' + U.eur(U.enEur(courant.fin.pouvoir_achat, fx), { dec: 0 }) + ')</span> '
             + 'en pouvoir d’achat d’aujourd’hui</div>'
             + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
             + UI.badge('rendement ' + U.pct(courant.def.rendement, 1), 'mut')

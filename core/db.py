@@ -32,6 +32,27 @@ class SecretsManquants(Exception):
     """Les credentials Supabase ne sont pas configurés."""
 
 
+class ComptesGeresDansAppli(RuntimeError):
+    """Un mouvement de cash ne peut plus s'écrire depuis Streamlit.
+
+    Depuis la 2.0, les liquidités sont des comptes (`pf2_comptes`) alimentés par des
+    opérations. Écrire le cash dans `Donnees` le ferait disparaître sans erreur, et un
+    mouvement écrit sans son lien (transaction ou apport) compterait deux fois après
+    une suppression. On refuse donc, avant toute écriture, avec ce message.
+    """
+
+
+MESSAGE_LECTURE_COMPTES = (
+    "Les comptes se gèrent dans l’application. Cette page affiche vos liquidités en "
+    "lecture seule : soldes, types, banques et opérations."
+)
+
+MESSAGE_COMPTES_2_0 = (
+    "Les comptes se gèrent dans l’application : depuis la 2.0, les liquidités sont des "
+    "comptes. Cette page les affiche en lecture seule ; rien n’a été enregistré."
+)
+
+
 # Tables de la nouvelle application.
 T_TRANSACTIONS = "pf2_transactions"
 T_APPORTS = "pf2_apports"
@@ -40,10 +61,17 @@ T_COURS = "pf2_cours"
 T_FX = "pf2_fx"
 T_INFLATION = "pf2_inflation"
 T_ALERTES = "pf2_alertes"
+T_COMPTES = "pf2_comptes"                    # migrations/003_comptes.sql
+T_OPERATIONS_COMPTE = "pf2_operations_compte"
 
 TOUTES_LES_TABLES = (
     T_TRANSACTIONS, T_APPORTS, T_SNAPSHOTS, T_COURS, T_FX, T_INFLATION, T_ALERTES,
 )
+
+# Sans ces tables, le robot ne peut pas tourner. Les tables de comptes sont OPTIONNELLES :
+# tant que la migration 003 n'est pas passée, les liquidités se lisent dans `Donnees`.
+TABLES_REQUISES = TOUTES_LES_TABLES
+TABLES_OPTIONNELLES = (T_COMPTES, T_OPERATIONS_COMPTE)
 
 
 def _credentials() -> tuple[str, str]:
@@ -222,8 +250,45 @@ def existe(table: str) -> bool:
 
 
 def tables_presentes() -> dict[str, bool]:
-    """État des tables attendues — affiché à l'utilisateur au démarrage."""
-    return {t: existe(t) for t in TOUTES_LES_TABLES}
+    """État de toutes les tables attendues (requises et optionnelles) — pour l'affichage."""
+    return {t: existe(t) for t in TABLES_REQUISES + TABLES_OPTIONNELLES}
+
+
+def tables_requises_manquantes() -> list[str]:
+    """Les tables REQUISES absentes. Une table optionnelle absente n'arrête rien."""
+    return [t for t in TABLES_REQUISES if not existe(t)]
+
+
+def comptes_liquidites() -> list[dict] | None:
+    """Lignes de `pf2_comptes`. None si la table n'existe pas : on lit alors Donnees.
+
+    Une table présente mais vide renvoie []. Une erreur de lecture est levée, pas avalée.
+    """
+    if not existe(T_COMPTES):
+        return None
+    rep = client().table(T_COMPTES).select("*").execute()
+    return rep.data or []
+
+
+def operations_compte() -> list[dict]:
+    """Toutes les opérations de comptes (le solde se calcule à partir d'elles)."""
+    rep = client().table(T_OPERATIONS_COMPTE).select("*").execute()
+    return rep.data or []
+
+
+def cash_gere_par_comptes() -> bool:
+    """Vrai quand au moins un compte existe : les liquidités viennent alors des comptes."""
+    return bool(comptes_liquidites())
+
+
+def verifier_ecriture_cash() -> None:
+    """Lève `ComptesGeresDansAppli` si le cash ne doit plus s'écrire depuis Streamlit.
+
+    À appeler AVANT la première écriture d'un mouvement : une transaction écrite puis un
+    cash refusé laisserait une transaction sans son mouvement de compte.
+    """
+    if cash_gere_par_comptes():
+        raise ComptesGeresDansAppli(MESSAGE_COMPTES_2_0)
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +559,36 @@ def variations_donnees_v1() -> dict[str, dict]:
 
 
 def soldes_comptes_liquidites() -> dict[str, dict]:
-    """Retourne l'état actuel des comptes de liquidités depuis la table `Donnees`."""
+    """État des liquidités, même forme qu'avant la 2.0 : {devise: {ticker, nom, type,
+    perimetre, quantite}}.
+
+    Comptes renseignés → lus dans `pf2_comptes` et `pf2_operations_compte`, groupés par
+    devise. Une devise qui a des comptes dans les deux poches garde deux entrées, clées
+    `DEVISE:poche`. Sinon (table absente ou vide) → lecture de `Donnees`, comme la v1.
+    """
+    try:
+        comptes = comptes_liquidites()
+    except Exception as exc:
+        log.warning("Comptes de liquidités illisibles, repli sur Donnees : %s", exc)
+        comptes = None
+    if comptes:
+        from .portfolio import grouper_liquidites
+        groupes = grouper_liquidites(comptes, operations_compte())
+        par_devise: dict[str, int] = {}
+        for g in groupes:
+            par_devise[g["devise"]] = par_devise.get(g["devise"], 0) + 1
+        resultat: dict[str, dict] = {}
+        for g in groupes:
+            cle = g["devise"] if par_devise[g["devise"]] == 1 else f'{g["devise"]}:{g["perimetre"]}'
+            resultat[cle] = {
+                "ticker": g["devise"],
+                "nom": f'{g["devise"]} — ' + ("épargne de précaution" if g["perimetre"] == "precaution" else "compte courant"),
+                "type": "🏦 Cash réserve" if g["perimetre"] == "precaution" else "💵 Cash",
+                "perimetre": g["perimetre"],
+                "quantite": g["quantite"],
+            }
+        return resultat
+
     comptes_defaut = [
         {"ticker": "USD", "nom": "💵 Compte courant USD (Cash disponible)", "type": "💵 Cash", "perimetre": "courant", "quantite": 0.0},
         {"ticker": "EUR", "nom": "💵 Compte courant EUR (Cash disponible)", "type": "💵 Cash", "perimetre": "courant", "quantite": 0.0},
@@ -532,12 +626,19 @@ def ajuster_solde_compte(
     ticker: str,
     delta_quantite: float,
     type_defaut: str = "💵 Cash",
-    taux_usd: float = 1.0,
+    taux_usd: float | None = None,
 ) -> float | None:
     """Ajoute `delta_quantite` (positif ou négatif) à la ligne `ticker` dans `Donnees`.
 
+    `taux_usd` est le cours de la devise en dollars (1.0 pour le dollar lui-même).
+    Il est obligatoire : sans lui, la valeur en dollars de la ligne ne peut pas être
+    écrite, et aucun taux de remplacement n'est inventé. Lève ValueError dans ce cas.
+
     Retourne le nouveau solde dans la devise du compte, ou `None` en cas d'échec.
     """
+    verifier_ecriture_cash()
+    if taux_usd is None or not taux_usd > 0:
+        raise ValueError("taux EUR/USD indisponible : solde non ajusté, aucune valeur de repli")
     t_up = str(ticker).strip().upper()
     try:
         c = client()
@@ -551,7 +652,7 @@ def ajuster_solde_compte(
                 except Exception:
                     q_actuel = 0.0
                 q_nouveau = round(max(0.0, q_actuel + float(delta_quantite)), 6)
-                val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+                val_tot_usd = round(q_nouveau * float(taux_usd), 2)
                 maj = {
                     "Quantité": q_nouveau,
                     "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
@@ -563,12 +664,12 @@ def ajuster_solde_compte(
                 return q_nouveau
         # Si la ligne n'existe pas encore dans Donnees
         q_nouveau = round(max(0.0, float(delta_quantite)), 6)
-        val_tot_usd = round(q_nouveau * float(taux_usd or 1.0), 2)
+        val_tot_usd = round(q_nouveau * float(taux_usd), 2)
         c.table("Donnees").insert({
             "Ticker": t_up,
             "Type": type_defaut,
             "Devise Cotation": "Auto",
-            "Court": f"$ {float(taux_usd or 1.0):.2f}",
+            "Court": f"$ {float(taux_usd):.2f}",
             "Quantité": q_nouveau,
             "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
             "Pourcentage (%)": 0,
