@@ -17,7 +17,12 @@ import importlib
 from core import db, fx, metrics, models, prices, rebalance, session as S
 from core import ui
 from core.models import POCHES_PAR_CLE
-from core.portfolio import devise_cotation_de, operations_compte_affichage, resume_comptes
+from core.portfolio import (  # noqa: E402
+    devise_cotation_de,
+    erreur_saisie_vente,
+    operations_compte_affichage,
+    resume_comptes,
+)
 
 if not hasattr(db, "soldes_comptes_liquidites") or not hasattr(db, "lire_allocation_personnalisee") or not hasattr(models, "verifier_allocation_cible") or not hasattr(models, "bande_actif") or not hasattr(db, "modifier_transaction") or not hasattr(metrics, "calculer_rente_mensuelle_reelle") or not hasattr(ui, "fleche_pct") or not hasattr(ui, "_NAV_V2"):
     importlib.reload(models)
@@ -365,6 +370,16 @@ with tab_reeq:
                         problemes.append("La quantité doit être positive.")
                     if cours <= 0:
                         problemes.append("Le cours doit être positif.")
+                    # Constat 6 (2.1.0) : une vente excédentaire n'est pas enregistrée.
+                    # Même validateur que l'Android et que les calculs 2074/2086.
+                    if ticker and ticker != "➕ Nouveau…" and quantite > 0 and cours > 0:
+                        erreur_vente = erreur_saisie_vente(ctx.transactions, {
+                            "ticker": ticker, "sens": sens, "date": date_tx.isoformat(),
+                            "quantite": quantite, "cours": cours, "frais": frais,
+                            "devise": devise, "source": source,
+                        })
+                        if erreur_vente:
+                            problemes.append(f"Vente non enregistrée : {erreur_vente}")
 
                     devise_attendue = devise_cotation_de(ticker) if ticker else None
                     if ticker and devise_attendue and devise != devise_attendue:
@@ -494,10 +509,21 @@ with tab_reeq:
                     btn_suppr_tx = b_del.form_submit_button("🗑️ Supprimer cette transaction", disabled=gerees)
 
                     if btn_sauver_tx:
+                        # Constat 6 (2.1.0) : la vente modifiée est retirée du calcul de
+                        # position (id_exclu), puis validée comme une saisie neuve.
+                        erreur_vente_edit = None
+                        if ticker_edit.strip() and qte_edit > 0 and cours_edit > 0:
+                            erreur_vente_edit = erreur_saisie_vente(ctx.transactions, {
+                                "ticker": ticker_edit, "sens": sens_edit, "date": date_edit.isoformat(),
+                                "quantite": float(qte_edit), "cours": float(cours_edit),
+                                "frais": float(frais_edit), "devise": dev_edit, "source": src_edit,
+                            }, id_exclu=int(tx_sel.id))
                         if not ticker_edit.strip():
                             st.error("Le ticker ne peut pas être vide.")
                         elif qte_edit <= 0 or cours_edit <= 0:
                             st.error("La quantité et le cours unitaire doivent être strictement positifs.")
+                        elif erreur_vente_edit:
+                            st.error(f"Modification non enregistrée : {erreur_vente_edit}")
                         else:
                             try:
                                 db.verifier_ecriture_cash()   # comptes 2.0 : refus avant toute écriture

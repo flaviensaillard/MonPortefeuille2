@@ -94,7 +94,7 @@ La 2.0.1 mettait la clé de signature en cache dans un dépôt public : elle est
 | **3** | Devise absente devenue `NAN`, puis valorisée au taux 1 ; côté fiscal, le montant étranger brut devenait des euros. | Liste ISO 4217 partagée ; taux absent = `NULL` annoncé, jamais 1 ; fiscal : plus de repli sur le brut (T-01). | `tests/test_devise_absente.js` (11), `tests/test_devise_absente.py` (11), `tests/test_fiscal_inventaire.py` (TestTauxAbsent) |
 | **4** | Snapshots partiels écrits sans marque de complétude ; portefeuille en liquidités seules sans point. | Colonne `complet` (migration 005) ; un point partiel n'entre jamais dans une série ; liquidités seules = point quand même ; alerte « Snapshot partiel ». | `tests/test_snapshot_complet.py` (7) |
 | **5** | 2086 : crypto-actifs détenus hors application ignorés du dénominateur ; erreurs de cours avalées par `except Exception: pass`. | Inventaire externe (migration 007, RLS) entrant dans les lignes 212 et 220 ; cours, taux, solde ou prix d'acquisition manquant = calcul **incomplet** et nommé ; plus aucun `except … : pass` dans le fiscal. | `tests/test_fiscal_inventaire.py` (9, dont le verrou sans `except … pass`) ; `tests/test_rls.py` (TestInventaireCrypto) |
-| **6** | Vente supérieure à la position : rejetée par le portefeuille, mais calculée en 2074 (gain sur la quantité entière). | Même règle dans les moteurs JS et Python ; refusée au formulaire Android, écartée des 2074 et 2086 et annoncée partout ; jamais chiffrée. Streamlit ne la refuse pas encore à la saisie (voir § 5). | `tests/test_ventes_excedentaires.py` (12) ; `tests/test_ventes_excedentaires.js` (18) |
+| **6** | Vente supérieure à la position : rejetée par le portefeuille, mais calculée en 2074 (gain sur la quantité entière). | Même règle dans les moteurs JS et Python ; refusée au formulaire Android **et au formulaire Streamlit** (création et modification, avant toute écriture), écartée des 2074 et 2086 et annoncée partout ; jamais chiffrée. | `tests/test_ventes_excedentaires.py` (12) ; `tests/test_ventes_excedentaires.js` (18) ; `tests/test_saisie_vente_streamlit.py` (7) |
 | **7** | TWR : chaque flux supposé en fin d'intervalle ; exemple de la revue : 100 €, apport de 100 € au milieu, +10 % → affiché +20 %, réel +10 %. | Valorisation juste avant chaque flux (migration 006 et saisie). Un intervalle non valorisé n'est pas chaîné : il est annoncé « non calculé ». `test_metrics.py` corrigé, miroir JS aligné. | `tests/test_twr_strict.py` (10) ; `tests/test_twr_strict.js` (16) ; `tests/test_metrics.py` (51) ; `tests/test_valorisation_flux.js` (9) |
 | **8** | Transaction et mouvement de compte écrits en deux requêtes, avec suppression « compensatoire » : une panne laissait des titres sans argent débité. | Création et modification par RPC atomiques (transactions : migration 004 ; apports : migrations 004 et 006) ; rejeu idempotent ; zéro compensation. | `tests/test_atomicite_ecritures.js` (26) ; `tests/test_rls.py` (RPC atomiques) |
 | **9** | Lectures Supabase sans pagination : au-delà de 1 000 lignes, l'historique était tronqué en silence. | Lecture paginée partout (JS et Python), ordre stable par table ; une page en échec fait échouer toute la lecture. | `tests/test_pagination.js` (11, jusqu'à 15 000 lignes) ; `tests/test_pagination_db.py` (5) |
@@ -134,7 +134,10 @@ La 2.0.1 mettait la clé de signature en cache dans un dépôt public : elle est
 - La page 4 (Fiscalité) n'affiche aucun formulaire et ne lance aucune simulation tant que le calcul est incomplet.
 
 ### Constat 6 — Vente excédentaire
-- Le formulaire de saisie Android contrôle la quantité détenue, pas seulement la quantité positive (validateur partagé `erreurVenteExcedentaire`). Streamlit n'appelle pas encore ce validateur à la saisie : la vente y est enregistrée, puis écartée des calculs 2074 et 2086 et annoncée sur la page Fiscalité (voir § 5).
+- Le formulaire de saisie Android contrôle la quantité détenue, pas seulement la quantité positive (validateur partagé `erreurVenteExcedentaire`).
+- **Clos en 2.1.0 pour Streamlit** : la page Portefeuille applique le même contrôle à la création et à la modification d'une transaction, via `core.portfolio.erreur_saisie_vente`, appelé avant toute écriture. La ligne modifiée est retirée du calcul de la position, pour ne pas être comptée deux fois. Une vente excédentaire n'est plus enregistrée depuis le formulaire, quel qu'il soit.
+- Une vente excédentaire saisie AVANT cette version reste en base : elle est écartée des 2074 et 2086 et annoncée sur la page Fiscalité. Elle n'est pas supprimée automatiquement ; corrigez-la à la main si elle est réelle (saisie erronée).
+- Tests rouges avant correction : validateur absent et formulaire sans appel (7 tests, dont 2 contrôles statiques de la page).
 - Les deux moteurs (JS et Python) appliquent la même règle, testée des deux côtés : achats du jour comptés, ventes du jour retirées par prudence, achats avant ventes à date égale.
 - Une vente excédentaire déjà enregistrée est écartée des 2074 et 2086 et annoncée (Python : `core/portfolio.py`, `filtrer_ventes_excedentaires` ; JS : `PF.portefeuille.erreurVenteExcedentaire`).
 
@@ -168,6 +171,19 @@ La 2.0.1 mettait la clé de signature en cache dans un dépôt public : elle est
 ## 4. Autres constats traités dans cette version
 - **T-01** (repli FX vers le montant brut) : traité côté fiscal (2074, 2086, cessions).
 - **T-03** (vente incohérente en fiscal) : traité avec le constat 6.
+- **XJSE.SW sans cotation vivante** (position détenue, hors des 10 constats) : traité en quatre couches, dans cet ordre pour la valorisation du jour :
+  1. cotation vivante de XJSE.SW lui-même (JPY), si Yahoo la redonne ;
+  2. **substitut XJSE.DE** : Xetra, EUR, même fonds (Xtrackers II Japan Government Bond UCITS ETF 1C). Mêmes garde-fous que tout cours : séance de 5 jours au plus, cohérence avec la clôture précédente (20 %). La ligne reste XJSE.SW dans vos transactions ; la fiche affiche « cours via XJSE.DE · EUR » ;
+  3. **cours de référence saisi à la main**, daté de 7 jours au plus : `python -m jobs.saisir_cours_reference XJSE.SW 6,0138 EUR AAAA-MM-JJ`. Refusé à la saisie si plus ancien ou invalide, et refusé à nouveau à la valorisation ;
+  4. sinon, **échec explicite** : le snapshot est partiel, une alerte est écrite, le point est exclu des séries. Le message d'échec nomme les couches tentées.
+  
+  Le cache nocturne `pf2_cours` n'écrit que les couches 1 et 2, avec la devise du cours (EUR pour le substitut). Il n'écrit jamais une référence, qui est un autre jour.
+  
+  **Constat sur la devise :** avant ce correctif, une valeur en EUR aurait été lue comme des yens (facteur ~180). La valorisation convertit désormais chaque cours dans SA devise.
+  
+  **Tests :** `tests/test_substitut_xjse.py` (10). Un test par couche, écrit avant le code et rouge sur l'ancien code : couche 1 (valorisation et fiche), couche 2 (référence, lecture de `Config`), couche 3 (message d'échec), robot (devise écrite). Limite honnête : les cas de bord (8 jours, date future, cours nul) sont aussi rouges, mais parce qu'ils appellent la nouvelle signature ; l'ancien code les refusait déjà.
+  
+  **Écart de valorisation :** voir § 5, non mesuré. Le cours de 6,0138 € du 10/10 est le vôtre, relevé sur XJSE.DE ; je ne l'ai pas revérifié depuis la sandbox.
 - **T-07** (profil annuel) : traité avec le constat 10.
 - **T-08** (veille des barèmes « à jour » après une panne) : une panne donne l'état `sonde_indisponible`, jamais « à jour » ; la panne n'est pas mise en cache. `tests/test_fiscal_veille.py` (3).
 - **F-17** (rendement retraite de 5 % présenté comme historique) : traité avec le constat 7.
@@ -191,16 +207,16 @@ La 2.0.1 mettait la clé de signature en cache dans un dépôt public : elle est
 - **Lectures silencieuses (Python)** : `core/db.py` (`lire_allocation_personnalisee`, `variations_donnees_v1`, `soldes_comptes_liquidites`) retombe sur des valeurs par défaut ou partielles si une lecture échoue ; `core/session.py` (2 cas) et `core/models.py` (1 cas) ont encore des `except … : pass`. Non traité : le verrou de 2.1.0 ne porte que sur le fiscal.
 - **Lectures silencieuses (Android)** : `lireTable` (`app/src/main/assets/www/js/portfolio.js`) renvoie une liste vide en cas d'erreur. Sans session valide, les vues s'affichent vides, sans message. Une bannière « session absente ou expirée » reste à faire.
 - **Apport ou retrait (Streamlit) : écritures non couplées.** La page Portefeuille écrit `pf2_apports`, puis le journal v1 (`Historique`), puis le solde (`Donnees`), en requêtes séparées. Si le journal ou le solde est refusé, l'erreur s'affiche, mais la ligne déjà écrite reste. Le couplage entre tables v1 et pf2 n'est pas atomique : non traité.
-- **Streamlit — vente excédentaire acceptée à la saisie** : le formulaire de la page Portefeuille n'appelle pas le validateur partagé. La vente est enregistrée, puis écartée des 2074 et 2086 et annoncée sur la page Fiscalité. Le refus au formulaire reste à faire, avec un test rouge préalable.
 - **Clé service_role dans Streamlit** : l'application Streamlit lit et écrit avec `SUPABASE_KEY` (service_role), qui contourne la RLS. La protection repose donc sur le secret `.streamlit/secrets.toml` et sur l'accès au serveur qui fait tourner l'application. Une connexion Streamlit par compte est une évolution distincte, non faite en 2.1.0 et soumise à votre accord.
 - **Tables v1 hors dépôt** : leur schéma n'est pas dans le dépôt. La migration 008 ne lit aucune colonne métier (seulement `id`, facultatif, pour la séquence) ; le nom des colonnes utilisées par l'application reste à vérifier sur votre base.
 - **Clés d'unicité sans propriétaire** : `pf2_cours` (ticker, date), `pf2_fx` (devise, contre, date), `pf2_inflation` (année) et `pf2_snapshots` (date) ne contiennent pas `user_id`. Sans effet avec un seul compte ; à corriger par migration avant tout second compte, sinon un upsert réattribuerait à un autre propriétaire une ligne déjà présente.
-- **XJSE.SW sans cotation vivante chez Yahoo** : la position est détenue ; le cours manque chaque nuit, le snapshot est donc partiel et exclu des séries. Aucune exclusion silencieuse n'est appliquée. La décision (valorisation de remplacement datée, ou sortie du plan si la position est soldée) reste à prendre.
+- **XJSE.SW : écart de valorisation entre listings NON MESURÉ.** Le cours est désormais pris sur XJSE.DE (EUR), même fonds (§ 4). Cet écart n'a pas pu être mesuré : l'environnement de préparation n'atteint pas Yahoo, et Yahoo ne publie plus de cours JPY vivant pour XJSE.SW, donc aucun couple de cours du même jour n'existe là-bas. Procédure à faire vous-même le jour où vous avez le cours JPY de votre courtier : écart = (cours JPY ÷ taux EUR/JPY du jour) ÷ cours XJSE.DE − 1. Seuil proposé : 0,5 % (à valider). Au-delà, signalez-le avant de vous fier à la valorisation.
+- **XJSE.SW : valorisation datée (historique) inchangée.** Les calculs à date passée (2074, 2086, historique des snapshots) restent sur le listing XJSE.SW en JPY. La substitution ne s'applique qu'à la valorisation du jour.
 
 ---
 
 ## 6. Tests et intégration continue
-- **Python hors réseau :** 772 tests passent, dont 33 tests RLS sur PostgreSQL embarqué (aucun Supabase requis), 19 tests de propriétaire couvrant les tables v1 et 35 tests des écritures serveur des robots (`tests/test_robots_proprietaire.py`).
+- **Python hors réseau :** 789 tests passent, dont 33 tests RLS sur PostgreSQL embarqué (aucun Supabase requis), 19 tests de propriétaire couvrant les tables v1, 35 tests des écritures serveur des robots (`tests/test_robots_proprietaire.py`), 10 tests XJSE.SW (`tests/test_substitut_xjse.py`) et 7 tests de saisie de vente Streamlit (`tests/test_saisie_vente_streamlit.py`).
 - **JavaScript hors réseau :** 13 suites, 342 vérifications.
 - **Exclues de la CI (dépendent du réseau ou d'identifiants) :** `tests/test_tickers_yahoo.py`, `tests/test_dates_de_bout_en_bout.py`, `tests/test_snapshot_resilient.py`, `tests/test_rls_integration.py`. Elles restent exécutables à la main.
 - `tests/test_rendu.js` (DOM simulé) : exclu, faute de jsdom dans le dépôt.

@@ -91,7 +91,14 @@ def main() -> int:
     echecs: list[str] = []
     if positions:
         try:
-            actifs, echecs = valoriser(positions)
+            # Couche 2 : cours de référence saisi à la main, 7 jours au plus. Illisible :
+            # on continue sans, et les titres concernés apparaissent dans `manquantes`.
+            try:
+                references = db.cours_de_reference()
+            except Exception as exc:
+                log.warning("Cours de référence illisibles : %s", exc)
+                references = {}
+            actifs, echecs = valoriser(positions, references=references)
         except fx.FXIndisponible as exc:
             log.error("Taux de change indisponible : %s.", exc)
             echecs = [p.ticker for p in positions]

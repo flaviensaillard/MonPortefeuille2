@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from dataclasses import dataclass
+from math import isfinite
 
 import pandas as pd
 import yfinance as yf
@@ -66,6 +68,103 @@ ALIAS_YAHOO: dict[str, str] = {
     # symbole et renvoie bien un cours.
     "BTCUSDT": "BTC-USD",
 }
+
+
+# Substituts : même fonds, listing vivant ailleurs. Clé = ticker détenu, valeur =
+# (symbole de substitution, devise de ce listing). XJSE.SW (Xtrackers II Japan
+# Government Bond UCITS ETF 1C) ne publie plus de cours vivant sur Yahoo ; le même
+# fonds est coté à Xetra sous XJSE.DE, en EUR. La ligne reste XJSE.SW dans les
+# transactions : seul le cours vient d'ailleurs, et la fiche le dit.
+SUBSTITUTS: dict[str, tuple[str, str]] = {
+    "XJSE.SW": ("XJSE.DE", "EUR"),
+}
+
+# Âge maximal d'un cours de référence saisi à la main (couche 2).
+DUREE_REFERENCE_MAX_JOURS = 7
+
+
+@dataclass(frozen=True)
+class Cotation:
+    """Un cours utilisable pour la valorisation du jour, et son origine.
+
+    `devise` vaut `None` quand le cours est dans la devise de la position (cas
+    normal). Pour un substitut ou une référence, elle est portée par la source.
+    """
+
+    ticker: str
+    valeur: float
+    devise: str | None
+    source: str                 # "yahoo" | "substitut" | "reference"
+    symbole: str = ""           # listing interrogé, pour un substitut
+    date: str = ""              # date de la référence saisie, pour une référence
+
+    @property
+    def note(self) -> str:
+        """Mention affichée sur la fiche quand le cours ne vient pas du listing natif."""
+        if self.source == "substitut":
+            return f"cours via {self.symbole} · {self.devise}"
+        if self.source == "reference":
+            return f"cours de référence du {self.date} · {self.devise}"
+        return ""
+
+
+def _reference_valide(ref: dict, aujourdhui: dt.date) -> bool:
+    """Vrai si la référence est exploitable : cours fini et > 0, date au plus
+    `DUREE_REFERENCE_MAX_JOURS` jours avant aujourd'hui, jamais dans le futur."""
+    try:
+        valeur = float(ref["cours"])
+        jour = dt.date.fromisoformat(str(ref["date"])[:10])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not (isfinite(valeur) and valeur > 0 and ref.get("devise")):
+        return False
+    age = (aujourdhui - jour).days
+    return 0 <= age <= DUREE_REFERENCE_MAX_JOURS
+
+
+def cotation_actuelle(ticker: str, references: dict | None = None,
+                      aujourdhui: dt.date | None = None) -> Cotation:
+    """Cours du jour d'un titre, par couches. Lève `CoursIndisponible` à la fin.
+
+    1. cotation vivante du titre lui-même (garde-fous de fraîcheur et de cohérence) ;
+    2. pour un substitut (`SUBSTITUTS`) : cotation vivante du listing de substitution,
+       mêmes garde-fous, devise du listing ;
+       pour les autres titres : cours sur 5 jours (chemin historique, `cours()`) ;
+    3. cours de référence saisi à la main (`references`), daté de 7 jours au plus ;
+    4. sinon, échec explicite qui nomme les couches tentées.
+    """
+    t = str(ticker).upper().strip()
+    jour = aujourdhui or dt.date.today()
+
+    v = cotation_du_moment(t)
+    if v is not None:
+        return Cotation(t, v, None, "yahoo")
+
+    raisons: list[str] = []
+    if t in SUBSTITUTS:
+        sym, devise_sub = SUBSTITUTS[t]
+        v = cotation_du_moment(sym)
+        if v is not None:
+            _cache_var[t] = _cache_var.get(sym)
+            return Cotation(t, v, devise_sub, "substitut", symbole=sym)
+        raisons.append(f"{sym} sans cotation vivante")
+    else:
+        try:
+            return Cotation(t, cours(t), None, "yahoo")
+        except CoursIndisponible as exc:
+            raisons.append(str(exc.cause or exc))
+
+    ref = (references or {}).get(t)
+    if ref is not None and _reference_valide(ref, jour):
+        return Cotation(t, float(ref["cours"]), str(ref["devise"]).upper(), "reference",
+                        date=str(ref["date"])[:10])
+    if ref is None:
+        raisons.append("aucune référence saisie")
+    else:
+        raisons.append(
+            f"référence du {str(ref.get('date', '?'))[:10]} : plus de "
+            f"{DUREE_REFERENCE_MAX_JOURS} jours, ou invalide")
+    raise CoursIndisponible(t, "", " ; ".join(raisons))
 
 
 def vider_cache() -> None:

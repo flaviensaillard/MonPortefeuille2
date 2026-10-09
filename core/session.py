@@ -575,8 +575,13 @@ def charger(rafraichir_cours: bool = False) -> Contexte:
         return ctx
 
     # --- Valorisation ---
+    # Cours de référence saisis à la main (couche 2 de la valorisation, 2.1.0).
     try:
-        ctx.actifs, ctx.echecs_cours = valoriser(ctx.positions)
+        references = db.cours_de_reference()
+    except Exception:
+        references = {}
+    try:
+        ctx.actifs, ctx.echecs_cours = valoriser(ctx.positions, references=references)
     except fx.FXIndisponible as exc:
         ctx.echecs_fx.append(str(exc))
 

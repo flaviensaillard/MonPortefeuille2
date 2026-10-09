@@ -745,6 +745,81 @@ def sauver_allocation_personnalisee(cfg_alloc: dict) -> None:
 
 
 
+PREFIXE_COURS_REFERENCE = "cours_ref:"
+
+
+def valider_cours_de_reference(ticker: str, cours: float, devise: str, date_iso: str,
+                               aujourdhui=None) -> dict:
+    """Contrôle une saisie de cours de référence avant écriture. Lève `ValueError`.
+
+    Un cours de référence ne vaut que s'il est fini, positif, daté au plus de
+    `prices.DUREE_REFERENCE_MAX_JOURS` jours avant aujourd'hui, et jamais futur.
+    """
+    import datetime as _dt
+    import math
+
+    from . import prices
+
+    t = str(ticker).upper().strip()
+    if not t:
+        raise ValueError("ticker manquant")
+    if not (isinstance(cours, (int, float)) and math.isfinite(cours) and cours > 0):
+        raise ValueError("le cours doit être un nombre strictement positif")
+    devise = str(devise).upper().strip()
+    if len(devise) != 3 or not devise.isalpha():
+        raise ValueError("devise : code à trois lettres attendu (ex. EUR)")
+    try:
+        jour = _dt.date.fromisoformat(str(date_iso)[:10])
+    except ValueError as exc:
+        raise ValueError("date : format AAAA-MM-JJ attendu") from exc
+    today = aujourdhui or _dt.date.today()
+    age = (today - jour).days
+    if age < 0:
+        raise ValueError("la date ne peut pas être dans le futur")
+    if age > prices.DUREE_REFERENCE_MAX_JOURS:
+        raise ValueError(
+            f"cours daté du {jour.isoformat()} : plus de {prices.DUREE_REFERENCE_MAX_JOURS} "
+            "jours, refusé (une référence plus ancienne ne sert à rien)")
+    return {"cours": float(cours), "devise": devise, "date": jour.isoformat()}
+
+
+def cours_de_reference() -> dict[str, dict]:
+    """Cours de référence saisis à la main, lus dans `Config` (clés `cours_ref:TICKER`).
+
+    Une entrée illisible est ignorée (et écartée par `prices.cotation_actuelle`).
+    Lève l'exception de lecture si `Config` est injoignable : l'appelant décide.
+    """
+    import json
+
+    res: dict[str, dict] = {}
+    df = lire("Config")
+    if df is None or df.empty or not {"Clé", "Valeur"} <= set(df.columns):
+        return res
+    for _, r in df.iterrows():
+        cle = str(r.get("Clé") or "").strip()
+        if not cle.startswith(PREFIXE_COURS_REFERENCE):
+            continue
+        try:
+            data = json.loads(str(r.get("Valeur") or ""))
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            res[cle[len(PREFIXE_COURS_REFERENCE):].upper()] = data
+    return res
+
+
+def sauver_cours_de_reference(ticker: str, cours: float, devise: str, date_iso: str,
+                              aujourdhui=None) -> dict:
+    """Enregistre un cours de référence saisi à la main, après contrôle. Lève `ValueError`
+    si la saisie est refusée, `ErreurConfigFiscale` si l'écriture échoue."""
+    import json
+
+    valeur = valider_cours_de_reference(ticker, cours, devise, date_iso, aujourdhui)
+    cle = PREFIXE_COURS_REFERENCE + str(ticker).upper().strip()
+    sauver_config_fiscale({cle: json.dumps(valeur, ensure_ascii=False)})
+    return valeur
+
+
 def variations_donnees_v1() -> dict[str, dict]:
     """Lit les derniers cours et variations enregistrés dans la table `Donnees` (v1).
 

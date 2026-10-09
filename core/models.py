@@ -174,6 +174,7 @@ class Actif:
     dernier_taux: float | None = None # taux utilisé, pour traçabilité
     dernier_taux_usd: float | None = None
     variation_pct: float | None = None # variation en fraction depuis le dernier enregistrement (ex. +0.0081 pour +0,81 %)
+    note_cours: str = ""              # origine du cours si ce n'est pas le listing natif (ex. « cours via XJSE.DE · EUR »)
 
     def __post_init__(self) -> None:
         if self.valeur_usd == 0.0 and self.valeur_eur != 0.0:

@@ -174,7 +174,7 @@ if actifs_investis_tb:
             f"<div style='font-size:0.82rem;color:rgba(250,250,250,0.75);font-weight:600;'>{a.ticker} · {nom_poche}</div>"
             f"<div style='font-size:1.45rem;font-weight:700;color:{coul_fl};line-height:1.25;margin:4px 0;'>{txt_fl}</div>"
             f"{ui.html_usd_eur(a.valeur_usd, a.valeur_eur, taille_usd='0.95rem', taille_eur='0.82rem')}"
-            f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-top:3px;'>Cours : {a.prix:,.2f} {a.devise_cotation}</div>"
+            f"<div style='font-size:0.78rem;color:rgba(250,250,250,0.6);margin-top:3px;'>Cours : {a.prix:,.2f} {a.devise_cotation}{(' · ' + a.note_cours) if getattr(a, 'note_cours', '') else ''}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )

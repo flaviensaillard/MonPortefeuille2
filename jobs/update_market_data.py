@@ -47,30 +47,35 @@ def main() -> int:
     tickers = tickers_a_coter()
 
     # --- Cours ---
+    # Le cache ne reçoit que des cours VIVANTS (listing natif ou substitut) : un cours
+    # de référence saisi à la main est daté d'un autre jour et ne doit pas être écrit
+    # comme un cours du jour. Il n'est donc pas passé ici.
+    from core.portfolio import DEVISES_COTATION
+
     lignes_cours, echecs = [], []
+    sans_devise = []
     for t in tickers:
         try:
-            c = prices.cours(t)
-            lignes_cours.append({"ticker": t, "date": aujourdhui, "cours": c})
+            c = prices.cotation_actuelle(t)
         except prices.CoursIndisponible as exc:
             log.warning("Cours indisponible : %s", exc)
             echecs.append(t)
-
-    # --- Devise réelle de cotation -------------------------------------------
-    # Yahoo la connaît : c'est la source la plus fiable. `DEVISES_COTATION` ne
-    # sert que de repli. Et on ne devine JAMAIS : un ticker dont la devise est
-    # inconnue est écarté plutôt qu'écrit avec une devise fausse, parce qu'une
-    # devise erronée corrompt toute la valorisation de la position.
-    from core.portfolio import DEVISES_COTATION
-
-    cours_complets, sans_devise = [], []
-    for l in lignes_cours:
-        devise = prices.devise_de(l["ticker"]) or DEVISES_COTATION.get(l["ticker"])
-        if not devise:
-            sans_devise.append(l["ticker"])
             continue
-        cours_complets.append({**l, "devise": devise})
-    lignes_cours = cours_complets
+        if c.source not in ("yahoo", "substitut"):
+            echecs.append(t)
+            continue
+
+        # --- Devise du COURS ----------------------------------------------------
+        # Celle du listing qui a fourni le cours (XJSE.DE : EUR, pas le JPY de
+        # XJSE.SW). À défaut, Yahoo sur le ticker. `DEVISES_COTATION` ne sert que de
+        # repli. Et on ne devine JAMAIS : une devise inconnue fait écarter la ligne.
+        devise = c.devise or prices.devise_de(t) or DEVISES_COTATION.get(t)
+        if not devise:
+            sans_devise.append(t)
+            continue
+        if c.source == "substitut":
+            log.info("%s : cours du substitut %s (%s).", t, c.symbole, devise)
+        lignes_cours.append({"ticker": t, "date": aujourdhui, "cours": c.valeur, "devise": devise})
 
     if sans_devise:
         log.warning(
