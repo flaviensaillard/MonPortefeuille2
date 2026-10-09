@@ -618,6 +618,10 @@
         });
     }
 
+    /* TWR exact (2.1.0, revue F-07) : chaque apport porte la valeur du
+       patrimoine juste AVANT le flux (opts.valeurAvantEur/Usd), capturée par
+       l'app au moment du geste. NULL = écriture antérieure à la 2.1.0 ou robot
+       : son intervalle sera déclaré non calculé, jamais estimé. */
     function ecrireApport(opts) {
         var ligne = opts.ligne || {};
         return supabase.rpc('pf2_enregistrer_apport', {
@@ -627,7 +631,9 @@
             p_compte_id: opts.compteId || null,
             p_montant_operation: opts.compteId ? opts.montantOperation : null,
             p_type_operation: opts.compteId ? opts.typeOperation : null,
-            p_idempotence: opts.idempotence || null
+            p_idempotence: opts.idempotence || null,
+            p_valeur_avant_eur: opts.valeurAvantEur != null ? opts.valeurAvantEur : null,
+            p_valeur_avant_usd: opts.valeurAvantUsd != null ? opts.valeurAvantUsd : null
         });
     }
 
@@ -641,7 +647,9 @@
             p_compte_id: opts.compteId || null,
             p_operation_id: opts.operationId || null,
             p_montant_operation: opts.compteId ? opts.montantOperation : null,
-            p_type_operation: opts.compteId ? opts.typeOperation : null
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_valeur_avant_eur: opts.valeurAvantEur != null ? opts.valeurAvantEur : null,
+            p_valeur_avant_usd: opts.valeurAvantUsd != null ? opts.valeurAvantUsd : null
         });
     }
 

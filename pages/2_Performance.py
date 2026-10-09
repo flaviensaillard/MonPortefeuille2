@@ -52,17 +52,38 @@ if ctx.snapshots.empty or len(ctx.snapshots) < 2:
 # Série en DOLLARS ($) issue de `session.serie_performance(ctx)` :
 # utilise `Actifs Stratégiques` et les variations de `Capital investi` de
 # `Projections` (puis `flux_par_date` pour toute période postérieure).
-flux_jour = S.flux_par_date(ctx.apports)
-snaps, valeurs, flux = S.serie_performance(ctx)
+snaps, valeurs, flux, valorisations = S.serie_performance(ctx)
 if len(valeurs) < 2:
     st.info("Il faut au moins deux snapshots exploitables pour calculer une performance.")
     st.stop()
 
-rendements = metrics.rendements_periode(valeurs, flux)
-twr_total = metrics.twr(rendements)
+# 2.1.0 (revue F-07) : TWR EXACT. Chaque flux doit être encadré par une
+# valorisation juste avant lui ; un intervalle dont le flux n'est pas
+# valorisé n'est PAS calculé — il est annoncé plus bas, jamais remplacé par
+# la convention « flux en fin de période ».
+dates_serie = [d.date() for d in snaps["Date"]]
+flux_jour = S.flux_par_date(ctx.apports, snaps.attrs.get("col_ap", "montant_eur"))
+rendements_stricts, non_calcules = metrics.rendements_stricts(
+    dates_serie, valeurs, flux_jour, valorisations
+)
+rendements = [r for r in rendements_stricts if r is not None]
+twr_total = metrics.twr(rendements) if rendements else None
 
 jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days
-twr_ann = metrics.annualiser(twr_total, jours)
+jours_calcules = sum(
+    (dates_serie[i + 1] - dates_serie[i]).days
+    for i, r in enumerate(rendements_stricts) if r is not None
+)
+twr_ann = metrics.annualiser(twr_total, jours_calcules) if (twr_total is not None and jours_calcules > 0) else None
+
+if non_calcules:
+    st.warning(
+        f"**TWR exact — {len(non_calcules)} intervalle(s) non calculé(s)** : "
+        "un apport ou un retrait y est survenu sans valorisation du portefeuille "
+        "à ce moment-là (apports antérieurs à la 2.1.0). Ces intervalles ne sont "
+        "pas chaînés : aucun chiffre n'est inventé à leur place. Depuis la 2.1.0, "
+        "chaque apport enregistre la valeur du portefeuille au moment du geste."
+    )
 
 # ---------------------------------------------------------------------------
 # Le TWR n'est juste que si les flux sont enregistrés
@@ -103,13 +124,15 @@ if sauts:
     flux_corrige = metrics.flux_corrige_des_sauts(flux, sauts)
     rendements_corriges = metrics.rendements_periode(valeurs, flux_corrige)
     twr_corrige = metrics.twr(rendements_corriges)
+    twr_brut_legacy = metrics.twr(metrics.rendements_periode(valeurs, flux))
 
     c1, c2 = st.columns(2)
-    c1.metric("TWR affiché ci-dessus", ui.pct(twr_total, signe=True),
-              help="Ce qu'on obtient en prenant vos données telles quelles.")
-    c2.metric("TWR une fois ces mouvements enregistrés",
+    c1.metric("Estimation avec les sauts comptés tels quels",
+              ui.pct(twr_brut_legacy, signe=True),
+              help="Diagnostic : convention d'origine, à titre de comparaison seulement.")
+    c2.metric("Estimation une fois ces mouvements enregistrés",
               ui.pct(twr_corrige, signe=True),
-              delta=ui.points((twr_corrige - twr_total) * 100, 2),
+              delta=ui.points((twr_corrige - twr_brut_legacy) * 100, 2),
               help="Ce que vous auriez gagné si ces mouvements avaient été "
                    "saisis comme des apports.")
 
@@ -239,7 +262,7 @@ perf_usd = twr_total
 inflation = S.inflation_dict(ctx)
 d0, d1 = snaps["Date"].iloc[0].date(), snaps["Date"].iloc[-1].date()
 infl_periode = metrics.inflation_cumulee(inflation, d0, d1)
-perf_reel = (1.0 + perf_usd) / infl_periode - 1.0 if infl_periode > 0 else None
+perf_reel = (1.0 + perf_usd) / infl_periode - 1.0 if (perf_usd is not None and infl_periode > 0) else None
 
 # 3. En onces d'or — corrigée des apports, comme les deux autres lectures.
 perf_or = S.twr_en_or_portefeuille(ctx)
@@ -255,7 +278,7 @@ ui.metric_pct(
     help="L'étalon de Gave.",
 )
 
-if perf_or is not None and perf_or < perf_usd:
+if perf_or is not None and perf_usd is not None and perf_or < perf_usd:
     st.warning(
         f"Votre portefeuille a gagné {ui.pct(perf_usd, decimales=2, signe=True)} en dollars mais "
         f"**{ui.pct(perf_or, decimales=2, signe=True)} en or**. La monnaie a fait le travail à "
@@ -282,7 +305,7 @@ ui.metric_pct(
 )
 ui.metric_points(
     c2, "Écart TWR / IRR",
-    (taux_irr - twr_ann) * 100 if taux_irr is not None else None,
+    (taux_irr - twr_ann) * 100 if (taux_irr is not None and twr_ann is not None) else None,
     decimales=2,
     help="Positif : vos apports ont été bien placés. Négatif : vous avez "
          "alimenté le portefeuille au mauvais moment.",
@@ -296,26 +319,35 @@ st.subheader("Par année")
 
 snaps["Annee"] = snaps["Date"].dt.year
 
-# Le rendement de chaque sous-période, corrigé des flux. `rendements_periode`
-# renvoie n-1 valeurs pour n valeurs : la i-ème est le rendement qui MÈNE à la
-# ligne i. On la range donc dans la ligne d'arrivée.
-snaps["Rendement"] = [0.0] + metrics.rendements_periode(valeurs, flux)
+# Le rendement EXACT de chaque sous-période (2.1.0, revue F-07) : None quand
+# un flux de l'intervalle n'est pas valorisé — le point n'est pas calculé, il
+# est annoncé, jamais remplacé par une convention de fin de période.
+snaps["Rendement"] = [None] + rendements_stricts
 
-# Rendement de chaque annee = chainage des sous-periodes qui se terminent
-# dans cette annee. C'est la definition standard, et la seule qui neutralise
-# les apports. Le calcul precedent faisait `derniere / premiere - 1` : il
-# comptait vos versements comme du rendement.
-rendements_annuels = metrics.twr_par_annee(
-    [d.date() for d in snaps["Date"]], snaps["Rendement"].tolist()
-)
+# Rendement de chaque année = chaînage des sous-périodes exactes qui se
+# terminent dans cette année. Une année qui contient un intervalle non
+# calculé n'est PAS chaînée à moitié : elle est affichée « — » et signalée.
+rendements_annuels = {}
+annees_incompletes = set()
+for i, r in enumerate(rendements_stricts):
+    an = dates_serie[i + 1].year
+    if an not in rendements_annuels:
+        rendements_annuels[an] = None
+    if r is None:
+        annees_incompletes.add(an)
+        rendements_annuels[an] = None
+        continue
+    prec = rendements_annuels[an]
+    rendements_annuels[an] = r if prec is None else (1.0 + prec) * (1.0 + r) - 1.0
 
 snaps["_val_usd"] = valeurs
 bilan_par_annee = snaps.groupby("Annee").last()
 
 lignes = []
 for annee, perf in rendements_annuels.items():
+    incomplet = annee in annees_incompletes
     infl = inflation.get(annee)
-    reel = (1 + perf) / (1 + infl) - 1.0 if infl is not None else None
+    reel = (1 + perf) / (1 + infl) - 1.0 if (perf is not None and infl is not None) else None
     val_fin_u = float(bilan_par_annee.loc[annee, "_val_usd"]) if annee in bilan_par_annee.index else None
     val_fin_e = (
         float(bilan_par_annee.loc[annee, "patrimoine_investi_eur"])
@@ -324,7 +356,8 @@ for annee, perf in rendements_annuels.items():
     )
     lignes.append({
         "Année": int(annee),
-        "Performance ($)": ui.pct(perf, decimales=2, signe=True),
+        "Performance ($)": (ui.pct(perf, decimales=2, signe=True) if perf is not None
+                            else ("—" + (" ⚠️" if incomplet else ""))),
         "Inflation": ui.pct(infl, decimales=2, signe=True) if infl is not None else "⚠️ non renseignée",
         "Réelle": ui.pct(reel, decimales=2, signe=True) if reel is not None else "—",
         "Valeur bilan ($ / €)": ui.usd_eur(val_fin_u, val_fin_e) if val_fin_u is not None else "—",
@@ -334,10 +367,16 @@ if lignes:
     ui.tableau(pd.DataFrame(lignes))
     st.caption(
         "Performances calculées en **dollars ($)** (hors effet de change EUR/USD), "
-        "avec indication de la valeur bilan en euros. Note : en 2023 (9 mois, "
-        "d'avril à décembre), la performance sur la période est de **+9,33 %** "
-        "(soit **+12,68 %** en rythme annualisé sur 12 mois dans la v1)."
+        "avec indication de la valeur bilan en euros."
     )
+    if annees_incompletes:
+        st.caption(
+            "⚠️ Année(s) « — » : " + ", ".join(str(a) for a in sorted(annees_incompletes))
+            + ". Un apport ou un retrait y est survenu sans valorisation du "
+            "portefeuille à ce moment-là : le rendement exact de l'année ne peut "
+            "pas être calculé (revue F-07). Aucun chiffre de remplacement n'est "
+            "inventé ; les autres années restent exactes."
+        )
 
     annees_sans_inflation = [
         a for a in sorted({int(x) for x in snaps["Annee"]}) if a not in inflation

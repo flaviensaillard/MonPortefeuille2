@@ -52,6 +52,10 @@ APPORTS = pd.DataFrame({
     "date": [d.isoformat() for d in DATES[1:]],
     "sens": ["apport"] * (len(DATES) - 1),
     "montant_eur": [500.0] * (len(DATES) - 1),
+    # 2.1.0 (revue F-07) : le TWR exact exige la valeur du portefeuille juste
+    # AVANT chaque apport. Dans ce monde synthétique, le versement tombe juste
+    # avant le snapshot : la valeur d'avant est le snapshot moins le versement.
+    "valeur_avant_eur": [v - 500.0 for v in VALEURS[1:]],
 })
 
 
@@ -123,23 +127,54 @@ class TestTwrPortefeuille:
         })
         apports = pd.DataFrame({
             "date": ["2024-12-31"], "sens": ["retrait"], "montant_eur": [500.0],
+            # Le marché a fait +10 % (10 000 → 11 000), puis le retrait de 500.
+            "valeur_avant_eur": [11000.0],
         })
         ctx = CtxBidon(snaps, apports)
         assert S.twr_portefeuille(ctx) == pytest.approx(0.10)
 
+    def test_sans_valorisation_l_intervalle_n_est_pas_calcule(self):
+        """2.1.0 (revue F-07) : un apport sans valeur « avant » ne doit plus
+        produire un TWR dépendant du moment supposé du versement — le point est
+        annoncé non calculé, pas estimé en fin de période."""
+        snaps = pd.DataFrame({
+            "Date": pd.to_datetime([dt.date(2024, 1, 1), dt.date(2024, 12, 31)]),
+            "patrimoine_investi_eur": [100.0, 220.0],
+        })
+        apports = pd.DataFrame({
+            "date": ["2024-06-15"], "sens": ["apport"], "montant_eur": [100.0],
+        })
+        ctx = CtxBidon(snaps, apports)
+        assert S.twr_portefeuille(ctx) is None
+        assert len(ctx.twr_non_calcules) == 1
+        assert ctx.twr_non_calcules[0]["flux"] == pytest.approx(100.0)
+
 
 class TestTwrEnOrPortefeuille:
-    def test_or_stable_le_rendement_est_celui_des_euros(self, ctx):
-        """oz = V / 2 000 partout : l'or ne bouge pas, donc même rendement."""
-        assert S.twr_en_or_portefeuille(ctx) == pytest.approx(
-            S.twr_portefeuille(ctx), rel=1e-9
-        )
+    def test_sans_flux_l_or_stable_donne_zero(self):
+        """Pas de flux : le rendement en or se chaîne sur les intervalles sans
+        flux. Ici l'or monte exactement comme le portefeuille → 0 once gagnée."""
+        snaps = pd.DataFrame({
+            "Date": pd.to_datetime([dt.date(2024, 1, 1), dt.date(2024, 6, 1),
+                                    dt.date(2024, 12, 31)]),
+            "patrimoine_investi_eur": [100.0, 110.0, 121.0],
+            "equivalent_or_oz": [0.05, 0.055, 0.0605],   # or suit le portefeuille
+        })
+        assert S.twr_en_or_portefeuille(CtxBidon(snaps, pd.DataFrame())) == pytest.approx(0.0)
+
+    def test_un_intervalle_avec_flux_n_est_pas_calcule_en_or(self, ctx):
+        """2.1.0 (revue F-07) : le cours de l'or au moment d'un flux est
+        inconnu. Les intervalles avec flux sont donc écartés du chaînage en or ;
+        ici TOUS les intervalles en portent → rien n'est calculable."""
+        assert S.twr_en_or_portefeuille(ctx) is None
 
     def test_l_ancien_ratio_d_onces_s_envole(self, ctx):
-        """`oz_final / oz_initial` comptait les versements : +195 % ici."""
+        """`oz_final / oz_initial` comptait les versements : +195 % ici. Le TWR
+        strict, lui, refuse de calculer un intervalle dont le flux n'a pas son
+        cours d'or au même instant : il renvoie None plutôt que ce chiffre."""
         ancien = SNAPSHOTS["equivalent_or_oz"].iloc[-1] / SNAPSHOTS["equivalent_or_oz"].iloc[0] - 1
         assert ancien > 1.9
-        assert S.twr_en_or_portefeuille(ctx) < ancien / 2
+        assert S.twr_en_or_portefeuille(ctx) is None
 
     def test_or_manquant_renvoie_none_pas_une_valeur_inventee(self):
         """Les snapshots importés de la v1 n'ont pas d'équivalent-or."""
@@ -277,7 +312,7 @@ def test_twr_usd_projections_reproduit_swissquote():
     with patch("core.db.lire", side_effect=fake_lire):
         S._enrichir_historiques_usd(ctx)
 
-    snaps, valeurs, flux = S.serie_performance(ctx)
+    snaps, valeurs, flux, _valo = S.serie_performance(ctx)
     assert valeurs == [29534.0, 34039.0, 57986.0, 73229.0, 79007.0, 79007.0]
     assert snaps["Date"].iloc[-1].date() == dt.date.today()
     assert snaps["_live"].iloc[-1]
@@ -320,7 +355,7 @@ def test_capital_investi_zero_dans_projections_n_invente_pas_de_retrait():
     with patch("core.db.lire", side_effect=fake_lire):
         S._enrichir_historiques_usd(ctx)
 
-    snaps, valeurs, flux = S.serie_performance(ctx)
+    snaps, valeurs, flux, _valo = S.serie_performance(ctx)
     assert [round(f, 2) for f in flux] == [0.0, 2922.92, 0.0, 0.0]
     assert float(snaps["capital_investi_usd"].iloc[-1]) == 59629.92
     sauts = metrics.sauts_non_expliques([d.date() for d in snaps["Date"]], valeurs, flux)

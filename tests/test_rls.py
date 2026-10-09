@@ -76,6 +76,7 @@ def base(tmp_path_factory):
     assert "<VOTRE-UID>" in sql_004, "la migration doit demander l'uid du propriétaire"
     cur.execute(sql_004.replace("<VOTRE-UID>", user_a))
     cur.execute((MIGRATIONS / "005_snapshot_complet.sql").read_text(encoding="utf-8"))
+    cur.execute((MIGRATIONS / "006_twr_valorisation_flux.sql").read_text(encoding="utf-8"))
 
     # Droits par défaut façon Supabase : les rôles API ont les droits de base,
     # les politiques RLS décident ensuite ligne par ligne.
@@ -291,6 +292,101 @@ class TestRpcAtomiques:
         _session(cur, "authenticated", user_b)
         cur.execute("delete from pf2_comptes where id = 'c-b'")
         conn.execute("commit")
+
+
+# ---------------------------------------------------------------------------
+# TWR exact : la valorisation juste avant chaque apport est enregistrée
+# (revue F-07 — migration 006_twr_valorisation_flux.sql)
+# ---------------------------------------------------------------------------
+class TestValorisationAvantFlux:
+    def test_les_colonnes_de_valorisation_existent(self, base):
+        conn, _, _ = base
+        cur = conn.cursor()
+        cur.execute(
+            "select column_name from information_schema.columns "
+            "where table_name = 'pf2_apports' and column_name in "
+            "('valeur_avant_eur', 'valeur_avant_usd')"
+        )
+        assert {r[0] for r in cur.fetchall()} == {"valeur_avant_eur", "valeur_avant_usd"}
+
+    def test_l_apport_enregistre_la_valeur_avant(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "insert into pf2_comptes (id, nom, devise, type) "
+            "values ('c-twr', 'Courant TWR', 'EUR', 'disponible')"
+        )
+        cur.execute(
+            "select pf2_enregistrer_apport("
+            "'2026-02-01', 'apport', 500, null, null, 'Courant TWR', null, "
+            "'c-twr', 500, 'depot', '2026-02-01', null, 58000.5, 63250.25)"
+        )
+        res = cur.fetchone()[0]
+        assert res["ok"] is True and res["apport_id"]
+        cur.execute(
+            "select valeur_avant_eur, valeur_avant_usd from pf2_apports where id = %s",
+            (res["apport_id"],),
+        )
+        eur, usd = cur.fetchone()
+        assert float(eur) == pytest.approx(58000.5)
+        assert float(usd) == pytest.approx(63250.25)
+        conn.execute("rollback")
+
+    def test_l_appel_sans_valorisation_reste_valide(self, base):
+        """Apports antérieurs à la 2.1.0 et robots : la valorisation est NULL."""
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "select pf2_enregistrer_apport('2026-02-02', 'apport', 200)"
+        )
+        res = cur.fetchone()[0]
+        assert res["ok"] is True
+        cur.execute(
+            "select valeur_avant_eur is null and valeur_avant_usd is null "
+            "from pf2_apports where id = %s",
+            (res["apport_id"],),
+        )
+        assert cur.fetchone()[0] is True
+        conn.execute("rollback")
+
+    def test_la_modification_met_a_jour_la_valorisation(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "select pf2_enregistrer_apport('2026-02-03', 'apport', 300, null, null, "
+            "null, null, null, null, null, null, null, 1000, 1100)"
+        )
+        ap_id = cur.fetchone()[0]["apport_id"]
+        cur.execute(
+            "select pf2_modifier_apport(%s, '2026-02-03', 'apport', 350, null, null, "
+            "null, null, null, null, null, null, null, 2000, 2200)",
+            (ap_id,),
+        )
+        assert cur.fetchone()[0]["ok"] is True
+        cur.execute(
+            "select montant_eur, valeur_avant_eur, valeur_avant_usd "
+            "from pf2_apports where id = %s",
+            (ap_id,),
+        )
+        montant, eur, usd = cur.fetchone()
+        assert float(montant) == pytest.approx(350)
+        assert float(eur) == pytest.approx(2000)
+        assert float(usd) == pytest.approx(2200)
+        conn.execute("rollback")
+
+    def test_l_ancienne_signature_a_disparu(self, base):
+        """DROP puis CREATE : pas de surcharge qui ferait de l'ombre au RPC."""
+        conn, _, _ = base
+        cur = conn.cursor()
+        cur.execute(
+            "select pronargs from pg_proc where proname in "
+            "('pf2_enregistrer_apport', 'pf2_modifier_apport')"
+        )
+        arities = sorted(r[0] for r in cur.fetchall())
+        assert arities == [14, 15], arities
 
 
 # ---------------------------------------------------------------------------

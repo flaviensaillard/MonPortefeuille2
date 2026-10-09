@@ -1095,6 +1095,20 @@
             var montantUsd = U.arrondi(montant * tx.usd, 2);
             var coursOr = (etat.ctx && etat.ctx.coursOr) || 0;
 
+            /* TWR exact (2.1.0, revue F-07) : la valeur du patrimoine JUSTE AVANT
+               ce flux. Pour un nouveau geste, le flux n'est pas encore écrit : le
+               patrimoine courant est donc la valeur d'avant. Pour la correction
+               d'un geste déjà saisi en 2.1, on garde la valeur captée à l'époque.
+               Avant la 2.1 : NULL, et l'intervalle sera déclaré non calculé. */
+            var valeurAvantEur = null, valeurAvantUsd = null;
+            if (existant) {
+                valeurAvantEur = existant.valeur_avant_eur != null ? existant.valeur_avant_eur : null;
+                valeurAvantUsd = existant.valeur_avant_usd != null ? existant.valeur_avant_usd : null;
+            } else if (etat.ctx) {
+                if (etat.ctx.patrimoineTotalEur != null) valeurAvantEur = U.arrondi(etat.ctx.patrimoineTotalEur, 2);
+                if (etat.ctx.patrimoineTotalUsd != null) valeurAvantUsd = U.arrondi(etat.ctx.patrimoineTotalUsd, 2);
+            }
+
             var ligne = {
                 date: date,
                 sens: retrait ? 'retrait' : 'apport',
@@ -1121,14 +1135,16 @@
                     id: existant.id, ligne: ligne, compteId: compte.id,
                     operationId: liee.id,
                     montantOperation: retrait ? -montant : montant,
-                    typeOperation: retrait ? 'retrait' : 'depot'
+                    typeOperation: retrait ? 'retrait' : 'depot',
+                    valeurAvantEur: valeurAvantEur, valeurAvantUsd: valeurAvantUsd
                 }).then(function () { return null; });
             } else {
                 promesse = PF.net.ecrireApport({
                     ligne: ligne, compteId: compte.id,
                     montantOperation: retrait ? -montant : montant,
                     typeOperation: retrait ? 'retrait' : 'depot',
-                    idempotence: PF.comptes.genererId()
+                    idempotence: PF.comptes.genererId(),
+                    valeurAvantEur: valeurAvantEur, valeurAvantUsd: valeurAvantUsd
                 }).then(function () { return null; });
             }
             return promesse.then(function () {

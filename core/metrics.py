@@ -41,6 +41,13 @@ def rendements_periode(
                    supposé survenir à la fin de la période.
 
     r_i = (V_i - V_{i-1} - F_i) / V_{i-1}
+
+    ATTENTION (2.1.0, revue F-07) : la convention « flux en fin de période »
+    n'est PAS un TWR exact dès qu'un flux survient avant la fin de
+    l'intervalle — elle rendait +20 % là où le rendement réel était +10 %.
+    Le TWR officiel passe par `rendements_stricts` (valorisation avant/après
+    chaque flux ; à défaut, point non calculé). Cette fonction reste utilisée
+    pour les affichages de diagnostic et les séries sans flux.
     """
     n = len(valeurs)
     if n < 2:
@@ -141,6 +148,121 @@ def twr(rendements: list[float]) -> float:
 def twr_depuis(valeurs: list[float], flux: list[float] | None = None) -> float:
     """TWR cumulé sur toute la série."""
     return twr(rendements_periode(valeurs, flux))
+
+
+# ---------------------------------------------------------------------------
+# TWR EXACT (2.1.0, revue F-07) : valorisation avant/après chaque flux
+# ---------------------------------------------------------------------------
+
+def rendements_stricts(
+    dates: list,
+    valeurs: list[float],
+    flux_jour: dict,
+    valorisations_avant: dict | None = None,
+) -> tuple[list[float | None], list[dict]]:
+    """Rendements de sous-période EXACTS : chaque flux est encadré par une
+    valorisation juste avant lui.
+
+    `dates`/`valeurs`       : les snapshots, triés (valeur en fin de journée).
+    `flux_jour`              : `{date: montant signé}` — un seul flux net par jour.
+    `valorisations_avant`    : `{date du flux: valeur du portefeuille JUSTE AVANT
+                               le flux}`. Sans cette valeur, le moment du flux
+                               dans l'intervalle est inconnu et le rendement ne
+                               peut PAS être calculé exactement.
+
+    Règles :
+    - un intervalle SANS flux est exact quelle que soit sa longueur :
+      `V_i / V_{i-1} − 1` ;
+    - un intervalle dont chaque flux est valorisé est chaîné exactement :
+      le flux coupe l'intervalle en deux — marché jusqu'à la valorisation,
+      puis le flux (comptable, pas un rendement), puis marché jusqu'au
+      snapshot suivant ;
+    - un intervalle dont un flux n'est PAS valorisé rend `None` et figure dans
+      `non_calcules` : jamais remplacé par la convention « flux en fin de
+      période », qui rendait +20 % là où le rendement réel était +10 %
+      (100 € au départ, 100 € versés au milieu, +10 % après le versement).
+
+    Retourne `(rendements, non_calcules)` : un élément par intervalle
+    consécutif (`None` = non calculé), et la liste des intervalles écartés
+    `{"de": date, "a": date, "flux": montant}`.
+    """
+    n = len(dates)
+    if n < 2:
+        return [], []
+    if len(valeurs) != n:
+        raise ValueError("dates et valeurs doivent avoir la même longueur")
+    valorisations_avant = valorisations_avant or {}
+
+    entrees = sorted(
+        (d, float(m)) for d, m in (flux_jour or {}).items()
+        if m is not None and float(m) != 0.0
+    )
+
+    rendements: list[float | None] = []
+    non_calcules: list[dict] = []
+
+    k = 0
+    for i in range(1, n):
+        deb, fin = dates[i - 1], dates[i]
+        # Flux de l'intervalle (deb, fin] : même bornes que flux_par_periode.
+        while k < len(entrees) and not (entrees[k][0] > deb):
+            k += 1
+        j = k
+        flux_intervalle = []
+        while j < len(entrees) and not (entrees[j][0] > fin):
+            flux_intervalle.append(entrees[j])
+            j += 1
+        k = j
+
+        if not flux_intervalle:
+            v_prec = valeurs[i - 1]
+            rendements.append((valeurs[i] / v_prec - 1.0) if v_prec > 0 else 0.0)
+            continue
+
+        total_flux = sum(f for _, f in flux_intervalle)
+        v_prec = valeurs[i - 1]
+        prod = 1.0
+        prev = v_prec
+        possible = prev > 0
+        for d_flux, montant in flux_intervalle:
+            if not possible:
+                break
+            avant = valorisations_avant.get(d_flux)
+            if avant is None or not (avant > 0):
+                possible = False
+                break
+            prod *= avant / prev
+            prev = avant + montant          # valeur juste après le flux
+            if prev <= 0:
+                possible = False
+        if possible and prev > 0:
+            prod *= valeurs[i] / prev
+            rendements.append(prod - 1.0)
+        else:
+            rendements.append(None)
+            non_calcules.append({"de": deb, "a": fin, "flux": total_flux})
+
+    return rendements, non_calcules
+
+
+def twr_strict(
+    dates: list,
+    valeurs: list[float],
+    flux_jour: dict,
+    valorisations_avant: dict | None = None,
+) -> tuple[float, list[dict]]:
+    """TWR chaîné sur les seuls intervalles calculables.
+
+    Retourne `(twr, non_calcules)`. Les intervalles dont un flux n'est pas
+    valorisé ne contribuent pas au chaînage : ils sont listés pour être
+    annoncés — un TWR juste ne s'invente pas.
+    """
+    rendements, non_calcules = rendements_stricts(dates, valeurs, flux_jour, valorisations_avant)
+    prod = 1.0
+    for r in rendements:
+        if r is not None:
+            prod *= 1.0 + r
+    return prod - 1.0, non_calcules
 
 
 def annualiser(twr_total: float, jours: int) -> float:

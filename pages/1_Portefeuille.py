@@ -771,6 +771,12 @@ with tab_fonds:
                                         "cours_or": round(cours_or, 2),
                                         "compte": slug_cpt,
                                         "reference": f"usd:{montant_usd:.2f}",
+                                        # TWR exact (2.1.0, revue F-07) : valeur du
+                                        # patrimoine JUSTE AVANT ce flux. Le contexte a
+                                        # été chargé avant l'écriture : le flux n'y est
+                                        # pas encore, c'est donc bien la valeur d'avant.
+                                        "valeur_avant_eur": round(float(ctx.patrimoine_total_eur), 2),
+                                        "valeur_avant_usd": round(float(ctx.patrimoine_total_usd), 2),
                                     }])
                                     db.ajouter_historique_v1(
                                         date_mvt.strftime("%d/%m/%Y"),

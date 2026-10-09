@@ -551,18 +551,49 @@ def recalculer_twr(snaps: pd.DataFrame) -> None:
 
     dates = snaps["Date_DT"].tolist()
     valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce").fillna(0).tolist()
-    # Par période, pas par date exacte : la série de la v1 est mensuelle jusqu'en
-    # avril 2026, et un versement tombé entre deux snapshots serait perdu.
-    fluxs = metrics.flux_par_periode([d.date() for d in dates], flux)
 
-    rendements = metrics.rendements_periode(valeurs, fluxs)
-    colonne_r = [0.0] + list(rendements)
+    # 2.1.0 (revue F-07) : TWR EXACT. Chaque flux doit être encadré par une
+    # valorisation juste avant lui ; sans elle, l'intervalle n'est pas calculé
+    # (annoncé ici), jamais remplacé par la convention « fin de période ».
+    valorisations = {}
+    if not apports.empty and "valeur_avant_eur" in apports.columns:
+        d_v = pd.to_datetime(apports["date"], errors="coerce")
+        v_v = pd.to_numeric(apports["valeur_avant_eur"], errors="coerce")
+        compte = {}
+        for dd, vv in zip(d_v, v_v):
+            if pd.isna(dd) or pd.isna(vv):
+                continue
+            jour = dd.date()
+            compte[jour] = compte.get(jour, 0) + 1
+            valorisations.setdefault(jour, float(vv))
+        valorisations = {j: v for j, v in valorisations.items() if compte[j] == 1}
 
-    try:
-        par_an = metrics.twr_par_annee(dates, colonne_r)
-    except Exception as exc:
-        log.info("  twr_par_annee a échoué : %s", exc)
-        return
+    rendements_stricts, non_calcules = metrics.rendements_stricts(
+        [d.date() for d in dates], valeurs, flux, valorisations
+    )
+    if non_calcules:
+        log.info(
+            "  %d intervalle(s) non calculé(s) : un flux sans valorisation au "
+            "moment du geste (apports antérieurs à la 2.1.0). Ils ne sont pas "
+            "chaînés, aucun chiffre n'est inventé.", len(non_calcules)
+        )
+    par_an = {}
+    annees_incompletes = set()
+    for i, r in enumerate(rendements_stricts):
+        an = dates[i + 1].year
+        if an not in par_an:
+            par_an[an] = None
+        if r is None:
+            annees_incompletes.add(an)
+            par_an[an] = None
+            continue
+        par_an[an] = r if par_an[an] is None else (1.0 + par_an[an]) * (1.0 + r) - 1.0
+    if annees_incompletes:
+        log.info(
+            "  Années « TWR = NaN » : %s — un flux sans valorisation y rend le "
+            "rendement exact incalculable.",
+            ", ".join(str(a) for a in sorted(annees_incompletes)),
+        )
 
     lignes = []
     for annee in sorted(par_an):
@@ -571,15 +602,17 @@ def recalculer_twr(snaps: pd.DataFrame) -> None:
             continue
         v0 = valeurs[idx[0]]
         v1 = valeurs[idx[-1]]
-        f = sum(fluxs[i] for i in idx)
+        deb, fin = dates[idx[0]].date(), dates[idx[-1]].date()
+        f = sum(m for d, m in flux.items() if deb < d <= fin)
+        twr_an = par_an[annee]
         lignes.append({
             "annee": int(annee),
             "valeur_debut": v0,
             "valeur_fin": v1,
             "apports": f,
-            "TWR": par_an[annee] * 100,
+            "TWR": twr_an * 100 if twr_an is not None else float("nan"),
             "naif_%": ((v1 / v0 - 1) * 100) if v0 else 0.0,
-            "ecart_pts": ((v1 / v0 - 1) - par_an[annee]) * 100 if v0 else 0.0,
+            "ecart_pts": (((v1 / v0 - 1) - twr_an) * 100) if (v0 and twr_an is not None) else float("nan"),
         })
 
     df = pd.DataFrame(lignes)
