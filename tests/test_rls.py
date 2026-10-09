@@ -14,7 +14,11 @@ Ce qui est verrouillé ici (tout était permis avant 004) :
   un échec entre les deux écritures ne laisse AUCUNE orpheline ;
 - le rejeu d'une commande idempotente ne duplique rien ;
 - les RPC sont refusées à `anon` (pas de EXECUTE) ;
-- une écriture sans propriétaire (service role) est refusée par le NOT NULL.
+- une écriture sans propriétaire (service role) est refusée par le NOT NULL ;
+- les cinq tables v1 (Config, Donnees, Historique, Projections, Transaction) :
+  anon sans aucun droit, politiques héritées supprimées, propriétaire obligatoire
+  (migration 008) ;
+- 004 et 008 refusent un marqueur <VOTRE-UID> non remplacé.
 """
 
 from __future__ import annotations
@@ -79,10 +83,31 @@ def base(tmp_path_factory):
     cur.execute((MIGRATIONS / "006_twr_valorisation_flux.sql").read_text(encoding="utf-8"))
     cur.execute((MIGRATIONS / "007_inventaire_crypto.sql").read_text(encoding="utf-8"))
 
+    # Tables v1 (hors dépôt, créées par la v1 en production) : elles existent
+    # AVANT la migration 008, avec une ligne sans propriétaire qu'elle doit rattacher.
+    cur.execute('create table if not exists public."Config" (id bigserial primary key, "Clé" text, "Valeur" text)')
+    cur.execute('create table if not exists public."Donnees" (id bigserial primary key, "Ticker" text, "Quantité" text)')
+    cur.execute('create table if not exists public."Historique" (id bigserial primary key, "Date" text, "Montant $" text)')
+    cur.execute('create table if not exists public."Projections" (id bigserial primary key, "Date" text)')
+    cur.execute('create table if not exists public."Transaction" (id bigserial primary key, "Ticker" text)')
+    cur.execute("insert into public.\"Config\" (\"Clé\", \"Valeur\") values ('f_pre_existant', 'v1')")
+    # Politique publique héritée de la v1 (nom quelconque, inconnu de 008) : 008
+    # doit la SUPPRIMER, sans la connaître par son nom.
+    cur.execute('alter table public."Config" enable row level security')
+    cur.execute(
+        'create policy acces_public_heritage on public."Config" '
+        'for all to public using (true) with check (true)'
+    )
+
     # Droits par défaut façon Supabase : les rôles API ont les droits de base,
     # les politiques RLS décident ensuite ligne par ligne.
     cur.execute("grant all on all tables in schema public to anon, authenticated, service_role")
     cur.execute("grant all on all sequences in schema public to anon, authenticated, service_role")
+    # Migration 008 : protection des tables v1, APRÈS les droits par défaut
+    # (qu'elle doit retirer à anon).
+    sql_008 = (MIGRATIONS / "008_v1_proprietaire.sql").read_text(encoding="utf-8")
+    assert "<VOTRE-UID>" in sql_008, "la migration 008 doit demander l'uid du propriétaire"
+    cur.execute(sql_008.replace("<VOTRE-UID>", user_a))
 
     yield conn, user_a, user_b
     conn.close()
@@ -518,3 +543,140 @@ class TestInventaireCrypto:
                 "values ('2025-01-01', 'ETH-USD', -1, 1)"
             )
         conn.execute("rollback")
+
+
+# ---------------------------------------------------------------------------
+# Tables v1 encore lues par l'application (revue 2.0.1, S-01 étendu — migration 008)
+# ---------------------------------------------------------------------------
+TABLES_V1 = ("Config", "Donnees", "Historique", "Projections", "Transaction")
+
+
+class TestTablesV1:
+    def test_anon_ne_lit_aucune_ligne_v1(self, base):
+        """008 retire à anon le droit de lecture : la requête est refusée (42501),
+        ce qui est plus strict que « zéro ligne » (la RLS seule)."""
+        conn, _, _ = base
+        cur = conn.cursor()
+        for table in TABLES_V1:
+            _session(cur, "anon")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cur.execute(f'select count(*) from public."{table}"')
+            conn.execute("rollback")
+
+    def test_anon_n_a_plus_aucun_droit_sur_les_tables_v1(self, base):
+        conn, _, _ = base
+        cur = conn.cursor()
+        for table in TABLES_V1:
+            cur.execute(
+                "select has_table_privilege('anon', %s, 'select') "
+                "or has_table_privilege('anon', %s, 'insert')",
+                (f'public."{table}"', f'public."{table}"'),
+            )
+            assert cur.fetchone()[0] is False, table
+
+    def test_la_politique_publique_heritee_est_supprimee(self, base):
+        """Seules les quatre politiques v1_*, réservées à l'utilisateur connecté,
+        subsistent : l'accès public hérité de la v1 a disparu."""
+        conn, _, _ = base
+        cur = conn.cursor()
+        for table in TABLES_V1:
+            cur.execute(
+                "select policyname from pg_policies "
+                "where schemaname = 'public' and tablename = %s order by policyname",
+                (table,),
+            )
+            noms = [r[0] for r in cur.fetchall()]
+            assert noms == [
+                "v1_delete_proprietaire", "v1_insert_proprietaire",
+                "v1_select_proprietaire", "v1_update_proprietaire",
+            ], table
+            cur.execute(
+                "select relrowsecurity from pg_class where oid = to_regclass(%s)",
+                (f'public."{table}"',),
+            )
+            assert cur.fetchone()[0] is True, f"RLS inactive sur {table}"
+
+    def test_la_ligne_preexistante_est_rattachee_au_proprietaire(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        cur.execute("select user_id::text from public.\"Config\" where \"Clé\" = 'f_pre_existant'")
+        assert cur.fetchone()[0] == user_a
+
+    def test_le_proprietaire_ecrit_et_relit_ses_lignes(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "insert into public.\"Config\" (\"Clé\", \"Valeur\") "
+            "values ('f_test_a', '1') returning user_id::text"
+        )
+        assert cur.fetchone()[0] == user_a
+        cur.execute("select count(*) from public.\"Config\" where \"Clé\" = 'f_test_a'")
+        assert cur.fetchone()[0] == 1
+        conn.execute("rollback")
+
+    def test_un_autre_utilisateur_ne_voit_ni_ne_modifie_les_lignes(self, base):
+        conn, user_a, user_b = base
+        cur = conn.cursor()
+        _session(cur, "authenticated", user_a)
+        cur.execute(
+            "insert into public.\"Config\" (\"Clé\", \"Valeur\") "
+            "values ('f_prive_a', 'secret') returning id"
+        )
+        ligne_id = cur.fetchone()[0]
+        conn.execute("commit")
+
+        _session(cur, "authenticated", user_b)
+        cur.execute("select count(*) from public.\"Config\" where id = %s", (ligne_id,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("update public.\"Config\" set \"Valeur\" = 'pirate' where id = %s", (ligne_id,))
+        assert cur.rowcount == 0
+        conn.execute("rollback")
+
+        _session(cur, "authenticated", user_a)
+        cur.execute("delete from public.\"Config\" where id = %s", (ligne_id,))
+        conn.execute("commit")
+
+    def test_une_ecriture_serveur_sans_proprietaire_est_refusee(self, base):
+        """Robot ou Streamlit sans SUPABASE_USER_ID : la base refuse, sans repli.
+        Comme le service role de Supabase (BYPASSRLS), l'écriture serveur s'exécute
+        hors RLS : seule la contrainte NOT NULL la retient."""
+        conn, _, _ = base
+        cur = conn.cursor()
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            cur.execute("insert into public.\"Historique\" (\"Date\") values ('01/01/2026')")
+
+    def test_la_migration_est_rejouable_et_ignore_une_table_absente(self, base):
+        conn, user_a, _ = base
+        cur = conn.cursor()
+        sql = (MIGRATIONS / "008_v1_proprietaire.sql").read_text(encoding="utf-8")
+        sql = sql.replace("<VOTRE-UID>", user_a)
+        cur.execute("begin")
+        try:
+            cur.execute('drop table public."Transaction"')
+            cur.execute(sql)          # table absente : ignorée, pas d'erreur
+        finally:
+            conn.execute("rollback")  # même en cas d'échec : pas de transaction orpheline
+        cur.execute(sql)              # rejeu complet sur la base réelle : sans erreur
+
+
+# ---------------------------------------------------------------------------
+# Garde du propriétaire : un script sans uid valide ne s'exécute pas
+# ---------------------------------------------------------------------------
+class TestGardeDuUid:
+    """Checklist de mise en service, étape 4 : le marqueur <VOTRE-UID> non
+    remplacé arrête 004 et 008, même quand il n'y a aucune ligne à rattacher.
+    Sans cela, un script oublié passerait en silence sur une base vide."""
+
+    @pytest.mark.parametrize("fichier", ["004_auth_rls.sql", "008_v1_proprietaire.sql"])
+    def test_le_marqueur_non_remplace_est_refuse(self, base, fichier):
+        conn, _, _ = base
+        cur = conn.cursor()
+        sql = (MIGRATIONS / fichier).read_text(encoding="utf-8")
+        assert "<VOTRE-UID>" in sql
+        cur.execute("begin")
+        try:
+            with pytest.raises(psycopg.errors.RaiseException, match="uid du propriétaire"):
+                cur.execute(sql)
+        finally:
+            conn.execute("rollback")

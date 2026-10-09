@@ -18,13 +18,15 @@
 -- Auth, écran de connexion de l'application 2.1.0). Les APK ≤ 2.0.1 ne peuvent
 -- plus ni lire ni écrire : c'est le but de la migration.
 --
--- MODE D'EMPLOI (Supabase > SQL Editor > New query > Run) :
---   ÉTAPE 1 — installez l'APK 2.1.0 et créez votre compte dans l'application
---             (écran de connexion > « Créer mon compte »), ou créez l'utilisateur
---             dans Supabase Dashboard > Authentication > Users.
---   ÉTAPE 2 — copiez l'uid de cet utilisateur (Authentication > Users > colonne
---             User UID) et remplacez <VOTRE-UID> ci-dessous.
---   ÉTAPE 3 — exécutez ce fichier.
+-- MODE D'EMPLOI (Supabase > SQL Editor > New query > Run). L'ordre complet de
+-- la mise en service est la checklist du § 1 de telechargements/notes-2.1.0.md.
+--   ÉTAPE 1 — le compte propriétaire existe AVANT ce script : Authentication >
+--             Users > Add user > Create new user, e-mail et mot de passe, case
+--             « Auto Confirm User » cochée. (Ce script attache les lignes
+--             existantes à un uid : sans compte, il n'y a pas d'uid.)
+--   ÉTAPE 2 — copiez son uid (Authentication > Users > colonne User UID) et
+--             remplacez <VOTRE-UID> dans la ligne « select set_config » ci-dessous.
+--   ÉTAPE 3 — exécutez CE fichier seul, puis 005, 006, 007, puis 008 (même uid).
 --
 -- IDEMPOTENT : chaque instruction peut être rejouée sans erreur.
 -- ===========================================================================
@@ -94,9 +96,11 @@ begin
     ) t
     where user_id is null;
 
-    if v_orphelines > 0 and v_owner is null then
+    -- Le uid est OBLIGATOIRE, même si aucune ligne n'est à rattacher : un
+    -- marqueur non remplacé arrête le script ici (notes de version 2.1.0, § 1, étape 3).
+    if v_owner is null then
         raise exception
-          'pf2.owner_uid non défini alors que % ligne(s) n''ont pas de propriétaire. Remplacez <VOTRE-UID> en tête de script par l''uid de votre compte (Supabase > Authentication > Users), puis relancez.', v_orphelines;
+          'uid du propriétaire absent ou invalide : remplacez la valeur de pf2.owner_uid en tête de script par l''uid de votre compte (Supabase > Authentication > Users > User UID), puis relancez. Lignes à rattacher : %.', v_orphelines;
     end if;
 
     if v_owner is not null then

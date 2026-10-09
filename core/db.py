@@ -74,6 +74,10 @@ TOUTES_LES_TABLES = (
 TABLES_REQUISES = TOUTES_LES_TABLES
 TABLES_OPTIONNELLES = (T_COMPTES, T_OPERATIONS_COMPTE)
 
+# Tables v1 encore lues par l'application et les outils. Depuis la migration 008
+# (revue 2.0.1, S-01 étendu), elles portent un propriétaire, comme les tables pf2_.
+TABLES_V1_PROPRIETAIRE = ("Config", "Donnees", "Historique", "Projections", "Transaction")
+
 
 def _credentials() -> tuple[str, str]:
     """Récupère les credentials. Lève `SecretsManquants` s'ils sont absents."""
@@ -142,10 +146,10 @@ def _traduire_erreur(table: str, exc: Exception) -> Exception:
     if code == "23502" and "user_id" in message:
         return PermissionError(
             f"Écriture sur `{table}` sans propriétaire.\n"
-            f"Depuis la migration 004, chaque ligne pf2_ exige `user_id`. Les "
-            f"robots en service_role doivent fournir le propriétaire : ajoutez "
-            f"la variable d'environnement SUPABASE_USER_ID (l'uid de votre compte "
-            f"Supabase) au job.\n"
+            f"Depuis les migrations 004 et 008, chaque ligne (pf2_ et tables v1) "
+            f"exige `user_id`. Les robots et Streamlit (clé service role) doivent "
+            f"fournir le propriétaire : ajoutez SUPABASE_USER_ID (l'uid de votre "
+            f"compte Supabase), variable d'environnement du job ou secrets.toml.\n"
             f"(détail technique : {message})"
         )
     if code == "42501" or "row-level security" in message:
@@ -252,21 +256,34 @@ def lire(table: str) -> pd.DataFrame:
 
 
 def proprietaire_service() -> str | None:
-    """UID du propriétaire des lignes écrites par les robots.
+    """UID du propriétaire des lignes écrites par les robots et par Streamlit.
 
-    Depuis la migration 004 (revue S-01), chaque ligne `pf2_` porte un
-    propriétaire (`user_id`, NOT NULL). Les robots tournent avec la clé
-    `service_role`, qui contourne RLS : `auth.uid()` est donc nul pour eux et
-    ils doivent fournir l'uid explicitement, via `SUPABASE_USER_ID` (secret
-    GitHub Actions). Sans cette variable, l'écriture échoue sur la contrainte
-    NOT NULL — c'est voulu : un robot ne doit jamais écrire de ligne apatride.
+    Depuis les migrations 004 et 008 (revue S-01 étendu), chaque ligne `pf2_` et
+    chaque ligne des tables v1 porte un propriétaire (`user_id`, NOT NULL). Les
+    robots et Streamlit tournent avec la clé `service_role`, qui contourne RLS :
+    `auth.uid()` est donc nul pour eux, et ils doivent fournir l'uid.
+
+    Source, dans l'ordre : la variable d'environnement `SUPABASE_USER_ID` (secret
+    GitHub Actions des robots), puis `.streamlit/secrets.toml` pour l'application
+    lancée en local. Sans uid, rien n'est inventé : l'écriture échoue sur la
+    contrainte NOT NULL — c'est voulu, un robot ne doit jamais écrire de ligne
+    apatride.
     """
-    return os.environ.get("SUPABASE_USER_ID") or None
+    uid = os.environ.get("SUPABASE_USER_ID")
+    if not uid:
+        try:
+            import streamlit as st
+            uid = st.secrets.get("SUPABASE_USER_ID")
+        except Exception:
+            uid = None
+    return uid or None
 
 
 def _avec_proprietaire(table: str, lignes: list[dict]) -> list[dict]:
-    """Injecte `user_id` dans les écritures `pf2_` des robots."""
-    if not table.startswith("pf2_"):
+    """Injecte `user_id` dans les écritures serveur des tables propriétaires
+    (`pf2_` et TABLES_V1_PROPRIETAIRE). Sans uid connu, les lignes partent telles
+    quelles : la base refuse alors l'écriture au lieu de la rendre apatride."""
+    if not (table.startswith("pf2_") or table in TABLES_V1_PROPRIETAIRE):
         return lignes
     uid = proprietaire_service()
     if not uid:
@@ -571,9 +588,11 @@ def sauver_config_fiscale(modifs: dict[str, object]) -> None:
             if k in existantes:
                 c.table("Config").update({"Valeur": val_str}).eq("id", existantes[k]).execute()
             else:
-                c.table("Config").insert({"Clé": k, "Valeur": val_str}).execute()
+                c.table("Config").insert(
+                    _avec_proprietaire("Config", [{"Clé": k, "Valeur": val_str}])[0]).execute()
     except Exception as exc:
-        raise ErreurConfigFiscale(f"écriture de la table Config impossible ({exc})") from exc
+        raise ErreurConfigFiscale(
+            f"écriture de la table Config impossible ({_traduire_erreur('Config', exc)})") from exc
 
 
 def inventaire_crypto() -> pd.DataFrame:
@@ -761,14 +780,16 @@ def ajuster_solde_compte(
     delta_quantite: float,
     type_defaut: str = "💵 Cash",
     taux_usd: float | None = None,
-) -> float | None:
+) -> float:
     """Ajoute `delta_quantite` (positif ou négatif) à la ligne `ticker` dans `Donnees`.
 
     `taux_usd` est le cours de la devise en dollars (1.0 pour le dollar lui-même).
     Il est obligatoire : sans lui, la valeur en dollars de la ligne ne peut pas être
     écrite, et aucun taux de remplacement n'est inventé. Lève ValueError dans ce cas.
 
-    Retourne le nouveau solde dans la devise du compte, ou `None` en cas d'échec.
+    Retourne le nouveau solde dans la devise du compte. Une écriture refusée LÈVE
+    une exception (PermissionError si la base refuse, par ex. sans propriétaire) :
+    un solde non écrit ne doit jamais être présenté comme écrit (revue 2.0.1).
     """
     verifier_ecriture_cash()
     if taux_usd is None or not taux_usd > 0:
@@ -799,7 +820,7 @@ def ajuster_solde_compte(
         # Si la ligne n'existe pas encore dans Donnees
         q_nouveau = round(max(0.0, float(delta_quantite)), 6)
         val_tot_usd = round(q_nouveau * float(taux_usd), 2)
-        c.table("Donnees").insert({
+        c.table("Donnees").insert(_avec_proprietaire("Donnees", [{
             "Ticker": t_up,
             "Type": type_defaut,
             "Devise Cotation": "Auto",
@@ -807,10 +828,10 @@ def ajuster_solde_compte(
             "Quantité": q_nouveau,
             "Valeur totale": f"$ {val_tot_usd:,.2f}".replace(",", " "),
             "Pourcentage (%)": 0,
-        }).execute()
+        }])[0]).execute()
         return q_nouveau
-    except Exception:
-        return None
+    except Exception as exc:
+        raise _traduire_erreur("Donnees", exc) from exc
 
 
 def ajouter_historique_v1(
@@ -836,16 +857,17 @@ def ajouter_historique_v1(
                 cumul += m_u if ("ajout" in t_m or "apport" in t_m) else -m_u
         est_apport = sens.lower().startswith("apport") or "ajout" in sens.lower()
         nouveau_cumul = round(cumul + (montant_usd if est_apport else -montant_usd), 2)
-        c.table("Historique").insert({
+        c.table("Historique").insert(_avec_proprietaire("Historique", [{
             "Date": date_fr,
             "Type": "Ajout de fond propre" if est_apport else "Retrait",
             "Montant $": round(montant_usd, 2),
             "Montant €": round(montant_eur, 2),
             "Montant Or": round(montant_or, 6),
             "Total_Apports_nets": nouveau_cumul,
-        }).execute()
-    except Exception:
-        pass
+        }])[0]).execute()
+    except Exception as exc:
+        # Une écriture refusée doit se voir : le journal n'est jamais « presque » écrit.
+        raise _traduire_erreur("Historique", exc) from exc
 
 
 def modifier_transaction(id_ligne: int, champs: dict) -> None:
