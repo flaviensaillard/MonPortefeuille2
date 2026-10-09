@@ -14,6 +14,7 @@ Entrée  : corpus/brut/**/*.json  +  corpus/manuels/*.md
 Sortie  : corpus/chunks.jsonl
 """
 
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,39 @@ SORTIE = os.path.join(RACINE, "corpus", "chunks.jsonl")
 
 TAILLE = 1200
 RECOUVREMENT = 150
+
+# Identifiant d'un passage : 64 caractères au plus (contrainte de Vectorize).
+# Quand deux passages tombent sur le même identifiant tronqué, le second reçoit
+# une empreinte de son contenu à la place du suffixe perdu. Avant ce correctif,
+# la troncature supprimait « -{i} » pour les longs articles : 1 143 passages
+# partageaient leur identifiant avec le premier passage de leur article, et
+# n'étaient jamais indexés.
+LONGUEUR_ID = 64
+LONGUEUR_EMPREINTE = 8
+
+
+def desambiguiser(candidat, passage, utilises):
+    """Rend unique un identifiant déjà pris, en gardant le début du candidat.
+
+    Déterministe : la même entrée donne toujours le même identifiant, quel que
+    soit l'ordre de lecture des fichiers. `utilises` est mis à jour.
+    """
+    if candidat not in utilises:
+        utilises.add(candidat)
+        return candidat
+    empreinte = hashlib.sha1(passage.encode("utf-8")).hexdigest()[:LONGUEUR_EMPREINTE]
+    base = candidat[: LONGUEUR_ID - LONGUEUR_EMPREINTE - 1]
+    nouveau = f"{base}-{empreinte}"
+    if nouveau in utilises:
+        raise RuntimeError(f"identifiant impossible à rendre unique : {candidat}")
+    utilises.add(nouveau)
+    return nouveau
+
+
+def identifiant_passage(doc_id, i, passage, utilises):
+    """Identifiant du passage i d'un document, unique dans le fichier."""
+    candidat = f"{doc_id}-{i}".replace(" ", "-")[:LONGUEUR_ID]
+    return desambiguiser(candidat, passage, utilises)
 
 
 def morceaux(texte: str, taille: int = TAILLE, recouvrement: int = RECOUVREMENT):
@@ -67,8 +101,10 @@ def charger():
     for dossier in (BRUT, MANUELS):
         if not os.path.isdir(dossier):
             continue
-        for chemin, _, fichiers in os.walk(dossier):
-            for nom in fichiers:
+        for chemin, sous_dossiers, fichiers in os.walk(dossier):
+            # Ordre stable : deux exécutions produisent les mêmes identifiants.
+            sous_dossiers.sort()
+            for nom in sorted(fichiers):
                 p = os.path.join(chemin, nom)
                 try:
                     if nom.endswith(".json"):
@@ -99,6 +135,7 @@ def principal():
         return 1
 
     ecrits = 0
+    utilises = set()
     with open(SORTIE, "w", encoding="utf-8") as out:
         for doc in docs:
             titre = doc.get("titre") or ""
@@ -109,7 +146,7 @@ def principal():
             auteur = doc.get("auteur") or "non attribué"
             for i, passage in enumerate(morceaux(doc.get("texte") or "")):
                 objet = {
-                    "id": f"{doc.get('id', 'doc')}-{i}".replace(" ", "-")[:64],
+                    "id": identifiant_passage(doc.get("id", "doc"), i, passage, utilises),
                     "titre": titre,
                     "source": f"{source} — {auteur}",
                     "date": date,
