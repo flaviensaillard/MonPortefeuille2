@@ -11,8 +11,19 @@ Ici, un seul robot qui écrit des données **brutes** (valorisation du jour). Le
 n'est jamais stocké : il est calculé à la demande depuis les snapshots. Une seule
 source de vérité, impossible à désynchroniser.
 
-En cas de cours manquant, le snapshot n'est PAS écrit. La v1 en aurait écrit un
-avec des zéros, créant un trou dans la courbe de performance.
+COMPLÉTUDE (2.1.0, revues D-01 / D-02 / F-20)
+----------------------------------------------
+Le snapshot est TOUJOURS écrit s'il existe au moins une composante
+patrimoniale (titres valorisables OU liquidités), mais il porte un marqueur :
+
+- `complet = true`  : toutes les positions ont un cours, toutes les liquidités
+  un taux, l'indicateur or est calculé ;
+- `complet = false` : au moins une composante manque ; `manquantes` liste quoi.
+
+Les points partiels ne sont JAMAIS consommés par les séries de performance
+(core/db.snapshots() les écarte) : une valorisation amputée ne doit pas passer
+pour la valeur réelle du patrimoine. Un portefeuille entièrement en liquidités
+produit lui aussi un point (investi = 0) — la v2.0 rentrait bredouille.
 """
 
 from __future__ import annotations
@@ -73,29 +84,33 @@ def main() -> int:
         except Exception as exc:      # une alerte ne doit jamais tuer le snapshot
             log.warning("Alerte non enregistrée : %s", exc)
 
-    if not positions:
-        log.info("Aucune position. Rien à snapshotter.")
-        return 0
+    manquantes: list[str] = []
 
-    # --- Valorisation ---
-    try:
-        actifs, echecs = valoriser(positions)
-    except fx.FXIndisponible as exc:
-        log.error("Taux de change indisponible : %s. Snapshot abandonné.", exc)
-        return 1
+    # --- Valorisation des positions (si titres) ---
+    actifs: list = []
+    echecs: list[str] = []
+    if positions:
+        try:
+            actifs, echecs = valoriser(positions)
+        except fx.FXIndisponible as exc:
+            log.error("Taux de change indisponible : %s.", exc)
+            echecs = [p.ticker for p in positions]
+            manquantes.append(f"taux de change ({exc})")
 
-    if echecs:
-        log.warning("Cours indisponibles : %s", echecs)
-        if len(echecs) == len(positions):
-            log.error("Aucun cours disponible. Snapshot abandonné.")
-            return 1
-        # On continue avec les positions valorisables, mais on le signale.
+        if echecs:
+            log.warning("Cours indisponibles : %s", echecs)
+            manquantes.append("cours : " + ", ".join(echecs))
+            # On continue avec les positions valorisables : le point sera
+            # écrit MAIS marqué incomplet — jamais consommé par les séries.
 
-    # --- Agrégation ---
+    # --- Liquidités : comptes (2.0) si pf2_comptes est renseignée, sinon Donnees (v1).
+    #     LUES AVANT le test de sortie (revue D-02) : un portefeuille vendu en
+    #     totalité reste un patrimoine — le cash seul doit produire un point. ---
     totaux = {p.value: 0.0 for p in Perimetre}
     totaux_usd = {p.value: 0.0 for p in Perimetre}
     poches = {cle: 0.0 for cle in POCHES_PAR_CLE}
     tickers_deja = {a.ticker.upper() for a in actifs}
+
     for a in actifs:
         p = POCHES_PAR_CLE.get(a.poche)
         cle = p.perimetre.value if p else Perimetre.INVESTI.value
@@ -103,9 +118,8 @@ def main() -> int:
         totaux_usd[cle] += getattr(a, "valeur_usd", 0.0)
         poches[a.poche] = poches.get(a.poche, 0.0) + a.valeur_eur
 
-    # --- Liquidités : comptes (2.0) si pf2_comptes est renseignée, sinon Donnees (v1).
-    #     `soldes_comptes_liquidites` choisit la source ; même forme dans les deux cas. ---
     echecs_liquidites: list[str] = []
+    liquidites_lues = 0
     try:
         comptes_liq = db.soldes_comptes_liquidites()
         if isinstance(comptes_liq, dict):
@@ -119,6 +133,7 @@ def main() -> int:
                 qte = float(info.get("quantite") or 0.0)
                 if qte <= 0:
                     continue
+                liquidites_lues += 1
                 perim = str(info.get("perimetre") or Perimetre.COURANT.value)
                 try:
                     t_eur = 1.0 if code == "EUR" else float(fx.taux(code, aujourdhui.isoformat(), "EUR"))
@@ -131,29 +146,31 @@ def main() -> int:
                 totaux[cle_p] = totaux.get(cle_p, 0.0) + qte * t_eur
                 totaux_usd[cle_p] = totaux_usd.get(cle_p, 0.0) + qte * t_usd
     except Exception as exc:
-        log.warning("Lecture des liquidités Donnees ignorée : %s", exc)
+        log.warning("Lecture des liquidités ignorée : %s", exc)
+        manquantes.append(f"liquidités illisibles ({exc})")
 
     if echecs_liquidites:
         log.warning("Liquidités absentes du snapshot, taux indisponible : %s", echecs_liquidites)
-        try:
-            db.ajouter_alerte(
-                "Liquidités absentes du snapshot",
-                "Taux indisponible pour " + ", ".join(echecs_liquidites) + ". "
-                "Le patrimoine de ce snapshot est partiel.",
-                niveau="attention",
-            )
-        except Exception as exc:      # une alerte ne doit jamais tuer le snapshot
-            log.warning("Alerte non enregistrée : %s", exc)
+        manquantes.append("taux liquidités : " + ", ".join(echecs_liquidites))
 
-    # --- Or ---
+    if not positions and liquidites_lues == 0 and sum(totaux.values()) <= 0:
+        log.info("Aucune position et aucune liquidité. Rien à snapshotter.")
+        return 0
+
+    # --- Or : indicateur seulement. Son absence ne supprime plus le snapshot :
+    #     les colonnes or restent NULL et le point est marqué incomplet. ---
+    cours_or = None
+    equivalent_or = None
     try:
         cours_or = prices.cours_or()
         taux_usd = fx.taux("EUR", aujourdhui.isoformat(), "USD")
         inv_usd = totaux_usd[Perimetre.INVESTI.value] or (totaux[Perimetre.INVESTI.value] * taux_usd)
-        equivalent_or = inv_usd / cours_or
+        equivalent_or = inv_usd / cours_or if cours_or else None
     except (prices.CoursIndisponible, fx.FXIndisponible) as exc:
-        log.error("Cours de l'or indisponible : %s. Snapshot abandonné.", exc)
-        return 1
+        log.warning("Cours de l'or ou taux EUR/USD indisponible : %s. Indicateur or absent.", exc)
+        manquantes.append(f"or/EURUSD ({exc})")
+
+    complet = not manquantes
 
     ligne = {
         "date": aujourdhui.isoformat(),
@@ -161,14 +178,16 @@ def main() -> int:
         "patrimoine_investi_eur": round(totaux[Perimetre.INVESTI.value], 2),
         "precaution_eur": round(totaux[Perimetre.PRECAUTION.value], 2),
         "courant_eur": round(totaux[Perimetre.COURANT.value], 2),
-        "cours_or_usd": round(cours_or, 2),
-        "equivalent_or_oz": round(equivalent_or, 6),
+        "cours_or_usd": round(cours_or, 2) if cours_or is not None else None,
+        "equivalent_or_oz": round(equivalent_or, 6) if equivalent_or is not None else None,
         "poche_rv_eur": round(
             poches.get("rv", 0.0) + poches.get("rv_physique", 0.0) + poches.get("rv_numerique", 0.0), 2
         ),
         "poche_energie_eur": round(poches.get("energie", 0.0), 2),
         "poche_asie_eur": round(poches.get("asie", 0.0), 2),
         "poche_jgb_eur": round(poches.get("jgb", 0.0), 2),
+        "complet": complet,
+        "manquantes": " ; ".join(manquantes) if manquantes else None,
     }
 
     try:
@@ -178,17 +197,24 @@ def main() -> int:
         return 1
 
     log.info(
-        "Snapshot %s écrit : investi %.2f €, précaution %.2f €, %.2f oz d'or",
-        ligne["date"], ligne["patrimoine_investi_eur"],
-        ligne["precaution_eur"], ligne["equivalent_or_oz"],
+        "Snapshot %s écrit (%s) : investi %.2f €, précaution %.2f €, %s",
+        ligne["date"],
+        "complet" if complet else "PARTIEL — " + " ; ".join(manquantes),
+        ligne["patrimoine_investi_eur"],
+        ligne["precaution_eur"],
+        f"{ligne['equivalent_or_oz']:.2f} oz d'or" if equivalent_or else "indicateur or absent",
     )
-    if echecs:
-        db.ajouter_alerte(
-            "Cours manquants au snapshot",
-            f"Cours indisponibles : {', '.join(echecs)}. "
-            "La valorisation est partielle.",
-            niveau="attention",
-        )
+    if manquantes:
+        try:
+            db.ajouter_alerte(
+                "Snapshot partiel",
+                "Snapshot partiel du " + ligne["date"] + " : la valorisation est "
+                "incomplète et ce point n'entrera pas dans les séries de "
+                "performance. Manque : " + " ; ".join(manquantes),
+                niveau="attention",
+            )
+        except Exception as exc:
+            log.warning("Alerte non enregistrée : %s", exc)
     return 0
 
 

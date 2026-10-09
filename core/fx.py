@@ -77,12 +77,31 @@ def taux(devise: str, date: str, contre: str = "EUR") -> float:
     """Taux de change `devise` -> `contre` au jour `date` (ISO ou jj/mm/aaaa).
 
     Lève `FXIndisponible` si le taux est introuvable.
-    """
-    devise = str(devise).upper().strip()
-    contre = str(contre).upper().strip()
 
-    if devise == contre or devise in ("", "NAN"):
+    2.1.0 (revue D-04) : une devise ABSENTE ou « NAN » n'est PLUS JAMAIS
+    convertie au taux 1 — elle lève `FXIndisponible`, comme un taux
+    introuvable. Toute valorisation qui en dépend est alors annoncée
+    indisponible au lieu d'entrer silencieusement au pair. Une devise hors
+    ISO 4217 est refusée de la même manière. Seule la devise contre elle-même
+    rend 1.
+    """
+    from .devises import est_iso
+
+    devise = str(devise or "").upper().strip()
+    contre = str(contre or "").upper().strip()
+
+    if devise == contre and devise:
         return 1.0
+    if not devise or not contre or devise == "NAN" or contre == "NAN":
+        raise FXIndisponible(
+            devise or "(vide)", contre or "(vide)", str(date),
+            "devise absente — jamais remplacée par un taux de 1"
+        )
+    if not est_iso(devise) or not est_iso(contre):
+        raise FXIndisponible(
+            devise, contre, str(date),
+            "devise hors ISO 4217 — non prise en charge"
+        )
 
     d = dates.parser(date)
     if pd.isna(d):

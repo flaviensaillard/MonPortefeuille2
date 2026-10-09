@@ -56,12 +56,25 @@
         };
     }
 
+    /* 2.1.0 (revue D-04) : la devise doit être un code ISO 4217 ACTIF. Le
+       simple contrôle « trois lettres majuscules » laissait passer « NAN »,
+       que le convertisseur traitait ensuite comme 1. Renvoie un message
+       d'erreur, ou null si la devise est valide. */
+    function erreurDevise(devise) {
+        var d = String(devise || '').trim().toUpperCase();
+        if (!d) return 'La devise est requise (code ISO 4217, ex. USD, CHF, CNY…).';
+        if (d === 'NAN') return '« NAN » n’est pas une devise : indiquez le code ISO 4217 (USD, CHF…).';
+        if (!/^[A-Z]{3}$/.test(d)) return 'La devise doit être un code à 3 lettres (USD, CHF, CNY…).';
+        var iso = (PF.modele && PF.modele.DEVISES_ISO) || [];
+        if (!iso.includes(d)) return 'Devise hors ISO 4217 : « ' + d + ' » n’est pas prise en charge.';
+        return null;
+    }
+
     function erreursCompte(c) {
         var erreurs = [];
         if (!c.nom) erreurs.push('Le nom du compte est requis.');
-        if (!/^[A-Z]{3}$/.test(c.devise)) {
-            erreurs.push('La devise doit être un code à 3 lettres (USD, CHF, CNY…).');
-        }
+        var ed = erreurDevise(c.devise);
+        if (ed) erreurs.push(ed);
         if (c.type !== TYPES.RESERVE && c.type !== TYPES.DISPONIBLE) {
             erreurs.push('Le type doit être « réserve » ou « disponible ».');
         }
@@ -446,7 +459,7 @@
         genererId: genererId,
         nouveauCompte: nouveauCompte, modifierCompte: modifierCompte,
         basculerArchive: basculerArchive, versLigneCompte: versLigneCompte,
-        erreursCompte: erreursCompte, comptesActifs: comptesActifs,
+        erreursCompte: erreursCompte, erreurDevise: erreurDevise, comptesActifs: comptesActifs,
         banquesConnues: banquesConnues,
         operationsDuCompte: operationsDuCompte, soldeDuCompte: soldeDuCompte,
         libelleContrepartie: libelleContrepartie,

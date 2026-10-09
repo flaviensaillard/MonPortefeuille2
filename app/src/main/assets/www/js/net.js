@@ -282,11 +282,22 @@
 
     function coursOr(dateISO) { return cours(TICKER_OR, dateISO); }
 
-    /* Taux de change devise -> contre. Yahoo cote les deux sens de la paire. */
+    /* Taux de change devise -> contre. Yahoo cote les deux sens de la paire.
+
+       2.1.0 (revue D-04) : une devise ABSENTE ou « NAN » n'est PLUS JAMAIS
+       convertie au taux 1. Elle rend `null` — comme un taux introuvable — et
+       toute valorisation qui en dépend est annoncée indisponible. Une devise
+       hors ISO 4217 est traitée de même. Seule la devise contre elle-même
+       reste 1. */
     function taux(devise, dateISO, contre) {
         devise = String(devise || '').toUpperCase().trim();
         contre = String(contre || 'EUR').toUpperCase().trim();
-        if (devise === contre || !devise || devise === 'NAN') return Promise.resolve(1);
+        if (devise === contre) return Promise.resolve(1);
+        if (!devise || !contre || devise === 'NAN' || contre === 'NAN'
+            || !PF.modele || !(PF.modele.DEVISES_ISO || []).includes(devise)
+            || !(PF.modele.DEVISES_ISO || []).includes(contre)) {
+            return Promise.resolve(null);
+        }
         var cle = devise + '-' + contre + '|' + (dateISO || '');
         if (cache_fx[cle] !== undefined) return Promise.resolve(cache_fx[cle]);
         var symbole = devise + contre + '=X';
@@ -332,6 +343,25 @@
         var r = (PF.store && PF.store.reglages()) || {};
         return { url: String(r.supabaseUrl || '').replace(/\/+$/, ''), cle: String(r.supabaseKey || '') };
     }
+
+    /* Pagination (2.1.0) : limite standard Supabase par réponse, et ordre
+       stable propre à chaque table (clé primaire ou clé naturelle). */
+    var LIMITE_PAGE = 1000;
+    var ORDRE_PAGINATION = {
+        pf2_transactions: 'id.asc',
+        pf2_apports: 'id.asc',
+        pf2_snapshots: 'date.asc,id.asc',
+        pf2_cours: 'ticker.asc,date.asc',
+        pf2_fx: 'devise.asc,contre.asc,date.asc',
+        pf2_inflation: 'annee.asc',
+        pf2_alertes: 'id.asc',
+        pf2_comptes: 'id.asc',
+        pf2_operations_compte: 'id.asc',
+        Donnees: 'id.asc',
+        Projections: 'id.asc',
+        Historique: 'id.asc',
+        Transaction: 'id.asc'
+    };
 
     /* ------------------------------------------------------------------
        Supabase Auth (2.1.0, revue S-01). La clé publique ne suffit plus :
@@ -490,6 +520,31 @@
                     return r.json;
                 });
         },
+        /* LECTURE PAGINÉE (2.1.0, revue D-05) : Supabase limite chaque réponse
+           à 1 000 lignes. selectTout enchaîne les pages (limit/offset sur un
+           ordre stable propre à chaque table) jusqu'à épuisement. Une page qui
+           échoue fait échouer toute la lecture : l'historique ne doit JAMAIS
+           être tronqué en silence. À un snapshot par jour, la limite arrive en
+           ~2,7 ans ; 40 ans ≈ 14 610 lignes. */
+        selectTout: function (table, query) {
+            var ordre = ORDRE_PAGINATION[table] || null;
+            if (!ordre) {
+                // Table sans ordre connu (Config v1, petites tables) : lecture
+                // simple, comme avant.
+                return supabase.select(table, query);
+            }
+            var toutes = [];
+            function page(offset) {
+                var q = (query ? query + '&' : '')
+                    + 'order=' + ordre + '&limit=' + LIMITE_PAGE + '&offset=' + offset;
+                return supabase.select(table, q).then(function (rows) {
+                    toutes = toutes.concat(rows || []);
+                    if ((rows || []).length === LIMITE_PAGE) return page(offset + LIMITE_PAGE);
+                    return toutes;
+                });
+            }
+            return page(0);
+        },
         tester: function () {
             return requeteAvecSession('GET', supabase.url('pf2_transactions', 'select=id&limit=1'),
                 { Accept: 'application/json' }, null)
@@ -526,12 +581,78 @@
         });
     }
 
+    /* ÉCRITURES ATOMIQUES (2.1.0, revue D-03).
+       Avant, une saisie faisait deux requêtes séparées (la transaction puis le
+       mouvement de compte), avec une « compensation » qui pouvait elle-même
+       échouer : des titres achetés sans argent débité. Désormais tout passe par
+       les RPC de la migration 004 : les deux lignes sont écrites dans UNE
+       transaction SQL, tout passe ou rien, et la clé d'idempotence rend les
+       rejeux (réseau instable, bouton pressé deux fois) inoffensifs. */
+
+    function ecrireTransaction(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_enregistrer_transaction', {
+            p_ticker: ligne.ticker, p_sens: ligne.sens, p_date: ligne.date,
+            p_quantite: ligne.quantite, p_cours: ligne.cours, p_frais: ligne.frais || 0,
+            p_devise: ligne.devise || null, p_source: ligne.source || 'appli',
+            p_reference: ligne.reference || null, p_note: ligne.note || null,
+            p_compte_id: opts.compteId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_idempotence: opts.idempotence || null
+        });
+    }
+
+    function modifierTransaction(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_modifier_transaction', {
+            p_tx_id: opts.id,
+            p_ticker: ligne.ticker, p_sens: ligne.sens, p_date: ligne.date,
+            p_quantite: ligne.quantite, p_cours: ligne.cours, p_frais: ligne.frais || 0,
+            p_devise: ligne.devise || null, p_source: ligne.source || 'appli',
+            p_reference: ligne.reference || null, p_note: ligne.note || null,
+            p_compte_id: opts.compteId || null,
+            p_operation_id: opts.operationId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null
+        });
+    }
+
+    function ecrireApport(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_enregistrer_apport', {
+            p_date: ligne.date, p_sens: ligne.sens, p_montant_eur: ligne.montant_eur,
+            p_montant_or: ligne.montant_or || null, p_cours_or: ligne.cours_or || null,
+            p_compte: ligne.compte || null, p_reference: ligne.reference || null,
+            p_compte_id: opts.compteId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null,
+            p_idempotence: opts.idempotence || null
+        });
+    }
+
+    function modifierApport(opts) {
+        var ligne = opts.ligne || {};
+        return supabase.rpc('pf2_modifier_apport', {
+            p_apport_id: opts.id,
+            p_date: ligne.date, p_sens: ligne.sens, p_montant_eur: ligne.montant_eur,
+            p_montant_or: ligne.montant_or || null, p_cours_or: ligne.cours_or || null,
+            p_compte: ligne.compte || null, p_reference: ligne.reference || null,
+            p_compte_id: opts.compteId || null,
+            p_operation_id: opts.operationId || null,
+            p_montant_operation: opts.compteId ? opts.montantOperation : null,
+            p_type_operation: opts.compteId ? opts.typeOperation : null
+        });
+    }
+
     PF.net = {
         req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
         deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, tauxMouvement: tauxMouvement, viderCache: viderCache, supabase: supabase,
         auth: auth,
+        ecrireTransaction: ecrireTransaction, modifierTransaction: modifierTransaction,
+        ecrireApport: ecrireApport, modifierApport: modifierApport,
         setTransport: function (fn) { transport = fn; viderCache(); },
         TICKER_OR: TICKER_OR, ALIAS_YAHOO: ALIAS_YAHOO,
         cache: { cours: cache_cours, fx: cache_fx, variation: cache_variation, serie: cache_serie }

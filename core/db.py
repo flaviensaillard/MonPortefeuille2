@@ -197,10 +197,56 @@ def verifier_ecriture() -> None:
             log.warning("Sonde d'écriture non supprimée (id=%s).", ligne.get("id"))
 
 
+# ---------------------------------------------------------------------------
+# Pagination (2.1.0, revue D-05) : Supabase limite chaque réponse à 1 000
+# lignes. Un unique select("*") tronquait donc l'historique au bout de ~2,7
+# ans de snapshots quotidiens — silencieusement. On enchaîne des pages de
+# 1 000 lignes sur un ordre STABLE propre à chaque table. Une page qui échoue
+# fait échouer toute la lecture : jamais de troncature invisible.
+# ---------------------------------------------------------------------------
+
+PAGE_MAX = 1000
+
+ORDRE_PAGINATION = {
+    T_TRANSACTIONS: "id",
+    T_APPORTS: "id",
+    T_SNAPSHOTS: "date,id",
+    T_COURS: "ticker,date",
+    T_FX: "devise,contre,date",
+    T_INFLATION: "annee",
+    T_ALERTES: "id",
+    T_COMPTES: "id",
+    T_OPERATIONS_COMPTE: "id",
+    # Tables v1 encore lues par l'application.
+    "Donnees": "id",
+    "Transaction": "id",
+    "Historique": "id",
+    "Projections": "id",
+}
+
+
 def lire(table: str) -> pd.DataFrame:
-    """Lit une table entière."""
-    rep = client().table(table).select("*").execute()
-    return pd.DataFrame(rep.data or [])
+    """Lit une table entière, page par page.
+
+    Chaque page est demandée avec `.range(debut, fin)` sur un ordre stable ;
+    la boucle s'arrête quand une page rend moins de `PAGE_MAX` lignes. Si une
+    page échoue, l'exception remonte telle quelle : mieux vaut une erreur
+    qu'un historique amputé.
+    """
+    ordre = ORDRE_PAGINATION.get(table)
+    lignes: list[dict] = []
+    debut = 0
+    while True:
+        requete = client().table(table).select("*")
+        if ordre:
+            requete = requete.order(ordre)
+        rep = requete.range(debut, debut + PAGE_MAX - 1).execute()
+        page = rep.data or []
+        lignes.extend(page)
+        if len(page) < PAGE_MAX:
+            break
+        debut += PAGE_MAX
+    return pd.DataFrame(lignes)
 
 
 def proprietaire_service() -> str | None:
@@ -370,6 +416,22 @@ def snapshots() -> pd.DataFrame:
         )
     if colonne != "Date":
         df = df.rename(columns={colonne: "Date"})
+
+    # COMPLÉTUDE (2.1.0, revues D-01 / F-20) : un snapshot marqué
+    # `complet = false` est une valorisation partielle (cours ou taux manquant).
+    # Il reste en base, visible et alerté, mais il n'entre JAMAIS dans les
+    # séries : TWR, retraite et graphiques ne doivent pas consommer un point
+    # qui ne représente qu'une partie du patrimoine. Les lignes antérieures à
+    # la migration 005 n'ont pas la colonne : elles restent toutes admises.
+    if "complet" in df.columns:
+        partiels = df["complet"].eq(False)
+        if partiels.any():
+            log.info(
+                "%d snapshot(s) partiel(s) écarté(s) des séries : %s",
+                int(partiels.sum()),
+                ", ".join(map(str, df.loc[partiels, "Date"].tolist()[:10])),
+            )
+        df = df[~partiels]
 
     df["Date_DT"] = dates.parser(df["Date"])
     return df.dropna(subset=["Date_DT"]).sort_values("Date_DT").reset_index(drop=True)

@@ -681,13 +681,19 @@ def detail_2074_de_lannee(
     - Tableau détaillé opération par opération.
     """
     from . import fx
-    from .portfolio import classe_de
+    from .portfolio import classe_de, filtrer_ventes_excedentaires
 
     classes_titres = {Classe.ACTION_ETF, Classe.OBLIGATION_ETF, Classe.OR}
     triees = sorted(
         (t for t in transactions if classe_de(t.ticker) in classes_titres),
         key=lambda x: (x.date, 0 if x.est_achat else 1),
     )
+
+    # 2.1.0 (revue, constat 6) : une vente supérieure à la position détenue est
+    # écartée de la déclaration et annoncée — jamais chiffrée. Avant, le gain
+    # était calculé sur la quantité vendue entière (PRU déduit sur des titres
+    # jamais détenus).
+    triees, ventes_excedentaires = filtrer_ventes_excedentaires(triees)
 
     soldes: dict[str, dict[str, float]] = {}
     operations: list[dict] = []
@@ -816,6 +822,7 @@ def detail_2074_de_lannee(
         "case_3vh": round(abs(bilan_net), 2) if bilan_net < 0 else 0.0,
         "cadre_11": cadre_11,
         "choix_regime": choix_regime,
+        "ventes_excedentaires": ventes_excedentaires,
     }
 
 
@@ -827,12 +834,17 @@ def detail_2086_de_lannee(
     en suivant les achats et les fractions de capital déduites (ligne 221) depuis
     l'origine du portefeuille jusqu'à la fin de `annee`."""
     from . import fx, prices
-    from .portfolio import classe_de
+    from .portfolio import classe_de, filtrer_ventes_excedentaires
 
     triees = sorted(
         (t for t in transactions if classe_de(t.ticker) is Classe.CRYPTO),
         key=lambda x: (x.date, 0 if x.est_achat else 1),
     )
+
+    # 2.1.0 (revue, constat 6) : comme au 2074, une vente supérieure à la
+    # position détenue est écartée et annoncée. Avant, les quantités étaient
+    # clampées à zéro en silence et la cession fictive entrait au formulaire.
+    triees, ventes_excedentaires = filtrer_ventes_excedentaires(triees)
 
     cout_total_brut_eur = 0.0
     somme_fractions_deduites = 0.0
@@ -928,6 +940,7 @@ def detail_2086_de_lannee(
         "exonere_305": exonere_305,
         "case_3an": round(case_3an, 2),
         "case_3bn": round(case_3bn, 2),
+        "ventes_excedentaires": ventes_excedentaires,
     }
 
 

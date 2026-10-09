@@ -187,10 +187,27 @@ def test_erreur_rls_devient_un_message_actionnable():
     )
     res = _traduire_erreur("pf2_transactions", exc)
 
+    # 2.1.0 : les politiques exigent un utilisateur authentifié (migration 004).
     assert isinstance(res, PermissionError)
     assert "Row Level Security" in str(res)
-    assert "002_rls.sql" in str(res)      # le mode d'emploi est dans le message
-    assert "SQL Editor" in str(res)
+    assert "004_auth_rls.sql" in str(res)     # le mode d'emploi est dans le message
+    assert "auth.uid()" in str(res)
+
+
+def test_erreur_sans_proprietaire_devient_un_message_actionnable():
+    """Un robot en service_role qui n'indique pas le propriétaire viole la
+    contrainte NOT NULL sur user_id (migration 004)."""
+    from core.db import _traduire_erreur
+
+    exc = _api_error(
+        'null value in column "user_id" of relation "pf2_snapshots" '
+        "violates not-null constraint",
+        "23502",
+    )
+    res = _traduire_erreur("pf2_snapshots", exc)
+
+    assert isinstance(res, PermissionError)
+    assert "SUPABASE_USER_ID" in str(res)
 
 
 def test_erreur_colonne_inconnue_est_expliquee():
@@ -245,6 +262,6 @@ def test_remplacer_traduit_l_erreur_rls(client_supabase, monkeypatch):
 
     monkeypatch.setattr(db, "client", lambda: FauxClient())
 
-    with pytest.raises(PermissionError, match="002_rls.sql"):
+    with pytest.raises(PermissionError, match="004_auth_rls.sql"):
         db.remplacer(db.T_TRANSACTIONS, [{"ticker": "ASML"}],
                      on_conflict="ticker")

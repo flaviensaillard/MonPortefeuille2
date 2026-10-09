@@ -302,6 +302,16 @@ if any(str(cfg.get(k)) != str( "true" if v is True else ("false" if v is False e
 # ---------------------------------------------------------------------------
 d2074 = tax.detail_2074_de_lannee(ctx.transactions, annee)
 d2086 = tax.detail_2086_de_lannee(ctx.transactions, annee)
+
+# 2.1.0 (revue, constat 6) : les ventes supérieures à la position détenue sont
+# écartées des formulaires et annoncées — jamais chiffrées en silence.
+_excedents = list(d2074.get("ventes_excedentaires", [])) + list(d2086.get("ventes_excedentaires", []))
+if _excedents:
+    st.warning(
+        "**Vente(s) supérieure(s) à la position détenue — écartée(s) du calcul fiscal.** "
+        "Aucun chiffre n'a été calculé dessus.\n\n" + "\n\n".join(f"- {m}" for m in _excedents)
+    )
+
 sim = tax.simuler_foyer_complet(
     annee=annee,
     statut=statut,
