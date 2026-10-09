@@ -10,6 +10,7 @@
     var CLE_REGLAGES = 'pf.reglages.v1';
     var CLE_CACHE = 'pf.cache.v1';
     var CLE_ONGLET = 'pf.onglet';
+    var CLE_SESSION = 'pf.session.v1';   // Supabase Auth (2.1.0) : jetons du compte
 
     var DEFAUTS = {
         // Connexion (à saisir au premier lancement)
@@ -135,6 +136,23 @@
 
     function sauverOnglet(o) { ecrire(CLE_ONGLET, o); }
 
+    // ------------------------------------------------- session d'authentification
+    // La session Supabase Auth (jetons d'accès et de rafraîchissement) vit sur
+    // l'appareil, jamais dans les réglages partagés. Sans session, les
+    // politiques RLS (migrations 004) ne laissent ni lire ni écrire.
+
+    function sauverSession(session) {
+        ecrire(CLE_SESSION, session ? JSON.stringify(session) : '');
+    }
+
+    function lireSession() {
+        var brut = lire(CLE_SESSION);
+        if (!brut) return null;
+        try { return JSON.parse(brut); } catch (e) { return null; }
+    }
+
+    function effacerSession() { ecrire(CLE_SESSION, ''); }
+
     PF.store = {
         reglages: reglages,
         sauverReglages: sauverReglages,
@@ -145,6 +163,9 @@
         viderCache: viderCache,
         ongletCourant: ongletCourant,
         sauverOnglet: sauverOnglet,
+        sauverSession: sauverSession,
+        lireSession: lireSession,
+        effacerSession: effacerSession,
         DEFAUTS: DEFAUTS,
         disponible: dispo
     };

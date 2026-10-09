@@ -67,7 +67,70 @@
         }
 
         if (!PF.store.estConfigure()) { feuilleConnexion(true); return; }
+        // 2.1.0 (revue S-01) : la clé publique ne suffit plus, chaque appareil
+        // s'authentifie avec un compte Supabase. Sans session, l'écran de
+        // connexion est proposé avant tout chargement.
+        if (!PF.net.auth.aUneSession()) { feuilleCompte(true); return; }
         rafraichir(false);
+    }
+
+    /* Écran de compte (2.1.0) : connexion ou création du compte Supabase qui
+       possède les données. Les politiques RLS exigent cet utilisateur : sans
+       lui, ni lecture ni écriture. */
+    function feuilleCompte(premiereFois) {
+        var corps = ''
+            + UI.champ({ id: 'ctEmail', label: 'Adresse e-mail', valeur: '', placeholder: 'vous@exemple.fr' })
+            + UI.champ({ id: 'ctMdp', label: 'Mot de passe', valeur: '', placeholder: '8 caractères minimum', type: 'password' })
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin:-6px 0 12px;line-height:1.5">'
+            + 'Ce compte Supabase est le propriétaire de vos lignes : c’est la fin des '
+            + 'données lisibles par n’importe qui (revue S-01). Le mot de passe n’est '
+            + 'jamais stocké, seuls les jetons de session restent sur l’appareil.</div>'
+            + '<button class="btn ghost" id="ctOubli" style="margin-bottom:8px">Mot de passe oublié ?</button>';
+
+        var f = UI.feuille({
+            titre: premiereFois ? 'Votre compte' : 'Connexion à votre compte',
+            aide: premiereFois ? 'Créez votre compte avec l’e-mail de votre choix : il devient '
+                + 'le propriétaire exclusif de vos données (RLS par utilisateur).' : '',
+            corps: corps,
+            boutons: [
+                { texte: 'Plus tard', sorte: 'ghost' },
+                { texte: 'Créer mon compte', sorte: 'ghost', garder: true, action: function () { return agir('creer'); } },
+                { texte: 'Se connecter', sorte: '', garder: true, action: function () { return agir('connecter'); } }
+            ]
+        });
+
+        function agir(mode) {
+            var email = String(UI.lire('ctEmail') || '').trim();
+            var mdp = String(UI.lire('ctMdp') || '');
+            if (!email || !mdp) { UI.toast('E-mail et mot de passe sont requis'); return false; }
+            if (mdp.length < 8) { UI.toast('Mot de passe : 8 caractères minimum'); return false; }
+            var appel = mode === 'creer'
+                ? PF.net.auth.inscription(email, mdp)
+                : PF.net.auth.connexion(email, mdp);
+            return appel.then(function (res) {
+                if (res && res.confirmation) {
+                    UI.toast('Un e-mail de confirmation vous a été envoyé : validez-le puis connectez-vous.');
+                    return false;
+                }
+                var voile = document.querySelector('#voile');
+                if (voile) voile.click();          // ferme la feuille
+                UI.toast('Connecté : ' + (res.email || email));
+                etat.demo = false;
+                rafraichir(true);
+                return true;
+            }).catch(function (e) {
+                UI.toast(String((e && e.message) || 'Connexion impossible').slice(0, 90));
+                return false;
+            });
+        }
+
+        var c = f.corps;
+        if (c) {
+            var bo = c.querySelector('#ctOubli');
+            if (bo) bo.addEventListener('click', function () {
+                UI.toast('Réinitialisez depuis Supabase : Authentication > Users > Reset password.');
+            });
+        }
     }
 
     /* Une tuile qui affiche un pourcentage montre, sur un simple appui, le
@@ -1875,8 +1938,18 @@
 
     function feuilleReglages() {
         var r = PF.store.reglages();
+        var utilisateur = PF.net.auth.utilisateur();
+        var session = PF.net.auth.aUneSession();
+        var compte = session
+            ? '<div style="font-size:12px;color:var(--txt-2);margin-bottom:9px">Compte : <b>'
+                + UI.h(utilisateur && utilisateur.email ? utilisateur.email : 'connecté') + '</b></div>'
+            : '<div style="font-size:12px;color:var(--down);margin-bottom:9px">Non connecté : '
+                + 'vos données ne sont ni lisibles ni modifiables.</div>';
         var corps = ''
-            + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase</button>'
+            + compte
+            + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase (URL et clé)</button>'
+            + '<button class="btn sec" id="rgCompte" style="margin-bottom:9px">👤 Compte : '
+                + (session ? 'changer ou fermer la session' : 'se connecter / créer') + '</button>'
             + '<button class="btn ghost" id="rgDiag" style="margin-bottom:9px">🩺 Diagnostiquer la connexion</button>'
             + '<button class="btn sec" id="rgInflation" style="margin-bottom:9px">📈 Inflation annuelle</button>'
             + '<button class="btn sec" id="rgFiscal" style="margin-bottom:9px">§ Situation fiscale</button>'
@@ -1898,6 +1971,10 @@
             c.querySelector('#rgConnexion').addEventListener('click', function () {
                 document.querySelector('#voile').click();
                 setTimeout(function () { feuilleConnexion(false); }, 220);
+            });
+            c.querySelector('#rgCompte').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(function () { feuilleCompte(false); }, 220);
             });
             c.querySelector('#rgDiag').addEventListener('click', function () {
                 document.querySelector('#voile').click();

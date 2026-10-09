@@ -11,3 +11,10 @@ venv/
 # Données locales
 data/
 *.db
+
+# Signature et artefacts de build — jamais commités (revue S-02)
+keystore/
+build/
+dist/
+*.jks
+*.keystore

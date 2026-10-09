@@ -123,27 +123,38 @@ def reinitialiser() -> None:
 def _traduire_erreur(table: str, exc: Exception) -> Exception:
     """Transforme une erreur PostgREST en message exploitable.
 
-    Le cas qui compte : `42501`, la violation de Row Level Security. Les tables
-    `pf2_` ont été créées avec RLS actif et, sans politique, PostgreSQL refuse
-    toute écriture avec la clé publique — alors que les lectures aboutissent en
-    renvoyant zéro ligne. Le contrôle d'existence concluait donc « la table est
-    là », et l'échec n'apparaissait qu'au premier INSERT, sous forme d'un objet
-    `APIError` que personne ne peut déchiffrer.
+    Deux cas comptent depuis la migration 004 (revue S-01) :
 
-    On renvoie une exception qui dit quoi faire. Le correctif est dans
-    `migrations/002_rls.sql`.
+    - `42501`, la violation de Row Level Security. Les politiques exigent
+      `auth.uid() = user_id` : avec la clé publique seule, on ne lit plus rien
+      et on n'écrit plus. L'échec dit de s'authentifier (application) ou de
+      vérifier la migration 004.
+
+    - `23502`, la contrainte NOT NULL sur `user_id` violée. C'est le cas d'un
+      robot qui tourne en `service_role` sans fournir le propriétaire : la clé
+      service contourne RLS mais pas la colonne obligatoire. Le correctif est
+      la variable `SUPABASE_USER_ID`.
     """
     code = str(getattr(exc, "code", None) or "")
     message = str(getattr(exc, "message", "") or exc)
 
+    if code == "23502" and "user_id" in message:
+        return PermissionError(
+            f"Écriture sur `{table}` sans propriétaire.\n"
+            f"Depuis la migration 004, chaque ligne pf2_ exige `user_id`. Les "
+            f"robots en service_role doivent fournir le propriétaire : ajoutez "
+            f"la variable d'environnement SUPABASE_USER_ID (l'uid de votre compte "
+            f"Supabase) au job.\n"
+            f"(détail technique : {message})"
+        )
     if code == "42501" or "row-level security" in message:
         return PermissionError(
             f"Écriture refusée sur `{table}` par la sécurité de Supabase "
             f"(Row Level Security).\n"
-            f"Vos tables existent et sont lisibles, mais aucune politique "
-            f"n'autorise l'écriture avec votre clé.\n"
-            f"Correctif : Supabase > SQL Editor > New query, collez le contenu "
-            f"de `migrations/002_rls.sql`, puis Run.\n"
+            f"Les politiques exigent un utilisateur authentifié (auth.uid()). "
+            f"La clé publique seule ne suffit plus depuis la migration 004.\n"
+            f"Correctif : utilisez un compte via l'application, ou vérifiez que "
+            f"`migrations/004_auth_rls.sql` a bien été exécutée.\n"
             f"(détail technique : {message})"
         )
     if code == "PGRST204" or "schema cache" in message:
@@ -168,11 +179,13 @@ def verifier_ecriture() -> None:
     Si l'écriture est refusée, on lève tout de suite une erreur qui dit quoi
     faire.
     """
+    sonde = {
+        "titre": "Sonde d'écriture",
+        "message": "Ligne de contrôle, supprimée immédiatement.",
+    }
+    sonde = _avec_proprietaire(T_ALERTES, [sonde])[0]
     try:
-        rep = client().table(T_ALERTES).insert({
-            "titre": "Sonde d'écriture",
-            "message": "Ligne de contrôle, supprimée immédiatement.",
-        }).execute()
+        rep = client().table(T_ALERTES).insert(sonde).execute()
     except Exception as exc:
         raise _traduire_erreur(T_ALERTES, exc) from exc
 
@@ -190,12 +203,35 @@ def lire(table: str) -> pd.DataFrame:
     return pd.DataFrame(rep.data or [])
 
 
+def proprietaire_service() -> str | None:
+    """UID du propriétaire des lignes écrites par les robots.
+
+    Depuis la migration 004 (revue S-01), chaque ligne `pf2_` porte un
+    propriétaire (`user_id`, NOT NULL). Les robots tournent avec la clé
+    `service_role`, qui contourne RLS : `auth.uid()` est donc nul pour eux et
+    ils doivent fournir l'uid explicitement, via `SUPABASE_USER_ID` (secret
+    GitHub Actions). Sans cette variable, l'écriture échoue sur la contrainte
+    NOT NULL — c'est voulu : un robot ne doit jamais écrire de ligne apatride.
+    """
+    return os.environ.get("SUPABASE_USER_ID") or None
+
+
+def _avec_proprietaire(table: str, lignes: list[dict]) -> list[dict]:
+    """Injecte `user_id` dans les écritures `pf2_` des robots."""
+    if not table.startswith("pf2_"):
+        return lignes
+    uid = proprietaire_service()
+    if not uid:
+        return lignes
+    return [{**l, "user_id": l.get("user_id") or uid} for l in lignes]
+
+
 def ecrire(table: str, lignes: list[dict]) -> int:
     """Insère des lignes. Retourne le nombre inséré."""
     if not lignes:
         return 0
     try:
-        rep = client().table(table).insert(lignes).execute()
+        rep = client().table(table).insert(_avec_proprietaire(table, lignes)).execute()
     except Exception as exc:
         raise _traduire_erreur(table, exc) from exc
     return len(rep.data or [])
@@ -223,7 +259,8 @@ def remplacer(table: str, lignes: list[dict], on_conflict: str | None = None) ->
     if not lignes:
         return
     try:
-        requete = client().table(table).upsert(lignes, on_conflict=on_conflict or "")
+        requete = client().table(table).upsert(
+            _avec_proprietaire(table, lignes), on_conflict=on_conflict or "")
         requete.execute()
     except Exception as exc:
         raise _traduire_erreur(table, exc) from exc
@@ -388,6 +425,7 @@ def ajouter_snapshot(ligne: dict) -> None:
     Utilise l'upsert sur la contrainte d'unicité de `date` : relancer le robot
     deux fois le même jour met à jour la ligne au lieu d'en créer une deuxième.
     """
+    ligne = _avec_proprietaire(T_SNAPSHOTS, [ligne])[0]
     client().table(T_SNAPSHOTS).upsert(ligne, on_conflict="date").execute()
 
 

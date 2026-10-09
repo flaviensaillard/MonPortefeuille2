@@ -61,10 +61,15 @@ public class MainActivity extends Activity implements NativeBridge.JsRunner {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
-        s.setAllowFileAccess(true);
-        s.setAllowContentAccess(true);
-        s.setAllowFileAccessFromFileURLs(true);
-        s.setAllowUniversalAccessFromFileURLs(true);
+        // DURCISSEMENT 2.1.0 (revue S-03) : la page locale vit dans les assets
+        // (chargeables même avec l'accès fichier coupé) ; aucun autre fichier,
+        // aucun contenu, aucune origine croisée depuis file:// ne doit être
+        // accessible. Un script injecté ne pourrait plus ni lire le système de
+        // fichiers, ni requêter d'autres origines au nom de la page.
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setAllowFileAccessFromFileURLs(false);
+        s.setAllowUniversalAccessFromFileURLs(false);
         s.setLoadWithOverviewMode(false);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
@@ -75,9 +80,7 @@ public class MainActivity extends Activity implements NativeBridge.JsRunner {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.NORMAL);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        if (Build.VERSION.SDK_INT >= 26) {
-            s.setSafeBrowsingEnabled(false);
-        }
+        // Safe Browsing reste ACTIF (il était désactivé avant la 2.1.0).
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -85,11 +88,14 @@ public class MainActivity extends Activity implements NativeBridge.JsRunner {
                 if (url != null && url.startsWith("file:///android_asset/")) {
                     return false;
                 }
-                if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                // DURCISSEMENT 2.1.0 : seule la sortie https vers un vrai
+                // navigateur est permise ; http et les autres schémas sont
+                // bloqués ici.
+                if (url != null && url.startsWith("https://")) {
                     if (pont != null) pont.openExternal(url);
                     return true;
                 }
-                return false;
+                return true;
             }
 
             @Override
