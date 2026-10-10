@@ -1,0 +1,161 @@
+# TEMPORAIRE — diagnostic lecture seule du TWR 2024 (aucune écriture en base).
+# Retiré de la branche après lecture.
+name: Diagnostic TWR (temporaire)
+
+on:
+  push:
+    branches:
+      - arena/25fcff0b-monportefeuille2
+    paths:
+      - '.github/workflows/diagnostic-twr-temp.yml'
+
+concurrency:
+  group: diagnostic-twr-temp
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Diagnostic (lecture seule)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+        run: |
+          set -eu
+          cat > /tmp/diag_twr.py <<'PY'
+          import csv, os, sys, datetime as dt, collections
+          sys.path.insert(0, os.getcwd())
+          from core import db, fx, prices
+          from core.models import POCHES_PAR_CLE, Perimetre
+          from core.portfolio import calculer_positions, charger_transactions, valoriser
+          import pandas as pd
+
+          OUT = os.path.join(os.getcwd(), "donnees-reconstituees", "diagnostic-twr")
+          os.makedirs(OUT, exist_ok=True)
+          uid = (os.environ.get("SUPABASE_USER_ID") or "").strip()
+
+          def lire(table, ordre):
+              out, debut = [], 0
+              while True:
+                  q = db.client().table(table).select("*")
+                  if uid:
+                      q = q.eq("user_id", uid)
+                  page = q.order(ordre).range(debut, debut + 999).execute().data or []
+                  out.extend(page)
+                  if len(page) < 1000:
+                      return out
+                  debut += 1000
+
+          # 1. Snapshots bruts
+          snaps = lire("pf2_snapshots", "date")
+          cols = ["date", "patrimoine_total_eur", "patrimoine_investi_eur", "precaution_eur", "courant_eur",
+                  "poche_rv_eur", "poche_energie_eur", "poche_asie_eur", "poche_jgb_eur", "cours_or_usd",
+                  "complet", "manquantes"]
+          with open(f"{OUT}/snapshots.csv", "w", newline="", encoding="utf-8") as fh:
+              w = csv.writer(fh, lineterminator="\n")
+              w.writerow(cols)
+              for s in snaps:
+                  w.writerow([s.get(c) for c in cols])
+          print("snapshots:", len(snaps))
+
+          # 2. Apports et transactions -> cash implicite mensuel (EUR)
+          apports = lire("pf2_apports", "id")
+          ap = collections.defaultdict(float)
+          for a in apports:
+              m = float(a["montant_eur"] or 0)
+              ap[str(a["date"])[:7]] += m if a["sens"] == "apport" else -m
+          trans = charger_transactions(db.transactions())
+          achats = collections.defaultdict(float)
+          ventes = collections.defaultdict(float)
+          for t in trans:
+              try:
+                  taux = 1.0 if t.devise == "EUR" else fx.taux(t.devise, t.date.isoformat(), "EUR")
+              except Exception as exc:
+                  print("taux manquant", t.devise, t.date, type(exc).__name__)
+                  continue
+              eur = abs(t.montant_net) * taux
+              (achats if t.est_achat else ventes)[t.date.isoformat()[:7]] += eur
+          mois = sorted(set(ap) | set(achats) | set(ventes))
+          with open(f"{OUT}/cash_implicite_mensuel.csv", "w", newline="", encoding="utf-8") as fh:
+              w = csv.writer(fh, lineterminator="\n")
+              w.writerow(["mois", "apports_nets_mois_eur", "achats_mois_eur", "ventes_mois_eur",
+                          "cumul_apports_nets_eur", "cumul_achats_moins_ventes_eur", "cash_implicite_eur"])
+              cum_ap = cum_net = 0.0
+              for m in mois:
+                  cum_ap += ap.get(m, 0.0)
+                  cum_net += achats.get(m, 0.0) - ventes.get(m, 0.0)
+                  w.writerow([m, round(ap.get(m, 0.0), 2), round(achats.get(m, 0.0), 2),
+                              round(ventes.get(m, 0.0), 2), round(cum_ap, 2), round(cum_net, 2),
+                              round(cum_ap - cum_net, 2)])
+          print("transactions:", len(trans), "apports:", len(apports))
+
+          # 3. Recalcul à la date de chaque snapshot, comme jobs/backfill_snapshots.py
+          with open(f"{OUT}/recalcul_par_snapshot.csv", "w", newline="", encoding="utf-8") as fh:
+              w = csv.writer(fh, lineterminator="\n")
+              w.writerow(["date", "db_total", "db_investi", "recalc_investi_sans_liquidites",
+                          "recalc_total_sans_liquidites", "nb_positions", "nb_actifs_valorises",
+                          "echecs_cours"])
+              for s in snaps:
+                  iso = str(s["date"])[:10]
+                  jour = dt.date.fromisoformat(iso)
+                  du_jour = [t for t in trans if t.date <= jour]
+                  if not du_jour:
+                      w.writerow([iso, s.get("patrimoine_total_eur"), s.get("patrimoine_investi_eur"),
+                                  "", "", 0, 0, "aucune transaction"])
+                      continue
+                  pos = calculer_positions(du_jour, [])
+                  try:
+                      actifs, echecs = valoriser(pos, iso)
+                  except Exception as exc:
+                      w.writerow([iso, s.get("patrimoine_total_eur"), s.get("patrimoine_investi_eur"),
+                                  "", "", len(pos), 0, f"erreur {type(exc).__name__}"])
+                      continue
+                  totaux = {p.value: 0.0 for p in Perimetre}
+                  for a in actifs:
+                      p = POCHES_PAR_CLE.get(a.poche)
+                      cle = p.perimetre.value if p else Perimetre.INVESTI.value
+                      totaux[cle] += a.valeur_eur
+                  w.writerow([iso, s.get("patrimoine_total_eur"), s.get("patrimoine_investi_eur"),
+                              round(totaux[Perimetre.INVESTI.value], 2), round(sum(totaux.values()), 2),
+                              len(pos), len(actifs), ";".join(echecs)])
+          print("recalc ok")
+
+          # 4. Crypto hors application
+          crypto = lire("pf2_inventaire_crypto", "date")
+          cc = ["date", "actif", "quantite", "cout_acquisition_eur", "source"]
+          with open(f"{OUT}/crypto_hors_application.csv", "w", newline="", encoding="utf-8") as fh:
+              w = csv.writer(fh, lineterminator="\n")
+              w.writerow(cc)
+              for c in crypto:
+                  w.writerow([c.get(k) for k in cc])
+          print("crypto lignes:", len(crypto))
+          PY
+          python /tmp/diag_twr.py
+
+          # Contrôle anti-secret avant publication
+          if [ -z "${SUPABASE_KEY:-}" ]; then echo "clé absente"; exit 1; fi
+          if grep -rqF -- "$SUPABASE_KEY" donnees-reconstituees/ || grep -rqF -- "$SUPABASE_URL" donnees-reconstituees/; then
+            echo "ECHEC : secret détecté ; rien publié."; exit 1
+          fi
+          echo "anti-secret OK"
+
+      - name: Publication (branche de travail uniquement)
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add donnees-reconstituees/diagnostic-twr/
+          if git diff --cached --quiet; then echo "rien à publier"; exit 0; fi
+          git commit -m "diagnostic TWR (temporaire, lecture seule)"
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
