@@ -2,7 +2,7 @@
 
 **Statut : PROPOSITION, NON APPLIQUÉE.** Aucune écriture n'a été faite dans la base. Ce rapport et le CSV doivent être validés par écrit par le propriétaire avant toute exécution de `update_valeur_avant.sql`.
 
-Généré par le workflow « Reconstitution valeur_avant » (run 38080741764), en lecture seule.
+Généré par le workflow « Reconstitution valeur_avant » (run 38080891220), en lecture seule.
 
 ## 1. Données lues et constats
 
@@ -28,6 +28,7 @@ Généré par le workflow « Reconstitution valeur_avant » (run 38080741764), e
 - Lignes à compléter dans le SQL : **41**.
 - Lignes où une seule devise est mesurée (l'autre laissée NULL pour ne pas mélanger les sources) : **0**.
 - Montants EUR négatifs dans pf2_apports : 0 (le sens gouverne le signe du flux).
+- Écart entre le snapshot retenu et l'apport (reconstructions antérieures) : médiane **10 jours**, maximum **31 jours** (apport id 299, snapshot du 2026-02-28). Plus l'écart est grand, moins la valeur reconstruite est fiable.
 
 ## 3. Apports approximés (snapshot postérieur)
 
@@ -39,16 +40,27 @@ Aucun.
 
 ## 5. TWR par année civile, avec les nouvelles valeurs
 
-Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avant (valeur mesurée ou reconstruite). Une année est **« non calculé »** dès qu'un de ses apports reste sans valeur, ou qu'un intervalle de l'année ne peut pas être chaîné. Les années avec approximations sont marquées.
+Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avant (valeur reconstruite depuis son snapshot). Une année est **« non calculé »** dès qu'un de ses apports reste sans valeur, qu'un intervalle ne peut pas être chaîné, ou qu'elle n'est pas couverte par les snapshots. Les années avec approximations sont marquées.
 
-Le TWR EUR porte sur `patrimoine_total_eur`. Le TWR USD porte sur le même total converti au taux historique de chaque date de snapshot.
+### 5.1 Série demandée par la mission : patrimoine total
 
 | Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |
 |---:|---:|---:|---:|---:|---|
 | 2023 | +3,26 % | +4,05 % | 1 | 0 / 0 | — |
 | 2024 | -6,09 % | -11,14 % | 18 | 0 / 0 | — |
 | 2025 | -1,48 % | +10,79 % | 10 | 0 / 0 | — |
-| 2026 (en cours) | +0,71 % | -3,89 % | 12 | 0 / 0 | — |
+| 2026 (partielle, jusqu'au 2026-10-10) | +0,71 % | -3,89 % | 12 | 0 / 0 | — |
+
+### 5.2 Comparaison : patrimoine investi (série de l'application)
+
+Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_investi_eur` (la trésorerie est exclue). Cette série sert à comparer avec les performances affichées par l'application. Elle ne remplace pas le TWR total de la section 5.1.
+
+| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |
+|---:|---:|---:|---:|---:|---|
+| 2023 | +9,09 % | +9,28 % | 1 | 0 / 0 | — |
+| 2024 | -13,25 % | -17,75 % | 18 | 0 / 0 | — |
+| 2025 | +4,35 % | +17,29 % | 10 | 0 / 0 | — |
+| 2026 (partielle, jusqu'au 2026-10-10) | +10,99 % | +5,94 % | 12 | 0 / 0 | — |
 
 ## 6. Contrôles automatiques
 
@@ -63,8 +75,10 @@ Le TWR EUR porte sur `patrimoine_total_eur`. Le TWR USD porte sur le même total
 - [OK] valeurs USD mesurées inchangées
 - [OK] une date de snapshot n'est retenue que si une valeur en découle
 - [OK] aucune source mixte : une devise mesurée seule laisse l'autre NULL
-- [OK] chaînage TWR EUR identique à core/metrics.rendements_stricts
-- [OK] chaînage TWR USD identique à core/metrics.rendements_stricts
+- [OK] chaînage TWR EUR (total) identique à core/metrics.rendements_stricts
+- [OK] chaînage TWR USD (total) identique à core/metrics.rendements_stricts
+- [OK] chaînage TWR EUR (investi) identique à core/metrics.rendements_stricts
+- [OK] chaînage TWR USD (investi) identique à core/metrics.rendements_stricts
 - [OK] une instruction UPDATE par ligne à compléter
 - [OK] SQL : aucune suppression ni changement de schéma
 - [OK] SQL : chaque UPDATE ne touche que pf2_apports, colonnes valeur_avant_*, avec garde IS NULL
