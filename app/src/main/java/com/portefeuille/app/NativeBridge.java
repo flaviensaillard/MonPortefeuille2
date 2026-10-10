@@ -800,9 +800,11 @@ public class NativeBridge {
 
                                 @Override
                                 public void onAuthenticationError(int code, CharSequence message) {
-                                    boolean annulation =
-                                            code == android.hardware.biometrics.BiometricPrompt.ERROR_USER_CANCELED
-                                            || code == android.hardware.biometrics.BiometricPrompt.ERROR_CANCELED;
+                                    // Codes stables de BiometricPrompt (BiometricConstants) :
+                                    // 5 = ERROR_CANCELED, 10 = ERROR_USER_CANCELED. Les
+                                    // constantes du champ ne sont pas résolues via la classe
+                                    // dans android.jar-35 : on garde les valeurs publiées.
+                                    boolean annulation = (code == 10 || code == 5);
                                     retourEmpreinte(callbackId, erreurEmpreinte(
                                             annulation ? "annule" : "echec", String.valueOf(message)));
                                 }
