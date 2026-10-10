@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "/tmp/export_v1.py", line 7, in <module>
-    page = db.client().table("Projections").select("*").range(debut, debut + 999).execute().data or []
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
-    raise APIError(dict(json_obj))
-postgrest.exceptions.APIError: {'message': 'permission denied for table Projections', 'code': '42501', 'hint': 'Grant the required privileges to the current role with: GRANT SELECT ON public."Projections" TO anon;', 'details': None}
