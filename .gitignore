@@ -18,3 +18,8 @@ build/
 dist/
 *.jks
 *.keystore
+
+# Sauvegardes chiffrées (2.2.0) : produites par le robot, jamais versionnées.
+sauvegardes/
+*.pf2
+*.pf2.sha256

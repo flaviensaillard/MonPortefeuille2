@@ -1,0 +1,57 @@
+# Sauvegarde chiffrée hebdomadaire — MonPortefeuille 2 (2.2.0, C).
+#
+# 1. Lit les tables Supabase (transactions, apports, opérations, comptes,
+#    snapshots, Config = versions fiscales) et produit une archive `.pf2`
+#    chiffrée (AES-GCM, clé scrypt) + son empreinte SHA-256.
+# 2. RESTAURE aussitôt le fichier produit (contrôle d'intégrité, sommes,
+#    synthèse). Si la restauration échoue, le workflow échoue.
+# 3. Publie le fichier chiffré en ARTEFACT (conservé 90 jours) : c'est la
+#    copie hors ligne. Télécharger l'artefact depuis l'onglet « Actions ».
+#
+# Secrets requis (Settings > Secrets and variables > Actions) :
+#   SUPABASE_URL, SUPABASE_KEY : lecture ;
+#   SAUVEGARDE_CLE : phrase de chiffrement, 12 caractères minimum. Sans elle,
+#   le job s'arrête : aucune sauvegarde en clair n'est produite.
+#
+# Restaurer en local :
+#   SAUVEGARDE_CLE=... python jobs/restauration.py pf2-AAAA-MM-JJ.pf2 --csv ./csv
+
+name: Sauvegarde chiffrée
+
+on:
+  schedule:
+    - cron: "0 20 * * 0"   # chaque dimanche, 20 h UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Export chiffré
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: python jobs/sauvegarde.py
+      - name: Restauration de contrôle
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/restauration.py "$fichier" --csv /tmp/controle-csv
+          (cd sauvegardes && sha256sum -c "$(basename "$fichier").sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sauvegarde-pf2-${{ github.run_id }}
+          path: sauvegardes/
+          retention-days: 90
+          if-no-files-found: error
