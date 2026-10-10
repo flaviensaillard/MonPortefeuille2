@@ -1,0 +1,13 @@
+snapshots: 188
+transactions: 96 apports: 41
+recalc ok
+Traceback (most recent call last):
+  File "/tmp/diag_twr.py", line 99, in <module>
+    crypto = lire("pf2_inventaire_crypto", "date")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/diag_twr.py", line 18, in lire
+    page = q.order(ordre).range(debut, debut + 999).execute().data or []
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'permission denied for table pf2_inventaire_crypto', 'code': '42501', 'hint': 'Grant the required privileges to the current role with: GRANT SELECT ON public.pf2_inventaire_crypto TO anon;', 'details': None}
