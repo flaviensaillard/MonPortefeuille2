@@ -1,6 +1,6 @@
 # Rapport — reconstitution de `valeur_avant_eur` / `valeur_avant_usd` (pf2_apports)
 
-**Statut : PROPOSITION, NON APPLIQUÉE.** Aucune écriture n'a été faite dans la base. Ce rapport et le CSV doivent être validés par écrit par le propriétaire avant toute exécution de `update_valeur_avant.sql`.
+**Statut : PROPOSITION, NON APPLIQUÉE.** Validation du propriétaire : CSV et rapport **non validés** ; conversion USD au taux historique **validée**. Aucune écriture n'a été faite dans la base. Ce rapport et le CSV doivent être validés par écrit par le propriétaire avant toute exécution de `update_valeur_avant.sql`.
 
 Généré par le workflow « Reconstitution valeur_avant » (run 38081155920), en lecture seule.
 
@@ -103,7 +103,7 @@ Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_i
 
 - **Dépôt public.** Les montants, dates et totaux de patrimoine de ces fichiers sont visibles de tout le monde, dans le dépôt, les journaux d'Actions et la PR. Le propriétaire a accepté cette publication. Un retrait ultérieur ne supprime pas l'historique git.
 - **Incohérence possible dans l'application (non modifiée).** Le TWR de l'application compare les valeurs « avant » au total `patrimoine_total_eur`, mais la série de performance utilise `patrimoine_investi_eur` (`core/session.py`, `serie_performance`). Quand il y a de la trésorerie, ces deux séries diffèrent. Ce rapport, lui, utilise le total des deux côtés.
-- **Comparaison avec les performances documentées dans le code** (`core/session.py`, commentaire de la revue 2.1.0) : 2023 : +9,33 % ; 2024 : +15,21 % ; 2025 : +13,92 % (convention dollars, performances Swissquote / v1 selon ce commentaire). La série investie reproduit 2023 (section 5.2). **2024 ne concorde pas** : la valeur de référence progresse moins que les apports versés. Causes possibles, NON TRANCHÉES : snapshots 2024 sous-évalués (liquidités absentes, cours manquants, reconstruction depuis les transactions), ou écart réel. Vérifier les snapshots de 2024 avant d'utiliser ce TWR.
+- **Comparaison avec les performances documentées dans le code** (`core/session.py`, commentaire de la revue 2.1.0) : 2023 : +9,33 % ; 2024 : +15,21 % ; 2025 : +13,92 % (convention dollars, performances Swissquote / v1 selon ce commentaire). La série investie reproduit 2023 (section 5.2). **2024 ne concorde pas** : la valeur de référence progresse moins que les apports versés. Piste principale identifiée (NON TRANCHÉE) : l'apport du **29/04/2024 (10 800 €, id 305)** n'apparaît dans aucune valorisation d'avril à juin 2024, alors que les autres gros apports apparaissent le mois de leur saisie. Sans cette ligne, le TWR 2024 passe à environ **+18,7 %** (convention de l'application, `QUOI-FAIRE.md` étape 7) et à +18,8 % en investi par notre contrôle indépendant. Le propriétaire attend environ +12 % : il reste un écart non expliqué. Décision à prendre sur le relevé Swissquote au 29/04/2024 : **cas A** (versement inexistant) = supprimer la ligne `pf2_apports` id 305 ; il faudra alors aussi la retirer du CSV et du SQL ; **cas B** (versement réel) = la valorisation d'avril 2024 manque dans la v1.
 - Les valeurs reconstruites supposent un portefeuille inchangé entre le snapshot et l'apport (voir `core/metrics.py`, limite A6). Elles sont donc des approximations.
 
 ## 9. Secrets
@@ -113,3 +113,10 @@ Aucun secret (SUPABASE_URL, SUPABASE_KEY, identifiant du propriétaire en clair)
 ## 10. Application (à faire après validation écrite)
 
 Exécuter `update_valeur_avant.sql` dans l'éditeur SQL Supabase, une seule fois. Le fichier est une transaction BEGIN/COMMIT. Chaque instruction ne met à jour que les colonnes encore NULL.
+
+## 11. Statut de validation
+
+- CSV `valeur_avant_apports.csv` : **non validé**.
+- Ce rapport : **non validé**.
+- Conversion USD au taux historique (`core/fx.py`) : **validée** par le propriétaire.
+- TWR 2024 : **non tranché** (voir section 8). Le SQL n'est exécutable qu'après validation écrite du CSV et du rapport.
