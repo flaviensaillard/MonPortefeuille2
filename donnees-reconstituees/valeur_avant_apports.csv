@@ -5,7 +5,6 @@ id,date,sens,montant_eur,montant_usd,source_montant_usd,valeur_avant_eur_avant,v
 271,2024-03-13,apport,200.00,217.86,once_x_cours_or,,,49010.54,53151.01,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-02-28,
 272,2024-03-26,apport,10.00,10.79,once_x_cours_or,,,49010.54,53151.01,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-02-28,
 273,2024-04-11,apport,250.00,268.24,once_x_cours_or,,,50653.70,54678.00,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-03-30,
-305,2024-04-29,apport,10800.00,11579.86,once_x_cours_or,,,50653.70,54678.00,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-03-30,
 274,2024-05-02,apport,8100.00,8676.78,once_x_cours_or,,,50831.02,54469.00,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-04-30,
 275,2024-05-10,apport,400.00,430.57,once_x_cours_or,,,50831.02,54469.00,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-04-30,
 276,2024-05-22,retrait,50.00,54.28,eur_x_taux_historique,,,50831.02,54469.00,reconstruite_snapshot,reconstruite_snapshot_converti_taux_historique,2024-04-30,

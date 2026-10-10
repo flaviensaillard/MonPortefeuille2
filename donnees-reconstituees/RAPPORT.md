@@ -17,15 +17,15 @@ Généré par le workflow « Reconstitution valeur_avant » (run 38081155920), e
 
 | Indicateur | EUR | USD |
 |---|---:|---:|
-| Total d'apports | 41 | 41 |
+| Total d'apports | 40 | 40 |
 | Déjà mesurés (valeur présente avant la mission) | 0 | 0 |
-| Reconstruits (snapshot antérieur) | 41 | 41 |
-| dont USD converties au taux historique | — | 41 |
+| Reconstruits (snapshot antérieur) | 40 | 40 |
+| dont USD converties au taux historique | — | 40 |
 | Approximés (snapshot postérieur, approximation plus forte) | 0 | 0 |
 | Non renseignés (NULL) | 0 | 0 |
 
 - Apports déjà entièrement mesurés (EUR et USD) : **0**.
-- Lignes à compléter dans le SQL : **41**.
+- Lignes à compléter dans le SQL : **40**.
 - Lignes où une seule devise est mesurée (l'autre laissée NULL pour ne pas mélanger les sources) : **0**.
 - Montants EUR négatifs dans pf2_apports : 0 (le sens gouverne le signe du flux).
 - Écart entre le snapshot retenu et l'apport (reconstructions antérieures) : médiane **10 jours**, maximum **31 jours** (apport id 299, snapshot du 2026-02-28). Plus l'écart est grand, moins la valeur reconstruite est fiable.
@@ -40,6 +40,8 @@ Aucun.
 
 ## 5. TWR par année civile, avec les nouvelles valeurs
 
+> **Mise à jour (cas A, id 305 retiré).** Les lignes 2024 ci-dessous sont recalculées hors du workflow, en EUR seulement (méthode des flux au début de période). Les autres valeurs ont été calculées avant le retrait de l'id 305 et sont inchangées pour 2023, 2025 et 2026 (le retrait ne touche que 2024). Le TWR USD 2024 n'a pas été recalculé. Une nouvelle exécution du workflow devra confirmer ces chiffres avant validation.
+
 Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avant (valeur reconstruite depuis son snapshot). Une année est **« non calculé »** dès qu'un de ses apports reste sans valeur, qu'un intervalle ne peut pas être chaîné, ou qu'elle n'est pas couverte par les snapshots. Les années avec approximations sont marquées.
 
 ### 5.1 Série demandée par la mission : patrimoine total
@@ -49,7 +51,7 @@ Colonnes de contrôle : les apports nets de l'année (EUR) et la valeur de réf�
 | Année | TWR EUR | TWR USD | Apports nets EUR | Valeur réf. EUR (début → fin) | Nb apports | Approximés (EUR / USD) | Motif si non calculé |
 |---:|---:|---:|---:|---|---:|---:|---|
 | 2023 | +3,26 % | +4,05 % | 15 000,00 | 30 874,90 → 47 183,86 | 1 | 0 / 0 | — |
-| 2024 | -6,09 % | -11,14 % | 32 860,00 | 47 183,86 → 77 354,57 | 18 | 0 / 0 | — |
+| 2024 | +14,10 % (EUR, recalcul hors workflow, voir ci-dessous) | non recalculé | 22 060,00 | 47 183,86 → 77 354,57 | 17 | 0 / 0 | — |
 | 2025 | -1,48 % | +10,79 % | 4 220,00 | 77 354,57 → 80 370,86 | 10 | 0 / 0 | — |
 | 2026 (partielle, jusqu'au 2026-10-10) | +0,71 % | -3,89 % | 4 513,11 | 80 370,86 → 85 451,82 | 12 | 0 / 0 | — |
 
@@ -60,7 +62,7 @@ Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_i
 | Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |
 |---:|---:|---:|---:|---:|---|
 | 2023 | +9,09 % | +9,28 % | 1 | 0 / 0 | — |
-| 2024 | -13,25 % | -17,75 % | 18 | 0 / 0 | — |
+| 2024 | +18,81 % (EUR, recalcul hors workflow) | non recalculé | 17 | 0 / 0 | — |
 | 2025 | +4,35 % | +17,29 % | 10 | 0 / 0 | — |
 | 2026 (partielle, jusqu'au 2026-10-10) | +10,99 % | +5,94 % | 12 | 0 / 0 | — |
 
@@ -119,4 +121,4 @@ Exécuter `update_valeur_avant.sql` dans l'éditeur SQL Supabase, une seule fois
 - CSV `valeur_avant_apports.csv` : **non validé**.
 - Ce rapport : **non validé**.
 - Conversion USD au taux historique (`core/fx.py`) : **validée** par le propriétaire.
-- TWR 2024 : **non tranché** (voir section 8). Décision sur l'apport du 29/04/2024 : cas B choisi, puis remis en cause par le relevé au 31/12/2024 (voir section 8). Le SQL n'est exécutable qu'après validation écrite du CSV et du rapport.
+- TWR 2024 : **non tranché** (voir section 8). Décision sur l'apport du 29/04/2024 : **cas A** (versement inexistant), retiré du CSV et du SQL. La ligne `pf2_apports` id 305 doit être supprimée dans Supabase par le propriétaire. Le SQL n'est exécutable qu'après validation écrite du CSV et du rapport.

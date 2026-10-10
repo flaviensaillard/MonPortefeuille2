@@ -9,7 +9,6 @@ UPDATE pf2_apports SET valeur_avant_eur = 49010.54, valeur_avant_usd = 53151.01 
 UPDATE pf2_apports SET valeur_avant_eur = 49010.54, valeur_avant_usd = 53151.01 WHERE id = 271 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
 UPDATE pf2_apports SET valeur_avant_eur = 49010.54, valeur_avant_usd = 53151.01 WHERE id = 272 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
 UPDATE pf2_apports SET valeur_avant_eur = 50653.70, valeur_avant_usd = 54678.00 WHERE id = 273 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
-UPDATE pf2_apports SET valeur_avant_eur = 50653.70, valeur_avant_usd = 54678.00 WHERE id = 305 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
 UPDATE pf2_apports SET valeur_avant_eur = 50831.02, valeur_avant_usd = 54469.00 WHERE id = 274 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
 UPDATE pf2_apports SET valeur_avant_eur = 50831.02, valeur_avant_usd = 54469.00 WHERE id = 275 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
 UPDATE pf2_apports SET valeur_avant_eur = 50831.02, valeur_avant_usd = 54469.00 WHERE id = 276 AND valeur_avant_eur IS NULL AND valeur_avant_usd IS NULL;
