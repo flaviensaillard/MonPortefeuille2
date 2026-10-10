@@ -2,7 +2,7 @@
 
 **Statut : PROPOSITION, NON APPLIQUÉE.** Aucune écriture n'a été faite dans la base. Ce rapport et le CSV doivent être validés par écrit par le propriétaire avant toute exécution de `update_valeur_avant.sql`.
 
-Généré par le workflow « Reconstitution valeur_avant » (run 38081021592), en lecture seule.
+Généré par le workflow « Reconstitution valeur_avant » (run 38081155920), en lecture seule.
 
 ## 1. Données lues et constats
 
@@ -106,6 +106,10 @@ Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_i
 - **Comparaison avec les performances documentées dans le code** (`core/session.py`, commentaire de la revue 2.1.0) : 2023 : +9,33 % ; 2024 : +15,21 % ; 2025 : +13,92 % (convention dollars, performances Swissquote / v1 selon ce commentaire). La série investie reproduit 2023 (section 5.2). **2024 ne concorde pas** : la valeur de référence progresse moins que les apports versés. Causes possibles, NON TRANCHÉES : snapshots 2024 sous-évalués (liquidités absentes, cours manquants, reconstruction depuis les transactions), ou écart réel. Vérifier les snapshots de 2024 avant d'utiliser ce TWR.
 - Les valeurs reconstruites supposent un portefeuille inchangé entre le snapshot et l'apport (voir `core/metrics.py`, limite A6). Elles sont donc des approximations.
 
-## 9. Application (à faire après validation écrite)
+## 9. Secrets
+
+Aucun secret (SUPABASE_URL, SUPABASE_KEY, identifiant du propriétaire en clair) n'est présent dans `donnees-reconstituees/`. Le contrôle anti-secret est fait par le workflow AVANT toute publication (section 6). Les secrets ne sont jamais écrits dans le code ni dans les journaux.
+
+## 10. Application (à faire après validation écrite)
 
 Exécuter `update_valeur_avant.sql` dans l'éditeur SQL Supabase, une seule fois. Le fichier est une transaction BEGIN/COMMIT. Chaque instruction ne met à jour que les colonnes encore NULL.
