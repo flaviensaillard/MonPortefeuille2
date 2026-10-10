@@ -1,0 +1,132 @@
+# TEMPORAIRE — recalcul lecture seule du TWR USD (aucune écriture en base).
+# Réutilise les fonctions de donnees-reconstituees/reconstruire_valeur_avant.py.
+# Sortie : CSV de pourcentages uniquement. Retiré de la branche après lecture.
+name: Diagnostic TWR (temporaire)
+
+on:
+  push:
+    branches:
+      - arena/25fcff0b-monportefeuille2
+    paths:
+      - '.github/workflows/diagnostic-twr-temp.yml'
+
+concurrency:
+  group: diagnostic-twr-temp
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Recalcul TWR USD (lecture seule)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+        run: |
+          set +e
+          mkdir -p donnees-reconstituees/diagnostic-twr
+          cat > /tmp/twr_usd.py <<'PY'
+          import csv, os, sys, importlib.util, datetime as dt
+          ROOT = os.getcwd()
+          sys.path.insert(0, ROOT)
+          spec = importlib.util.spec_from_file_location("R", os.path.join(ROOT, "donnees-reconstituees", "reconstruire_valeur_avant.py"))
+          R = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(R)
+          from supabase import create_client
+          url = os.environ["SUPABASE_URL"].strip()
+          cle = os.environ["SUPABASE_KEY"].strip()
+          uid = (os.environ.get("SUPABASE_USER_ID") or "").strip()
+          client = create_client(url, cle)
+          apports = R.lire_toutes(client, "pf2_apports", "id", uid)
+          snaps = R.lire_toutes(client, "pf2_snapshots", "date", uid)
+
+          pts_eur = sorted((R.jour(s["date"]), float(s["patrimoine_total_eur"]))
+                           for s in snaps if s.get("complet") is not False and s.get("patrimoine_total_eur") is not None)
+          pts_usd = []
+          for j, v in pts_eur:
+              t, _ = R.taux_eur_usd(j)
+              pts_usd.append((j, v * t if t else None))
+
+          def flux_de(devise, exclus):
+              flux, lignes = {}, []
+              for a in apports:
+                  if str(a["id"]) in exclus:
+                      continue
+                  d = R.jour(a["date"])
+                  signe = 1.0 if a["sens"] == "apport" else -1.0
+                  if devise == "EUR":
+                      m = float(a["montant_eur"])
+                  else:
+                      b = dict(a); b["date"] = d; b["montant_eur"] = float(a["montant_eur"])
+                      m, _ = R.montant_usd_apport(b)
+                  if m is None:
+                      continue
+                  flux[d] = flux.get(d, 0.0) + signe * abs(m)
+                  lignes.append(d)
+              return flux
+
+          def avant_de(points, flux):
+              avant = {}
+              for d in flux:
+                  prec = [v for j, v in points if j < d and v is not None]
+                  if prec:
+                      avant[d] = [v for j, v in points if j < d and v is not None][-1]
+              return avant
+
+          def twr(devise, exclus):
+              points = pts_eur if devise == "EUR" else pts_usd
+              flux = flux_de(devise, exclus)
+              avant = avant_de(points, flux)
+              inter = R.chaine(points, flux, avant, set())
+              sortie = []
+              for an in sorted({j.year for j, _ in points}):
+                  ints = [r for fin, r, why in inter if fin.year == an]
+                  if not ints or any(r is None for r in ints):
+                      sortie.append((an, None, len(ints)))
+                      continue
+                  rend = 1.0
+                  for r in ints:
+                      rend *= 1.0 + r
+                  sortie.append((an, round((rend - 1.0) * 100, 2), len(ints)))
+              return sortie
+
+          out = os.path.join(ROOT, "donnees-reconstituees", "diagnostic-twr", "twr_recalcul.csv")
+          with open(out, "w", newline="", encoding="utf-8") as f:
+              w = csv.writer(f)
+              w.writerow(["scenario", "devise", "annee", "twr_pct", "nb_intervalles"])
+              for nom, exclus in (("tous_apports", set()), ("sans_id_305", {"305"})):
+                  for devise in ("EUR", "USD"):
+                      for an, pct, n in twr(devise, exclus):
+                          w.writerow([nom, devise, an, "" if pct is None else pct, n])
+          print("ecrit", out, "apports", len(apports), "snapshots", len(pts_eur))
+          PY
+          python /tmp/twr_usd.py > /tmp/journal.txt 2>&1
+          RC=$?
+          sed -e "s#$SUPABASE_KEY#<CLE>#g" -e "s#$SUPABASE_URL#<URL>#g" /tmp/journal.txt > donnees-reconstituees/diagnostic-twr/journal.txt
+          echo "$RC" > donnees-reconstituees/diagnostic-twr/code_retour.txt
+          if grep -rqF -- "$SUPABASE_KEY" donnees-reconstituees/ || grep -rqF -- "$SUPABASE_URL" donnees-reconstituees/; then
+            echo "ECHEC : secret détecté ; rien publié."; rm -f donnees-reconstituees/diagnostic-twr/*.csv; exit 1
+          fi
+          echo "anti-secret OK (code retour : $RC)"
+          set -e
+          test "$RC" = "0"
+
+      - name: Publication (branche de travail uniquement)
+        if: always()
+        run: |
+          git config user.name "arena-diagnostic"
+          git config user.email "arena-diagnostic@users.noreply.github.com"
+          git add -f donnees-reconstituees/diagnostic-twr/
+          if git diff --cached --quiet; then echo "rien à publier"; exit 0; fi
+          git commit -qm "Diagnostic TWR temporaire : recalcul USD sans id 305"
+          git push -q origin HEAD:arena/25fcff0b-monportefeuille2
