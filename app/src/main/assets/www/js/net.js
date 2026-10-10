@@ -463,8 +463,12 @@
             // Bearer = jeton d'accès de la session si elle existe, sinon clé
             // publique (lecture seule après la migration 004).
             var s = (PF.store && PF.store.lireSession && PF.store.lireSession()) || null;
-            var jeton = (s && s.access_token) ? s.access_token : k;
-            var h = { apikey: k, Authorization: 'Bearer ' + jeton };
+            // 2.1.1 (constat B) : une clé `sb_…` (publishable) n'est PAS un JWT.
+            // Elle ne va que dans `apikey`, jamais en Bearer. Le Bearer ne porte
+            // qu'un jeton de session, ou une clé anon héritée (JWT eyJ…).
+            var jeton = (s && s.access_token) ? s.access_token : (k.indexOf('sb_') === 0 ? null : k);
+            var h = { apikey: k };
+            if (jeton) h.Authorization = 'Bearer ' + jeton;
             if (extra) for (var e in extra) if (extra.hasOwnProperty(e)) h[e] = extra[e];
             return h;
         },
