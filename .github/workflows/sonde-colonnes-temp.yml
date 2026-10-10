@@ -1,0 +1,43 @@
+# TEMPORAIRE — sonde des noms de colonnes uniquement (aucune valeur affichée).
+# Sera supprimée de la branche de travail après lecture.
+name: Sonde colonnes (temporaire)
+
+on:
+  push:
+    branches:
+      - arena/25fcff0b-monportefeuille2
+    paths:
+      - '.github/workflows/sonde-colonnes-temp.yml'
+  workflow_dispatch:
+
+jobs:
+  sonde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install "supabase>=2.3"
+      - name: Noms de colonnes (sans valeurs)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          cat > /tmp/sonde.py <<'PY'
+          import os
+          from supabase import create_client
+          c = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+          tables = ["pf2_apports", "pf2_snapshots", "pf2_transactions", "pf2_cours",
+                    "pf2_fx", "Historique", "Projections", "Donnees", "Transaction", "Config"]
+          for t in tables:
+              try:
+                  r = c.table(t).select("*").limit(1).execute()
+                  if r.data:
+                      print(f"{t}: colonnes = {sorted(r.data[0].keys())}")
+                  else:
+                      print(f"{t}: table vide ou inexistante (aucune ligne)")
+              except Exception as e:
+                  print(f"{t}: erreur {type(e).__name__} code={getattr(e, 'code', None)}")
+          PY
+          python /tmp/sonde.py
