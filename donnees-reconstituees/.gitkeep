@@ -1,0 +1,9 @@
+# Ce dossier reçoit les livrables générés par le workflow
+# .github/workflows/backfill_valeur_avant.yml.
+#
+# Trois fichiers sont produits :
+#   - valeur_avant_apports.csv  (détail par apport)
+#   - update_valeur_avant.sql   (script SQL à exécuter manuellement)
+#   - RAPPORT.md                (synthèse et TWR annuels)
+#
+# Le dossier ne doit JAMAIS contenir de secrets (SUPABASE_URL, SUPABASE_KEY…).
