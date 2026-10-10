@@ -45,6 +45,15 @@ class MondeSimule:
         monkeypatch.setattr(db, "soldes_comptes_liquidites", lambda: dict(monde.liquidites))
         monkeypatch.setattr(db, "ajouter_snapshot", lambda ligne: monde.snapshots_ecrits.append(dict(ligne)))
         monkeypatch.setattr(db, "ajouter_alerte", monde._alerter)
+        # AUCUN contact réseau ni Supabase, même quand le réseau répond : sans
+        # ces deux verrous, `daily_snapshot` relisait les cours vivants de
+        # Yahoo (`prices.cotation_du_moment`) et les cours de référence de
+        # Supabase en direct. Hors ligne il retombait sur la simulation et le
+        # test passait ; en CI (connectée) Yahoo lui servait un vrai cours et
+        # `test_un_cours_manquant_marque_le_snapshot_incomplet` échouait.
+        monkeypatch.setattr(db, "cours_de_reference", lambda: {})
+        monkeypatch.setattr(db, "lire_allocation_personnalisee", lambda: None)
+        monkeypatch.setattr(prices, "cotation_du_moment", lambda ticker: None)
 
         def faux_cours(ticker, date=None):
             if ticker == "GC=F":
