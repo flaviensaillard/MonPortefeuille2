@@ -13,6 +13,17 @@ import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
 
+import android.content.DialogInterface;
+import android.content.SharedPreferences;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -570,6 +581,259 @@ public class NativeBridge {
             activity.startActivity(Intent.createChooser(i, "Partager"));
         } catch (Exception e) {
             Log.w(TAG, "share: " + e.getMessage());
+        }
+    }
+
+    /* =================================================================
+       Connexion par empreinte digitale (2.1.1).
+
+       Après une première connexion email/mot de passe, l'appareil peut
+       rouvrir la session par empreinte. Le mot de passe n'est JAMAIS stocké,
+       ni ici ni dans la page : cette porte ne manipule que les jetons de
+       session Supabase.
+
+       Les jetons sont scellés en AES-GCM sous une clé du Keystore Android
+       (`AndroidKeyStore`) : la clé vit dans le composant matériel, n'est ni
+       exportable ni lisible. L'ouverture passe par `BiometricPrompt`, liée à
+       un CryptoObject (le déchiffrement n'a lieu qu'après la biométrie) ;
+       le bouton « Utiliser le mot de passe » est le repli permanent.
+
+       Limites assumées :
+       - la clé n'exige pas une authentification par empreinte à CHAQUE
+         opération crypto : le scellement silencieux des jetons rafraîchis en
+         arrière-plan serait sinon impossible. La porte est applicative
+         (toute ouverture passe par le prompt) et la clé reste matérielle ;
+       - BiometricPrompt est l'API système (android.hardware.biometrics,
+         Android 9+). Sous Android 8, l'empreinte est annoncée indisponible
+         et le repli email/mot de passe s'applique ;
+       - la biométrie elle-même ne se teste que sur appareil. */
+
+    private static final String PREFS_EMPREINTE = "pf_empreinte";
+    private static final String CLE_SESSION_CHIFFREE = "session_chiffree";
+    private static final String CLE_KEYSTORE_EMPREINTE = "pf_empreinte_v1";
+
+    private SharedPreferences prefsEmpreinte() {
+        return activity.getSharedPreferences(PREFS_EMPREINTE, Context.MODE_PRIVATE);
+    }
+
+    /** Clé AES du Keystore Android : créée au premier scellement, jamais exportée. */
+    private SecretKey cleEmpreinte(boolean creer) throws Exception {
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+        if (ks.containsAlias(CLE_KEYSTORE_EMPREINTE)) {
+            KeyStore.Entry entree = ks.getEntry(CLE_KEYSTORE_EMPREINTE, null);
+            if (entree instanceof KeyStore.SecretKeyEntry) {
+                return ((KeyStore.SecretKeyEntry) entree).getSecretKey();
+            }
+        }
+        if (!creer) return null;
+        KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        kg.init(new KeyGenParameterSpec.Builder(CLE_KEYSTORE_EMPREINTE,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return kg.generateKey();
+    }
+
+    /** Scellement silencieux : chiffre et garde la session (jetons seuls). */
+    private boolean scellerSession(String sessionJson) {
+        try {
+            SecretKey cle = cleEmpreinte(true);
+            Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+            c.init(Cipher.ENCRYPT_MODE, cle);
+            byte[] iv = c.getIV();
+            byte[] chiffre = c.doFinal(sessionJson.getBytes(StandardCharsets.UTF_8));
+            String blob = Base64.encodeToString(iv, Base64.NO_WRAP) + ":"
+                    + Base64.encodeToString(chiffre, Base64.NO_WRAP);
+            prefsEmpreinte().edit().putString(CLE_SESSION_CHIFFREE, blob).apply();
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "Scellement des jetons impossible : " + e.getMessage());
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean empreinteMajSession(String sessionJson) {
+        return sessionJson != null && scellerSession(sessionJson);
+    }
+
+    @JavascriptInterface
+    public boolean empreinteEffacer() {
+        prefsEmpreinte().edit().remove(CLE_SESSION_CHIFFREE).apply();
+        return true;
+    }
+
+    @JavascriptInterface
+    public boolean empreinteSessionGardee() {
+        String blob = prefsEmpreinte().getString(CLE_SESSION_CHIFFREE, "");
+        return blob != null && !blob.isEmpty();
+    }
+
+    @SuppressWarnings("deprecation")
+    private boolean empreinteDisponible() {
+        // BiometricPrompt : Android 9 (API 28). Avant, indisponible — repli
+        // email/mot de passe, jamais une biométrie de fortune.
+        if (android.os.Build.VERSION.SDK_INT < 28) return false;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.hardware.biometrics.BiometricManager bm =
+                        (android.hardware.biometrics.BiometricManager)
+                                activity.getSystemService(Context.BIOMETRIC_SERVICE);
+                return bm != null && bm.canAuthenticate()
+                        == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+            }
+            android.hardware.fingerprint.FingerprintManager fm = activity.getSystemService(
+                    android.hardware.fingerprint.FingerprintManager.class);
+            return fm != null && fm.isHardwareDetected() && fm.hasEnrolledFingerprints();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public String empreinteEtat() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("dispo", empreinteDisponible());
+            o.put("sessionGardee", empreinteSessionGardee());
+            return o.toString();
+        } catch (Exception e) {
+            return "{\"dispo\":false,\"sessionGardee\":false}";
+        }
+    }
+
+    @JavascriptInterface
+    public void empreinteActiver(String sessionJson, String callbackId) {
+        demanderEmpreinte(callbackId, sessionJson,
+                "Activer la connexion par empreinte",
+                "Confirmez votre identité pour sceller vos jetons de session");
+    }
+
+    @JavascriptInterface
+    public void empreinteOuvrir(String callbackId) {
+        demanderEmpreinte(callbackId, null,
+                "Porte-feuille verrouillé",
+                "Confirmez votre identité pour rouvrir votre session");
+    }
+
+    /** Demande biométrique liée au chiffrement. Résultat : PF.biometrie._fin(id, r). */
+    private void demanderEmpreinte(final String callbackId, final String sessionJson,
+                                   final String titre, final String sousTitre) {
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            retourEmpreinte(callbackId, erreurEmpreinte("indispo",
+                    "BiometricPrompt absent (Android 9 requis)"));
+            return;
+        }
+        if (!empreinteDisponible()) {
+            retourEmpreinte(callbackId, erreurEmpreinte("indispo",
+                    "Aucune empreinte configurée sur cet appareil"));
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final Cipher chiffre;
+                    if (sessionJson != null) {
+                        chiffre = Cipher.getInstance("AES/GCM/NoPadding");
+                        chiffre.init(Cipher.ENCRYPT_MODE, cleEmpreinte(true));
+                    } else {
+                        String blob = prefsEmpreinte().getString(CLE_SESSION_CHIFFREE, "");
+                        if (blob == null || blob.indexOf(':') <= 0) {
+                            retourEmpreinte(callbackId, erreurEmpreinte("sans_session",
+                                    "Aucun jeton chiffré gardé"));
+                            return;
+                        }
+                        byte[] iv = Base64.decode(blob.split(":", 2)[0], Base64.NO_WRAP);
+                        chiffre = Cipher.getInstance("AES/GCM/NoPadding");
+                        chiffre.init(Cipher.DECRYPT_MODE, cleEmpreinte(false),
+                                new GCMParameterSpec(128, iv));
+                    }
+
+                    android.hardware.biometrics.BiometricPrompt.Builder constructeur =
+                            new android.hardware.biometrics.BiometricPrompt.Builder(activity);
+                    constructeur.setTitle(titre).setSubtitle(sousTitre);
+                    constructeur.setNegativeButton("Utiliser le mot de passe", pool,
+                            new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    retourEmpreinte(callbackId,
+                                            erreurEmpreinte("repli", "Repli demandé : mot de passe"));
+                                }
+                            });
+                    android.hardware.biometrics.BiometricPrompt prompt = constructeur.build();
+
+                    prompt.authenticate(
+                            new android.hardware.biometrics.BiometricPrompt.CryptoObject(chiffre),
+                            new android.os.CancellationSignal(), pool,
+                            new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                                @Override
+                                public void onAuthenticationSucceeded(
+                                        android.hardware.biometrics.BiometricPrompt.AuthenticationResult resultat) {
+                                    try {
+                                        if (sessionJson != null) {
+                                            byte[] chiffree = chiffre.doFinal(
+                                                    sessionJson.getBytes(StandardCharsets.UTF_8));
+                                            String blob = Base64.encodeToString(chiffre.getIV(), Base64.NO_WRAP)
+                                                    + ":" + Base64.encodeToString(chiffree, Base64.NO_WRAP);
+                                            prefsEmpreinte().edit().putString(CLE_SESSION_CHIFFREE, blob).apply();
+                                            retourEmpreinte(callbackId, "{\"ok\":true}");
+                                        } else {
+                                            String blob = prefsEmpreinte().getString(CLE_SESSION_CHIFFREE, "");
+                                            byte[] clair = chiffre.doFinal(
+                                                    Base64.decode(blob.split(":", 2)[1], Base64.NO_WRAP));
+                                            JSONObject res = new JSONObject();
+                                            res.put("ok", true);
+                                            res.put("session", new JSONObject(
+                                                    new String(clair, StandardCharsets.UTF_8)));
+                                            retourEmpreinte(callbackId, res.toString());
+                                        }
+                                    } catch (Exception e) {
+                                        Log.w(TAG, "Jetons illisibles après biométrie : " + e.getMessage());
+                                        retourEmpreinte(callbackId,
+                                                erreurEmpreinte("echec", "Jetons illisibles"));
+                                    }
+                                }
+
+                                @Override
+                                public void onAuthenticationError(int code, CharSequence message) {
+                                    boolean annulation =
+                                            code == android.hardware.biometrics.BiometricPrompt.ERROR_USER_CANCELED
+                                            || code == android.hardware.biometrics.BiometricPrompt.ERROR_CANCELED;
+                                    retourEmpreinte(callbackId, erreurEmpreinte(
+                                            annulation ? "annule" : "echec", String.valueOf(message)));
+                                }
+
+                                // onAuthenticationFailed : doigt inconnu — le prompt reste
+                                // ouvert, on ne rend rien, l'utilisateur peut réessayer.
+                            });
+                } catch (Exception e) {
+                    Log.w(TAG, "Demande biométrique impossible : " + e.getMessage());
+                    retourEmpreinte(callbackId,
+                            erreurEmpreinte("echec", String.valueOf(e.getMessage())));
+                }
+            }
+        });
+    }
+
+    private static String erreurEmpreinte(String code, String message) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", false);
+            o.put("code", code);
+            o.put("message", message);
+            return o.toString();
+        } catch (Exception e) {
+            return "{\"ok\":false,\"code\":\"echec\"}";
+        }
+    }
+
+    private void retourEmpreinte(String callbackId, String json) {
+        if (js != null) {
+            js.eval("PF.biometrie._fin('" + callbackId + "', " + json + ")");
         }
     }
 

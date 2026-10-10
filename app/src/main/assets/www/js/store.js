@@ -56,7 +56,13 @@
 
         // Ergonomie
         periodeDefaut: 'Depuis le début',
-        onboardingFait: false
+        onboardingFait: false,
+
+        // Connexion par empreinte digitale (2.1.1) : quand elle est active,
+        // les jetons de session reposent chiffrés (Keystore Android) et la
+        // session se rouvre par la biométrie — jamais par un mot de passe
+        // stocké. Désactivée par défaut : c'est le porteur qui l'arme.
+        empreinteActivee: false
     };
 
     var memoire = null;

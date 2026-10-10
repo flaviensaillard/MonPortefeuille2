@@ -76,8 +76,14 @@ verifier('openExternal n’ouvre que des liens https',
 
 console.log('Surface exposée à JavaScript');
 const exposees = [...pont.matchAll(/@JavascriptInterface\s+public\s+\S+\s+(\w+)\s*\(/g)].map(m => m[1]);
+// 2.1.1 — six méthodes d'empreinte passées en revue : elles ne manipulent
+// que les jetons de session chiffrés (Keystore) et un retour de biométrie ;
+// elles ne reçoivent jamais de mot de passe (verrouillé par
+// tests/test_empreinte_cableage.py).
 const ADMISES = ['http', 'httpAsync', 'telechargerInflationInsee', 'isOnline',
-    'haptic', 'toast', 'openExternal', 'share', 'versionCode', 'versionName'];
+    'haptic', 'toast', 'openExternal', 'share', 'versionCode', 'versionName',
+    'empreinteEtat', 'empreinteSessionGardee', 'empreinteMajSession',
+    'empreinteActiver', 'empreinteOuvrir', 'empreinteEffacer'];
 verifier('méthodes exposées = liste revue (' + exposees.length + ')',
     exposees.length === ADMISES.length && exposees.every(m => ADMISES.includes(m)),
     'attendu : ' + ADMISES.join(', ') + ' — trouvé : ' + exposees.join(', '));

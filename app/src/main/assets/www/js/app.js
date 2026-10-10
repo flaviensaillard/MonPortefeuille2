@@ -70,6 +70,12 @@
         // 2.1.0 (revue S-01) : la clé publique ne suffit plus, chaque appareil
         // s'authentifie avec un compte Supabase. Sans session, l'écran de
         // connexion est proposé avant tout chargement.
+        // 2.1.1 — connexion par empreinte : quand elle est activée, la session
+        // en clair est d'abord scellée (jetons chiffrés Keystore) puis retirée ;
+        // elle se rouvre par la biométrie, avec repli sur l'écran de connexion
+        // email/mot de passe si l'empreinte échoue ou n'est pas configurée.
+        PF.biometrie.verrouillerAuDemarrage();
+        if (PF.biometrie.choixDemarrage() === 'empreinte') { feuilleDeverrouiller(); return; }
         if (!PF.net.auth.aUneSession()) { feuilleConnexionCompte(true); return; }
         rafraichir(false);
     }
@@ -131,6 +137,54 @@
                 UI.toast('Réinitialisez depuis Supabase : Authentication > Users > Reset password.');
             });
         }
+    }
+
+    /* Écran de déverrouillage (2.1.1) : la session est fermée au lancement
+       quand l'empreinte est activée. La biométrie rouvre les jetons chiffrés ;
+       en cas d'échec, d'annulation ou d'empreinte non configurée, le repli est
+       l'écran de connexion email/mot de passe. Le mot de passe n'est jamais
+       stocké : il ne sert qu'à ouvrir une session, qui est ensuite scellée. */
+    function feuilleDeverrouiller() {
+        var f = UI.feuille({
+            titre: 'Porte-feuille verrouillé',
+            aide: 'La connexion par empreinte est activée : confirmez votre '
+                + 'identité pour rouvrir votre session, ou utilisez votre mot de passe.',
+            corps: '<button class="btn" id="bioOuvrir" style="margin-bottom:8px">🔓 Déverrouiller avec l’empreinte</button>'
+                + '<div style="font-size:11.5px;color:var(--txt-3);line-height:1.5">'
+                + 'Vos jetons de session sont chiffrés par le Keystore de l’appareil. '
+                + 'Le mot de passe n’est jamais stocké.</div>',
+            boutons: [
+                { texte: 'Utiliser mon mot de passe', sorte: 'sec', action: function () {
+                    setTimeout(function () { feuilleConnexionCompte(false); }, 220);
+                    return true;
+                } }
+            ]
+        });
+        var c = f.corps;
+        function tenter() {
+            var bt = c && c.querySelector('#bioOuvrir');
+            if (bt) { bt.textContent = 'Vérification…'; bt.disabled = true; }
+            PF.biometrie.ouvrir().then(function (res) {
+                if (res && res.ok) {
+                    var voile = document.querySelector('#voile');
+                    if (voile) voile.click();
+                    UI.toast('Session rouverte');
+                    rafraichir(true);
+                    return;
+                }
+                if (bt) { bt.textContent = '🔓 Déverrouiller avec l’empreinte'; bt.disabled = false; }
+                UI.toast(res && res.code === 'annule'
+                    ? 'Empreinte annulée — le mot de passe reste disponible.'
+                    : 'Empreinte refusée — utilisez votre mot de passe.');
+            });
+        }
+        if (c) {
+            var bt = c.querySelector('#bioOuvrir');
+            if (bt) bt.addEventListener('click', tenter);
+        }
+        // La demande biométrique s'ouvre dès l'écran : un appui de plus n'est
+        // nécessaire qu'après un échec ou une annulation.
+        setTimeout(tenter, 260);
     }
 
     /* Une tuile qui affiche un pourcentage montre, sur un simple appui, le
@@ -1974,6 +2028,66 @@
         });
     }
 
+    function libelleEmpreinte() {
+        var e = PF.biometrie.etat();
+        if (!e.disponible) return 'indisponible sur cet appareil';
+        return e.activee ? 'activée' : 'désactivée';
+    }
+
+    /* Écran de réglage (2.1.1) : activer ou désactiver la connexion par
+       empreinte. Activation : après une connexion email/mot de passe, les
+       jetons de session sont scellés par le Keystore de l'appareil — jamais le
+       mot de passe — et la biométrie rouvre la session au lancement suivant.
+       Désactivation : la copie chiffrée des jetons est effacée. */
+    function feuilleEmpreinte() {
+        var e = PF.biometrie.etat();
+        var session = PF.net.auth.aUneSession();
+        var corps = ''
+            + '<div style="font-size:12px;color:var(--txt-2);margin-bottom:9px;line-height:1.6">'
+            + 'État : <b>' + UI.h(e.activee ? 'activée' : 'désactivée') + '</b>'
+            + (e.disponible ? '' : ' — l’empreinte est indisponible sur cet appareil '
+                + '(capteur absent, non configurée, ou Android trop ancien).')
+            + '</div>'
+            + '<div style="font-size:11.5px;color:var(--txt-3);margin-bottom:12px;line-height:1.6">'
+            + 'Après une première connexion email/mot de passe, l’appareil peut rouvrir la '
+            + 'session par empreinte. <b>Le mot de passe n’est jamais stocké</b> : seuls les '
+            + 'jetons de session sont conservés, chiffrés par le Keystore Android. Si '
+            + 'l’empreinte échoue ou n’est pas configurée, le repli est toujours la connexion '
+            + 'email/mot de passe.</div>'
+            + (e.activee
+                ? '<button class="btn sec" id="bioDesactiver">Désactiver la connexion par empreinte</button>'
+                : '<button class="btn" id="bioActiver">Activer la connexion par empreinte</button>');
+
+        var f = UI.feuille({ titre: 'Connexion par empreinte', corps: corps, boutons: [{ texte: 'Fermer', sorte: 'ghost' }] });
+        var c = f.corps;
+        if (!c) return;
+        var ba = c.querySelector('#bioActiver');
+        if (ba) ba.addEventListener('click', function () {
+            if (!session) {
+                UI.toast('Connectez-vous d’abord avec votre e-mail et votre mot de passe');
+                return;
+            }
+            ba.textContent = 'Confirmation sur le téléphone…';
+            PF.biometrie.activer().then(function (res) {
+                if (res && res.ok) {
+                    UI.toast('Connexion par empreinte activée');
+                    document.querySelector('#voile').click();
+                    return;
+                }
+                ba.textContent = 'Activer la connexion par empreinte';
+                UI.toast(res && res.code === 'sans_session'
+                    ? 'Connectez-vous d’abord avec votre e-mail et votre mot de passe'
+                    : 'Activation annulée : l’empreinte n’a pas confirmé votre identité');
+            });
+        });
+        var bd = c.querySelector('#bioDesactiver');
+        if (bd) bd.addEventListener('click', function () {
+            PF.biometrie.desactiver();
+            UI.toast('Connexion par empreinte désactivée — jetons chiffrés effacés');
+            document.querySelector('#voile').click();
+        });
+    }
+
     function feuilleReglages() {
         var r = PF.store.reglages();
         var utilisateur = PF.net.auth.utilisateur();
@@ -1988,6 +2102,8 @@
             + '<button class="btn sec" id="rgConnexion" style="margin-bottom:9px">🔑 Connexion Supabase (URL et clé)</button>'
             + '<button class="btn sec" id="rgCompte" style="margin-bottom:9px">👤 Compte : '
                 + (session ? 'changer ou fermer la session' : 'se connecter / créer') + '</button>'
+            + '<button class="btn sec" id="rgEmpreinte" style="margin-bottom:9px">🔐 Connexion par empreinte : '
+                + libelleEmpreinte() + '</button>'
             + '<button class="btn ghost" id="rgDiag" style="margin-bottom:9px">🩺 Diagnostiquer la connexion</button>'
             + '<button class="btn sec" id="rgInflation" style="margin-bottom:9px">📈 Inflation annuelle</button>'
             + '<button class="btn sec" id="rgFiscal" style="margin-bottom:9px">§ Situation fiscale</button>'
@@ -2013,6 +2129,10 @@
             c.querySelector('#rgCompte').addEventListener('click', function () {
                 document.querySelector('#voile').click();
                 setTimeout(function () { feuilleConnexionCompte(false); }, 220);
+            });
+            c.querySelector('#rgEmpreinte').addEventListener('click', function () {
+                document.querySelector('#voile').click();
+                setTimeout(feuilleEmpreinte, 220);
             });
             c.querySelector('#rgDiag').addEventListener('click', function () {
                 document.querySelector('#voile').click();

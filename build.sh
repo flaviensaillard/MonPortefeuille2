@@ -22,7 +22,7 @@ ANDROID_JAR="$PLAT/android.jar"
 # dans index.html manque sur le disque, la construction s'arrete : une APK qui
 # perd un onglet sans rien dire est pire qu'une APK qui ne se construit pas.
 WWW="$ROOT/app/src/main/assets/www"
-for f in js/util.js js/models.js js/net.js js/store.js js/metrics.js js/comptes.js js/portfolio.js js/rebalance.js js/ui.js js/fiscal.js js/views.js js/ia.js js/app.js; do
+for f in js/util.js js/models.js js/net.js js/store.js js/biometrie.js js/metrics.js js/comptes.js js/portfolio.js js/rebalance.js js/ui.js js/fiscal.js js/views.js js/ia.js js/app.js; do
     if [ ! -f "$WWW/$f" ]; then
         echo "Module manquant : $WWW/$f" >&2
         exit 1
