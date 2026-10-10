@@ -100,20 +100,9 @@ if non_calcules:
         "permet de la déterminer."
     )
 
-# 2.2.0 (constat A1) : une valorisation reconstruite (snapshot précédent) n'est
-# pas une mesure : elle est signalée avec ses dates.
-_reconstruits = sorted(
-    f for f, e in (snaps.attrs.get("valorisations_detail") or {}).items()
-    if e.get("origine") == "reconstruite"
-)
-if _reconstruits:
-    st.info(
-        f"{len(_reconstruits)} apport(s) valorisé(s) par le snapshot précédent "
-        "(valeur reconstruite, approximation : portefeuille supposé inchangé entre "
-        "ce snapshot et l'apport) : " + ", ".join(
-            f"{f:%d/%m/%Y}" for f in _reconstruits
-        ) + "."
-    )
+# 2.2.0 (constat A1) : la valorisation reconstruite (snapshot précédent) reste
+# une donnée de calcul — `valorisations_detail` la porte et le diagnostic la
+# détaille. Demande du 10/10/2026 : elle n'est plus affichée en liste ici.
 
 # ---------------------------------------------------------------------------
 # Le TWR n'est juste que si les flux sont enregistrés

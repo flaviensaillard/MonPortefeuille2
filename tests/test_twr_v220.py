@@ -3,8 +3,9 @@
 Constats couverts (revue 2.2.0, bug A du retour d'appareil) :
 
 - A1 : une valorisation absente est RECONSTRUITE depuis le snapshot le plus
-  proche STRICTEMENT antérieur au flux (date affichée, origine marquée). Une
-  valorisation mesurée (capturée au geste) reste prioritaire.
+  proche STRICTEMENT antérieur au flux (date et origine conservées dans la
+  donnée — plus affichées depuis la 2.2.1, voir TestListeDesReconstructionsRetiree).
+  Une valorisation mesurée (capturée au geste) reste prioritaire.
 - A2 : un intervalle non calculé rend le TWR global « non calculé » : jamais un
   chaînage partiel présenté comme un total.
 - A4 : golden test de la revue (100 €, apport de 100 € à mi-période, +10 %
@@ -20,6 +21,7 @@ déjà ce flux). Il ne rend donc pas le TWR non calculé ; il est listé comme
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -262,3 +264,29 @@ class TestBoutEnBout:
         ctx = CtxBidon(snaps, apports)
         assert S.twr_portefeuille(ctx) == pytest.approx(0.10)
         assert ctx.twr_non_calcules == []
+
+
+# ---------------------------------------------------------------------------
+# Affichage : la liste des valorisations reconstruites est retirée
+# ---------------------------------------------------------------------------
+
+
+class TestListeDesReconstructionsRetiree:
+    """Demande du 10/10/2026 : plus de bandeau « N apport(s) valorisé(s) par le
+    snapshot précédent », ni dans l'app, ni sur la page Performance.
+
+    La donnée, elle, ne bouge pas : `valorisations_detail` garde l'origine et la
+    date du snapshot retenu (TestReconstruction ci-dessus), et le diagnostic les
+    détaille flux par flux (jobs/diagnostic.py). Seul l'affichage disparaît.
+    """
+
+    RACINE = Path(__file__).resolve().parent.parent
+
+    def test_l_app_ne_l_affiche_plus(self):
+        source = (self.RACINE / "app/src/main/assets/www/js/views.js").read_text(encoding="utf-8")
+        assert "par le snapshot" not in source, "le bandeau est encore rendu par l'app"
+
+    def test_la_page_performance_ne_l_affiche_plus(self):
+        source = (self.RACINE / "pages/2_Performance.py").read_text(encoding="utf-8")
+        assert "apport(s) valorisé(s) par le snapshot précédent" not in source
+        assert "_reconstruits" not in source
