@@ -2,7 +2,7 @@
 
 **Statut : PROPOSITION, NON APPLIQUÉE.** Aucune écriture n'a été faite dans la base. Ce rapport et le CSV doivent être validés par écrit par le propriétaire avant toute exécution de `update_valeur_avant.sql`.
 
-Généré par le workflow « Reconstitution valeur_avant » (run 38080891220), en lecture seule.
+Généré par le workflow « Reconstitution valeur_avant » (run 38081021592), en lecture seule.
 
 ## 1. Données lues et constats
 
@@ -44,12 +44,14 @@ Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avan
 
 ### 5.1 Série demandée par la mission : patrimoine total
 
-| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |
-|---:|---:|---:|---:|---:|---|
-| 2023 | +3,26 % | +4,05 % | 1 | 0 / 0 | — |
-| 2024 | -6,09 % | -11,14 % | 18 | 0 / 0 | — |
-| 2025 | -1,48 % | +10,79 % | 10 | 0 / 0 | — |
-| 2026 (partielle, jusqu'au 2026-10-10) | +0,71 % | -3,89 % | 12 | 0 / 0 | — |
+Colonnes de contrôle : les apports nets de l'année (EUR) et la valeur de référence du premier au dernier snapshot complet de l'année. Si les apports dépassent la hausse de la valeur, le TWR peut être négatif même si la valeur progresse en absolu.
+
+| Année | TWR EUR | TWR USD | Apports nets EUR | Valeur réf. EUR (début → fin) | Nb apports | Approximés (EUR / USD) | Motif si non calculé |
+|---:|---:|---:|---:|---|---:|---:|---|
+| 2023 | +3,26 % | +4,05 % | 15 000,00 | 30 874,90 → 47 183,86 | 1 | 0 / 0 | — |
+| 2024 | -6,09 % | -11,14 % | 32 860,00 | 47 183,86 → 77 354,57 | 18 | 0 / 0 | — |
+| 2025 | -1,48 % | +10,79 % | 4 220,00 | 77 354,57 → 80 370,86 | 10 | 0 / 0 | — |
+| 2026 (partielle, jusqu'au 2026-10-10) | +0,71 % | -3,89 % | 4 513,11 | 80 370,86 → 85 451,82 | 12 | 0 / 0 | — |
 
 ### 5.2 Comparaison : patrimoine investi (série de l'application)
 
@@ -101,6 +103,7 @@ Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_i
 
 - **Dépôt public.** Les montants, dates et totaux de patrimoine de ces fichiers sont visibles de tout le monde, dans le dépôt, les journaux d'Actions et la PR. Le propriétaire a accepté cette publication. Un retrait ultérieur ne supprime pas l'historique git.
 - **Incohérence possible dans l'application (non modifiée).** Le TWR de l'application compare les valeurs « avant » au total `patrimoine_total_eur`, mais la série de performance utilise `patrimoine_investi_eur` (`core/session.py`, `serie_performance`). Quand il y a de la trésorerie, ces deux séries diffèrent. Ce rapport, lui, utilise le total des deux côtés.
+- **Comparaison avec les performances documentées dans le code** (`core/session.py`, commentaire de la revue 2.1.0) : 2023 : +9,33 % ; 2024 : +15,21 % ; 2025 : +13,92 % (convention dollars, performances Swissquote / v1 selon ce commentaire). La série investie reproduit 2023 (section 5.2). **2024 ne concorde pas** : la valeur de référence progresse moins que les apports versés. Causes possibles, NON TRANCHÉES : snapshots 2024 sous-évalués (liquidités absentes, cours manquants, reconstruction depuis les transactions), ou écart réel. Vérifier les snapshots de 2024 avant d'utiliser ce TWR.
 - Les valeurs reconstruites supposent un portefeuille inchangé entre le snapshot et l'apport (voir `core/metrics.py`, limite A6). Elles sont donc des approximations.
 
 ## 9. Application (à faire après validation écrite)
