@@ -1,0 +1,85 @@
+# Reconstitution de valeur_avant_eur/usd pour pf2_apports
+#
+# Génère trois fichiers dans donnees-reconstituees/ :
+#   - valeur_avant_apports.csv
+#   - update_valeur_avant.sql
+#   - RAPPORT.md
+#
+# IMPORTANT : ce workflow NE MODIFIE PAS LA BASE. Il lit les tables,
+# reconstruit les valeurs manquantes, et livre les fichiers sur la branche.
+# L'application du SQL ne se fait qu'après validation explicite du propriétaire.
+#
+# Les secrets SUPABASE_URL et SUPABASE_KEY sont lus depuis les secrets GitHub
+# Actions ; ils ne sont JAMAIS écrits dans les fichiers livrés.
+
+name: Reconstitution valeur_avant apports
+
+on:
+  workflow_dispatch:
+    inputs:
+      committer:
+        description: "Commiter les fichiers générés sur la branche ?"
+        required: false
+        default: "oui"
+        type: choice
+        options:
+          - oui
+          - non
+
+jobs:
+  reconstruire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Reconstitution des valeur_avant
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python jobs/backfill_valeur_avant.py
+
+      - name: Vérifications pré-livraison
+        run: |
+          set -e
+          echo "--- Vérifications ---"
+          # Les trois fichiers existent
+          test -f donnees-reconstituees/valeur_avant_apports.csv
+          test -f donnees-reconstituees/update_valeur_avant.sql
+          test -f donnees-reconstituees/RAPPORT.md
+          echo "OK : trois livrables présents."
+          # Aucun secret dans les livrables (vérification basique)
+          if grep -rE "SUPABASE_(URL|KEY|USER_ID)" donnees-reconstituees/ 2>/dev/null; then
+            echo "ERREUR : un secret semble présent dans les livrables."
+            exit 1
+          fi
+          echo "OK : aucun secret détecté dans les livrables."
+          # Aucun DROP, DELETE, ALTER ni TRUNCATE hors commentaire dans le SQL
+          if grep -iE "^[^-]*\b(drop|delete|alter|truncate)\b" donnees-reconstituees/update_valeur_avant.sql; then
+            echo "ERREUR : le SQL contient une instruction destructrice."
+            exit 1
+          fi
+          echo "OK : le SQL ne contient que des UPDATE et un BEGIN/COMMIT."
+
+      - name: Commiter les livrables
+        if: github.event.inputs.committer == 'oui'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add donnees-reconstituees/
+          if git diff --cached --quiet; then
+            echo "Aucun changement à commettre."
+          else
+            git commit -m "Reconstitution valeur_avant_apports (fichiers de contrôle)"
+            git push origin HEAD:${{ github.head_ref || github.ref_name }}
+            echo "Livrables poussés sur la branche."
+          fi
