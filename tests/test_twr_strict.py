@@ -56,8 +56,11 @@ class TestTWRStrict:
         assert non_calcules[0]["a"] == dt.date(2026, 1, 31)
         assert non_calcules[0]["flux"] == pytest.approx(100.0)
         twr, nc = metrics.twr_strict(dates, valeurs, flux_jour)
-        assert twr == 0.0          # rien de calculé → rien de chaîné
+        # 2.2.0 (constat A2) : un intervalle non calculé rend le TWR GLOBAL
+        # non calculé. Avant : 0.0, présenté comme un total.
+        assert twr is None
         assert len(nc) == 1
+        assert nc[0]["raison"]     # la raison est toujours fournie
 
     def test_un_intervalle_sans_flux_est_exact_quelle_que_soit_sa_longueur(self):
         dates = [dt.date(2026, 1, 31), dt.date(2026, 3, 31)]
@@ -96,8 +99,10 @@ class TestTWRStrict:
         assert rendements[0] is None                  # intervalle du flux : non calculé
         assert rendements[1] == pytest.approx(0.10)   # 260 → 286 sans flux : exact
         assert len(non_calcules) == 1
+        # 2.2.0 (constat A2) : le seul intervalle exact ne fait PAS un total.
+        # Avant : 0.10, chaînage partiel présenté comme le TWR.
         twr, nc = metrics.twr_strict(dates, valeurs, flux_jour, avant)
-        assert twr == pytest.approx(0.10)             # seul l'intervalle exact est chaîné
+        assert twr is None
         assert len(nc) == 1
 
     def test_flux_du_premier_jour_n_appartient_a_aucun_intervalle(self):

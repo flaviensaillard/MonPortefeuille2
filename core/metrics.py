@@ -240,9 +240,111 @@ def rendements_stricts(
             rendements.append(prod - 1.0)
         else:
             rendements.append(None)
-            non_calcules.append({"de": deb, "a": fin, "flux": total_flux})
+            non_calcules.append({
+                "de": deb, "a": fin, "flux": total_flux,
+                "raison": RAISON_FLUX_NON_VALORISE,
+            })
 
     return rendements, non_calcules
+
+
+RAISON_FLUX_NON_VALORISE = (
+    "flux sans valorisation du portefeuille juste avant lui, et aucun "
+    "snapshot antérieur valorisé pour l'estimer"
+)
+
+MESUREE = "mesurée"
+RECONSTRUITE = "reconstruite"
+MANQUANTE = "manquante"
+
+
+def valorisations_avant_flux(
+    dates: list,
+    valeurs: list[float],
+    dates_flux,
+    mesurees: dict | None = None,
+) -> dict:
+    """Valorisation du portefeuille JUSTE AVANT chaque flux, avec son origine.
+
+    Règle (2.2.0, constat A1) :
+    - si elle a été capturée au moment du geste (`mesurees`), elle est
+      retenue : origine « mesurée » ;
+    - sinon elle est RECONSTRUITE depuis le snapshot le plus proche
+      STRICTEMENT ANTÉRIEUR au flux (même jour exclu) : sa valeur, sa date ;
+    - sans snapshot antérieur valorisé, elle est MANQUANTE, avec la raison.
+
+    Retourne `{date du flux: {"valeur", "origine", "snapshot", "raison"}}`.
+    `valeur` vaut None quand l'origine est « manquante ». Une valorisation
+    reconstruite est une APPROXIMATION : elle suppose le portefeuille inchangé
+    entre le snapshot et le flux. Elle doit être présentée comme telle.
+    """
+    import bisect
+
+    if len(dates) != len(valeurs):
+        raise ValueError("dates et valeurs doivent avoir la même longueur")
+    paires = sorted(
+        (d, float(v)) for d, v in zip(dates, valeurs)
+        if v is not None and not (isinstance(v, float) and v != v)
+    )
+    cles = [d for d, _ in paires]
+    mesurees = mesurees or {}
+
+    sortie: dict = {}
+    for f in sorted(dates_flux):
+        m = mesurees.get(f)
+        if m is not None and m > 0:
+            sortie[f] = {"valeur": float(m), "origine": MESUREE, "snapshot": None, "raison": ""}
+            continue
+        k = bisect.bisect_left(cles, f)          # snapshots strictement avant f
+        if k == 0:
+            sortie[f] = {
+                "valeur": None, "origine": MANQUANTE, "snapshot": None,
+                "raison": "aucun snapshot antérieur au flux",
+            }
+            continue
+        d_s, v_s = paires[k - 1]
+        if v_s > 0:
+            sortie[f] = {"valeur": v_s, "origine": RECONSTRUITE, "snapshot": d_s, "raison": ""}
+        else:
+            sortie[f] = {
+                "valeur": None, "origine": MANQUANTE, "snapshot": d_s,
+                "raison": "snapshot antérieur à valeur nulle",
+            }
+    return sortie
+
+
+def valorisations_completees(
+    dates: list,
+    valeurs: list[float],
+    dates_flux,
+    mesurees: dict | None = None,
+) -> dict:
+    """`{date du flux: valeur}` pour toutes les valorisations connues (mesurées
+    ou reconstruites). Les valorisations manquantes sont absentes : le moteur
+    strict déclare alors l'intervalle non calculé."""
+    detail = valorisations_avant_flux(dates, valeurs, dates_flux, mesurees)
+    return {f: e["valeur"] for f, e in detail.items() if e["valeur"] is not None}
+
+
+def twr_exact(
+    dates: list,
+    valeurs: list[float],
+    flux_jour: dict,
+    valorisations_avant: dict | None = None,
+) -> tuple[float | None, list[dict]]:
+    """TWR GLOBAL : `None` dès qu'un intervalle n'est pas calculé (2.2.0, A2).
+
+    Un chaînage partiel n'est jamais présenté comme un total : si un seul
+    intervalle manque, le total est « non calculé » et les intervalles
+    manquants sont retournés avec leur raison.
+    """
+    rendements, non_calcules = rendements_stricts(dates, valeurs, flux_jour, valorisations_avant)
+    if non_calcules or all(r is None for r in rendements):
+        return None, non_calcules
+    prod = 1.0
+    for r in rendements:
+        prod *= 1.0 + r
+    return prod - 1.0, non_calcules
 
 
 def twr_strict(
@@ -250,19 +352,13 @@ def twr_strict(
     valeurs: list[float],
     flux_jour: dict,
     valorisations_avant: dict | None = None,
-) -> tuple[float, list[dict]]:
-    """TWR chaîné sur les seuls intervalles calculables.
+) -> tuple[float | None, list[dict]]:
+    """Alias de `twr_exact` : `None` dès qu'un intervalle n'est pas calculé.
 
-    Retourne `(twr, non_calcules)`. Les intervalles dont un flux n'est pas
-    valorisé ne contribuent pas au chaînage : ils sont listés pour être
-    annoncés — un TWR juste ne s'invente pas.
+    Avant la 2.2.0, cette fonction chaînait les seuls intervalles calculables
+    et renvoyait ce chaînage partiel comme un total (constat A2).
     """
-    rendements, non_calcules = rendements_stricts(dates, valeurs, flux_jour, valorisations_avant)
-    prod = 1.0
-    for r in rendements:
-        if r is not None:
-            prod *= 1.0 + r
-    return prod - 1.0, non_calcules
+    return twr_exact(dates, valeurs, flux_jour, valorisations_avant)
 
 
 def annualiser(twr_total: float, jours: int) -> float:

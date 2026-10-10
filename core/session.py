@@ -356,9 +356,18 @@ def serie_performance(
     col_ap = "montant_usd" if (use_usd and ctx.apports is not None and "montant_usd" in getattr(ctx.apports, "columns", [])) else "montant_eur"
     df.attrs["col_ap"] = col_ap
     flux_ap = metrics.flux_par_periode(dates_l, flux_par_date(ctx.apports, col_ap))
-    valorisations = _valorisations_avant_apports(
+    valorisations_mesurees = _valorisations_avant_apports(
         ctx, "valeur_avant_usd" if col_ap == "montant_usd" else "valeur_avant_eur"
     )
+    # 2.2.0 (constat A1) : une valorisation absente est RECONSTRUITE depuis le
+    # snapshot le plus proche STRICTEMENT antérieur au flux. Le détail (origine,
+    # snapshot retenu) est conservé pour le diagnostic et l'affichage.
+    detail = metrics.valorisations_avant_flux(
+        dates_l, valeurs, list(flux_par_date(ctx.apports, col_ap).keys()),
+        valorisations_mesurees,
+    )
+    df.attrs["valorisations_detail"] = detail
+    valorisations = {f: e["valeur"] for f, e in detail.items() if e["valeur"] is not None}
 
     if use_usd and "capital_investi_usd" in df.columns:
         # `take_snapshot.py` (v1) écrit parfois `Capital investi = 0` lorsque la
@@ -423,13 +432,10 @@ def twr_portefeuille(ctx: "Contexte") -> float | None:
         dates, valeurs, flux_par_date(ctx.apports, col_ap), valorisations
     )
     ctx.twr_non_calcules = non_calcules
-    if all(r is None for r in rendements):
-        return None
-    prod = 1.0
-    for r in rendements:
-        if r is not None:
-            prod *= 1.0 + r
-    return prod - 1.0
+    # 2.2.0 (constat A2) : un intervalle non calculé rend le TWR global non
+    # calculé. Jamais un chaînage partiel présenté comme un total.
+    total, _ = metrics.twr_exact(dates, valeurs, flux_par_date(ctx.apports, col_ap), valorisations)
+    return total
 
 
 def _jours_calcules(ctx: "Contexte") -> int:
@@ -444,9 +450,12 @@ def _jours_calcules(ctx: "Contexte") -> int:
         return 0
     dates = [d.date() for d in pd.to_datetime(df["Date"])]
     col_ap = df.attrs.get("col_ap", "montant_eur")
-    rendements, _ = metrics.rendements_stricts(
+    rendements, non_calcules = metrics.rendements_stricts(
         dates, valeurs, flux_par_date(ctx.apports, col_ap), valorisations
     )
+    if non_calcules:
+        # Annualiser un chaînage partiel donnerait un chiffre faux (A2).
+        return 0
     jours = 0
     for i, r in enumerate(rendements):
         if r is not None:
@@ -500,6 +509,10 @@ def twr_en_or_portefeuille(ctx: "Contexte") -> float | None:
         prod *= (valeurs[i + 1] / oz[i + 1]) / (valeurs[i] / oz[i])
         aucun = False
     ctx.twr_non_calcules_or = non_calcules
+    # 2.2.0 (A2) : tout intervalle avec flux manque (cours de l'or inconnu au
+    # moment du flux) → le TWR en or est non calculé, pas partiel.
+    if any(flux_jour_has(dates, flux_jour, i) for i in range(len(dates) - 1)):
+        return None
     return None if aucun else prod - 1.0
 
 

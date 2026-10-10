@@ -66,23 +66,53 @@ flux_jour = S.flux_par_date(ctx.apports, snaps.attrs.get("col_ap", "montant_eur"
 rendements_stricts, non_calcules = metrics.rendements_stricts(
     dates_serie, valeurs, flux_jour, valorisations
 )
+# 2.2.0 (constat A2) : le TWR GLOBAL n'est affiché que si TOUS les intervalles
+# sont calculés. Un chaînage partiel n'est jamais présenté comme un total.
+twr_total, _ = metrics.twr_exact(dates_serie, valeurs, flux_jour, valorisations)
+# Rendements de sous-période calculés : servent à la VOLATILITÉ (statistique sur
+# les intervalles mesurés), jamais à un total.
 rendements = [r for r in rendements_stricts if r is not None]
-twr_total = metrics.twr(rendements) if rendements else None
 
 jours = (snaps["Date"].iloc[-1] - snaps["Date"].iloc[0]).days
 jours_calcules = sum(
     (dates_serie[i + 1] - dates_serie[i]).days
     for i, r in enumerate(rendements_stricts) if r is not None
 )
-twr_ann = metrics.annualiser(twr_total, jours_calcules) if (twr_total is not None and jours_calcules > 0) else None
+twr_ann = (
+    metrics.annualiser(twr_total, (dates_serie[-1] - dates_serie[0]).days)
+    if (twr_total is not None and (dates_serie[-1] - dates_serie[0]).days > 0)
+    else None
+)
 
 if non_calcules:
-    st.warning(
-        f"**TWR exact — {len(non_calcules)} intervalle(s) non calculé(s)** : "
-        "un apport ou un retrait y est survenu sans valorisation du portefeuille "
-        "à ce moment-là (apports antérieurs à la 2.1.0). Ces intervalles ne sont "
-        "pas chaînés : aucun chiffre n'est inventé à leur place. Depuis la 2.1.0, "
-        "chaque apport enregistre la valeur du portefeuille au moment du geste."
+    st.error(
+        f"**TWR global non calculé** : {len(non_calcules)} intervalle(s) ne sont "
+        "pas calculables, et un total partiel ne serait pas un total."
+    )
+    for nc in non_calcules:
+        st.warning(
+            f"Intervalle du {nc['de']:%d/%m/%Y} au {nc['a']:%d/%m/%Y} "
+            f"(flux {nc['flux']:+,.2f}) : {nc.get('raison', '')}."
+        )
+    st.caption(
+        "Depuis la 2.2.0, la valorisation manquante est reconstruite depuis le "
+        "snapshot précédent lorsqu'il existe. Ici, aucun snapshot antérieur ne "
+        "permet de la déterminer."
+    )
+
+# 2.2.0 (constat A1) : une valorisation reconstruite (snapshot précédent) n'est
+# pas une mesure : elle est signalée avec ses dates.
+_reconstruits = sorted(
+    f for f, e in (snaps.attrs.get("valorisations_detail") or {}).items()
+    if e.get("origine") == "reconstruite"
+)
+if _reconstruits:
+    st.info(
+        f"{len(_reconstruits)} apport(s) valorisé(s) par le snapshot précédent "
+        "(valeur reconstruite, approximation : portefeuille supposé inchangé entre "
+        "ce snapshot et l'apport) : " + ", ".join(
+            f"{f:%d/%m/%Y}" for f in _reconstruits
+        ) + "."
     )
 
 # ---------------------------------------------------------------------------

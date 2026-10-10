@@ -62,6 +62,60 @@
 
     function twrDepuis(valeurs, flux) { return twr(rendementsPeriode(valeurs, flux)); }
 
+    /* 2.2.0 (constat A1) : valorisation du portefeuille JUSTE AVANT chaque flux,
+       avec son origine. Miroir de core/metrics.py:valorisations_avant_flux.
+       - mesurée : capturée au moment du geste (valeur_avant_*), prioritaire ;
+       - reconstruite : valeur du snapshot le plus proche STRICTEMENT antérieur
+         au flux (le snapshot du jour est exclu) ; date du snapshot conservée ;
+       - manquante : aucun snapshot antérieur valorisé, avec la raison.
+       Une valorisation reconstruite est une approximation : le portefeuille est
+       supposé inchangé entre le snapshot et le flux. Elle doit être affichée
+       comme telle. */
+    function valorisationsAvantFlux(dates, valeurs, dateFlux, mesurees) {
+        var paires = [];
+        for (var i = 0; i < (dates || []).length; i++) {
+            var v = U.num(valeurs[i], null);
+            if (v !== null && isFinite(v)) paires.push([dates[i], v]);
+        }
+        paires.sort(function (a, b) { return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0); });
+        mesurees = mesurees || {};
+        var fluxTries = (dateFlux || []).slice().sort();
+        var sortie = {};
+        fluxTries.forEach(function (f) {
+            var m = U.num(mesurees[f], null);
+            if (m !== null && m > 0) {
+                sortie[f] = { valeur: m, origine: 'mesurée', snapshot: null, raison: '' };
+                return;
+            }
+            var k = -1;
+            for (var j = 0; j < paires.length; j++) {
+                if (paires[j][0] < f) k = j; else break;
+            }
+            if (k < 0) {
+                sortie[f] = { valeur: null, origine: 'manquante', snapshot: null,
+                    raison: 'aucun snapshot antérieur au flux' };
+                return;
+            }
+            var dSnap = paires[k][0], vSnap = paires[k][1];
+            if (vSnap > 0) {
+                sortie[f] = { valeur: vSnap, origine: 'reconstruite', snapshot: dSnap, raison: '' };
+            } else {
+                sortie[f] = { valeur: null, origine: 'manquante', snapshot: dSnap,
+                    raison: 'snapshot antérieur à valeur nulle' };
+            }
+        });
+        return sortie;
+    }
+
+    /* `{date du flux: valeur}` pour toutes les valorisations connues. */
+    function valorisationsCompletees(detail) {
+        var out = {};
+        for (var f in (detail || {})) {
+            if (detail.hasOwnProperty(f) && detail[f].valeur !== null) out[f] = detail[f].valeur;
+        }
+        return out;
+    }
+
     /* TWR EXACT (2.1.0, revue F-07) : chaque flux est encadré par une
        valorisation juste AVANT lui (enregistrée avec l'apport depuis la 2.1.0).
 
@@ -124,7 +178,9 @@
                 rendements.push(prod - 1);
             } else {
                 rendements.push(null);
-                nonCalcules.push({ de: deb, a: fin, flux: totalFlux });
+                nonCalcules.push({ de: deb, a: fin, flux: totalFlux,
+                    raison: 'flux sans valorisation du portefeuille juste avant lui, '
+                        + 'et aucun snapshot antérieur valorisé pour l’estimer' });
             }
         }
         return { rendements: rendements, nonCalcules: nonCalcules };
@@ -134,10 +190,13 @@
        `{ twr, nonCalcules }`. Miroir de core/metrics.py:twr_strict. */
     function twrStricts(dates, valeurs, fluxJour, valorisationsAvant) {
         var r = rendementsStricts(dates, valeurs, fluxJour, valorisationsAvant);
-        var p = 1;
-        for (var i = 0; i < r.rendements.length; i++) {
-            if (r.rendements[i] !== null) p *= (1 + r.rendements[i]);
+        // 2.2.0 (constat A2) : un intervalle non calculé rend le TWR non calculé.
+        // Avant : le chaînage partiel était renvoyé comme un total.
+        if (r.nonCalcules.length || !r.rendements.length) {
+            return { twr: null, nonCalcules: r.nonCalcules };
         }
+        var p = 1;
+        for (var i = 0; i < r.rendements.length; i++) p *= (1 + r.rendements[i]);
         return { twr: p - 1, nonCalcules: r.nonCalcules };
     }
 
@@ -346,6 +405,10 @@
         for (var dj in compteJour) {
             if (compteJour.hasOwnProperty(dj) && compteJour[dj] > 1) delete valorisations[dj];
         }
+        // 2.2.0 (constat A1) : valorisation absente → reconstruite depuis le
+        // snapshot strictement antérieur. Le détail reste accessible.
+        var detailVal = valorisationsAvantFlux(dates, valeurs, Object.keys(fluxJour), valorisations);
+        valorisations = valorisationsCompletees(detailVal);
 
         var flux;
         if (useUsd && lignes[0].ligne.capital_investi_usd !== undefined) {
@@ -373,6 +436,7 @@
         return {
             dates: dates, valeurs: valeurs, flux: flux,
             fluxJour: fluxJour, valorisations: valorisations,
+            valorisationsDetail: detailVal,
             fluxTitresFinal: U.num(fluxTitresFinal, 0),
             useUsd: useUsd, lignes: lignes, colVal: colVal
         };
@@ -552,6 +616,9 @@
         if (!serie || !serie.dates || serie.dates.length < 2) return null;
         var strict = rendementsStricts(serie.dates, serie.valeurs,
             serie.fluxJour || {}, serie.valorisations || {});
+        // 2.2.0 (constat A2) : un intervalle non calculé → pas de CAGR, jamais
+        // un CAGR calculé sur une partie seulement de l'historique.
+        if (strict.nonCalcules.length) return null;
         var p = 1, jours = 0, aucun = true;
         for (var i = 0; i < strict.rendements.length; i++) {
             var r = strict.rendements[i];
@@ -648,6 +715,8 @@
         rendementsPeriode: rendementsPeriode,
         rendementsStricts: rendementsStricts,
         twrStricts: twrStricts,
+        valorisationsAvantFlux: valorisationsAvantFlux,
+        valorisationsCompletees: valorisationsCompletees,
         fluxParPeriode: fluxParPeriode,
         fluxPerimetre: fluxPerimetre,
         sensFlux: sensFlux, montantSigne: montantSigne,

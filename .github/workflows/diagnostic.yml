@@ -8,6 +8,9 @@
 #   1. Depuis quand mon historique remonte-t-il, et pourquoi pas plus loin ?
 #   2. Mes apports sont-ils enregistrés avec leur vrai montant ?
 #   3. Que contient la table d'inflation ?
+#   4. (2.2.0) Pour chaque apport des 3 dernières années : quelle valorisation
+#      le TWR a-t-il utilisée (mesurée, reconstruite depuis le snapshot précédent,
+#      ou manquante), quel snapshot a été retenu, et le TWR global qui en découle.
 #
 # À la fin du journal, une section VERDICT dit quoi faire.
 
