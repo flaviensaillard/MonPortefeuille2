@@ -173,9 +173,10 @@
                     return;
                 }
                 if (bt) { bt.textContent = '🔓 Déverrouiller avec l’empreinte'; bt.disabled = false; }
-                UI.toast(res && res.code === 'annule'
+                UI.toast(PF.biometrie.annulationVolontaire(res)
                     ? 'Empreinte annulée — le mot de passe reste disponible.'
-                    : 'Empreinte refusée — utilisez votre mot de passe.');
+                    : 'Déverrouillage impossible : ' + PF.biometrie.libelle(res)
+                        + ' Utilisez votre mot de passe.');
             });
         }
         if (c) {
@@ -2045,8 +2046,8 @@
         var corps = ''
             + '<div style="font-size:12px;color:var(--txt-2);margin-bottom:9px;line-height:1.6">'
             + 'État : <b>' + UI.h(e.activee ? 'activée' : 'désactivée') + '</b>'
-            + (e.disponible ? '' : ' — l’empreinte est indisponible sur cet appareil '
-                + '(capteur absent, non configurée, ou Android trop ancien).')
+            + (e.disponible ? '' : ' — indisponible : '
+                + UI.h(PF.biometrie.libelle({ ok: false, code: e.raison })))
             + '</div>'
             + '<div style="font-size:11.5px;color:var(--txt-3);margin-bottom:12px;line-height:1.6">'
             + 'Après une première connexion email/mot de passe, l’appareil peut rouvrir la '
@@ -2075,9 +2076,7 @@
                     return;
                 }
                 ba.textContent = 'Activer la connexion par empreinte';
-                UI.toast(res && res.code === 'sans_session'
-                    ? 'Connectez-vous d’abord avec votre e-mail et votre mot de passe'
-                    : 'Activation annulée : l’empreinte n’a pas confirmé votre identité');
+                UI.toast('Activation impossible — ' + PF.biometrie.libelle(res));
             });
         });
         var bd = c.querySelector('#bioDesactiver');

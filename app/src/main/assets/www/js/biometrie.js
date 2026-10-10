@@ -23,6 +23,55 @@
     var compteurCb = 0;
     var attente = {};
 
+    /* 2.2.0 (constat B1) : chaque échec nomme sa cause. Plus aucun libellé
+       fourre-tout « activation annulée ». Les codes viennent de NativeBridge.java
+       (codeErreurBiometrie, codeCanAuthenticate, et les codes propres à l'app). */
+    var LIBELLES = {
+        ok: 'Empreinte disponible.',
+        sdk_trop_ancien: 'La connexion par empreinte exige Android 9 ou plus récent.',
+        permission_manquante: 'L’application n’a pas la permission biométrique. Installez la version 2.2.0 ou plus récente.',
+        materiel_absent: 'Aucun capteur d’empreinte n’est détecté sur cet appareil.',
+        materiel_indisponible: 'Le capteur d’empreinte est momentanément indisponible. Réessayez.',
+        aucune_empreinte_enrolee: 'Aucune empreinte n’est enregistrée. Ajoutez-en une dans les réglages du téléphone.',
+        maj_securite_requise: 'Une mise à jour de sécurité Android est requise pour utiliser l’empreinte.',
+        non_supporte: 'Le capteur n’est pas reconnu comme assez fort pour protéger la session. Le mot de passe reste disponible.',
+        diagnostic_impossible: 'Impossible de vérifier le capteur d’empreinte sur cet appareil.',
+        sans_session: 'Connectez-vous d’abord avec votre e-mail et votre mot de passe.',
+        cle_absente: 'La clé de chiffrement a disparu. Reconnectez-vous avec votre mot de passe.',
+        cle_invalidee: 'Une empreinte a été ajoutée ou retirée sur l’appareil : la connexion par empreinte doit être réactivée avec votre mot de passe.',
+        cle_indisponible: 'La clé de chiffrement du téléphone est inaccessible.',
+        jetons_illisibles: 'Les jetons gardés sont illisibles. Reconnectez-vous avec votre mot de passe.',
+        erreur_prompt: 'L’invite biométrique n’a pas pu s’ouvrir (erreur système).',
+        annule_utilisateur: 'Vérification annulée.',
+        annule_systeme: 'La vérification a été interrompue par le système.',
+        repli_mot_de_passe: 'Vous avez choisi le mot de passe.',
+        delai_depasse: 'Délai dépassé : réessayez.',
+        capteur_illisible: 'Le capteur n’a pas pu lire l’empreinte : nettoyez-le et réessayez.',
+        espace_insuffisant: 'Espace insuffisant pour enregistrer l’empreinte.',
+        verrouillage_temporaire: 'Trop de tentatives : le capteur est verrouillé quelques instants. Réessayez plus tard ou utilisez le mot de passe.',
+        verrouillage_permanent: 'Trop de tentatives : le capteur est verrouillé. Utilisez le code de l’écran ou le mot de passe.',
+        erreur_fabricant: 'Le capteur a signalé une erreur.',
+        pas_de_code_ecran: 'Aucun code d’écran n’est configuré sur le téléphone.',
+        erreur_inconnue: 'Erreur biométrique inconnue.',
+        indispo: 'Empreinte indisponible sur cet appareil.',
+        echec: 'La vérification a échoué.',
+        erreur: 'Erreur interne de l’empreinte.'
+    };
+
+    /* Texte à afficher pour un résultat `{ok:false, code}`. Un code inconnu
+       garde son code système : jamais un libellé générique qui masque la cause. */
+    function libelle(res) {
+        if (!res || res.ok) return '';
+        var texte = LIBELLES[res.code];
+        if (texte) return texte;
+        return 'Erreur biométrique (' + (res.code || 'inconnue') + (res.systeme !== undefined ? ', code système ' + res.systeme : '') + ').';
+    }
+
+    /* Vrai si l'échec est une annulation volontaire (pas une panne). */
+    function annulationVolontaire(res) {
+        return !!res && (res.code === 'annule_utilisateur' || res.code === 'repli_mot_de_passe');
+    }
+
     function natif() {
         return (typeof root.Native !== 'undefined' && root.Native && root.Native.empreinteEtat)
             ? root.Native : null;
@@ -33,7 +82,7 @@
     }
 
     function etat() {
-        var defaut = { activee: actif(), disponible: false, sessionGardee: false };
+        var defaut = { activee: actif(), disponible: false, sessionGardee: false, raison: 'diagnostic_impossible' };
         var n = natif();
         if (!n) return defaut;
         try {
@@ -42,7 +91,8 @@
             return {
                 activee: actif(),
                 disponible: !!(e && e.dispo),
-                sessionGardee: !!(e && e.sessionGardee)
+                sessionGardee: !!(e && e.sessionGardee),
+                raison: (e && e.raison) || 'diagnostic_impossible'
             };
         } catch (e) {
             return defaut;
@@ -92,7 +142,7 @@
                 invoquer(n, id);
             } catch (e) {
                 delete attente[id];
-                resoudre({ ok: false, code: 'erreur' });
+                resoudre({ ok: false, code: 'erreur', message: String(e && e.message || e) });
             }
         });
     }
@@ -147,6 +197,9 @@
     }
 
     PF.biometrie = {
+        libelle: libelle,
+        libelles: LIBELLES,
+        annulationVolontaire: annulationVolontaire,
         actif: actif,
         etat: etat,
         choixDemarrage: choixDemarrage,
