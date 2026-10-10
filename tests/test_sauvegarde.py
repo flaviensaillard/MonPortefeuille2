@@ -15,6 +15,7 @@ sauvegarde, donc ces tests échouent sur elle par construction.
 from __future__ import annotations
 
 import csv
+import re
 import datetime as dt
 import json
 import os
@@ -275,18 +276,17 @@ def test_cli_sauvegarde_sans_phrase_ne_produit_rien(tmp_path, monkeypatch):
 
 
 def test_workflow_chiffre_controle_puis_publie_et_ne_journalise_jamais_la_phrase():
-    import yaml
-    flux = yaml.safe_load((RACINE / ".github/workflows/sauvegarde.yml").read_text(encoding="utf-8"))
-    etapes = flux["jobs"]["sauvegarde"]["steps"]
+    # Analyse textuelle (pas de PyYAML : la CI n'installe que requirements.txt).
     texte = (RACINE / ".github/workflows/sauvegarde.yml").read_text(encoding="utf-8")
-    i_export = next(i for i, s in enumerate(etapes) if "jobs/sauvegarde.py" in str(s.get("run", "")))
-    i_controle = next(i for i, s in enumerate(etapes) if "jobs/restauration.py" in str(s.get("run", "")))
-    i_publi = next(i for i, s in enumerate(etapes) if "upload-artifact" in str(s.get("uses", "")))
+    i_export = texte.index("run: python jobs/sauvegarde.py")
+    # Ancre sur la commande réelle de l'étape (le commentaire d'en-tête la cite aussi).
+    i_controle = texte.index('python jobs/restauration.py "$fichier"')
+    i_publi = texte.index("uses: actions/upload-artifact")
     assert i_export < i_controle < i_publi, "export, puis restauration de contrôle, puis publication"
     assert "retention-days: 90" in texte
     # La phrase n'est jamais imprimée ni écrite dans un fichier de sortie.
-    for s in etapes:
-        run = str(s.get("run", ""))
-        assert not any(m in run for m in ("echo $SAUVEGARDE_CLE", 'echo "$SAUVEGARDE_CLE', "${SAUVEGARDE_CLE}")), run
-    assert "SAUVEGARDE_CLE" not in "".join(
-        str(s.get("with", "")) for s in etapes), "la phrase ne doit pas passer par une action tierce"
+    for interdit in ("echo $SAUVEGARDE_CLE", 'echo "$SAUVEGARDE_CLE', "${SAUVEGARDE_CLE}", "tee "):
+        assert interdit not in texte, interdit
+    # Ni passée à une action tierce, ni dans un `with:`.
+    blocs_with = re.findall(r"with:\n(?:\s{10}.*\n)+", texte)
+    assert not any("SAUVEGARDE_CLE" in b for b in blocs_with)
