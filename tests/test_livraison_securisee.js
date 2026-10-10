@@ -64,6 +64,11 @@ console.log('Manifeste Android');
 verifier('versionName 2.1.1', /android:versionName="2\.1\.1"/.test(manifeste));
 verifier('versionCode 29', /android:versionCode="29"/.test(manifeste));
 
+console.log('Version Python (core)');
+verifier('core/__init__.py annonce 2.1.1',
+    /__version__\s*=\s*"2\.1\.1"/.test(lire('core/__init__.py')),
+    'la version doit être cohérente partout : APK, workflow, build, core, notes');
+
 console.log('Documentation de rotation');
 verifier('docs/SECURITE-LIVRAISON.md existe',
     fs.existsSync(path.join(RACINE, 'docs', 'SECURITE-LIVRAISON.md')));
