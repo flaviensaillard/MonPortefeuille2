@@ -70,14 +70,14 @@
         // 2.1.0 (revue S-01) : la clé publique ne suffit plus, chaque appareil
         // s'authentifie avec un compte Supabase. Sans session, l'écran de
         // connexion est proposé avant tout chargement.
-        if (!PF.net.auth.aUneSession()) { feuilleCompte(true); return; }
+        if (!PF.net.auth.aUneSession()) { feuilleConnexionCompte(true); return; }
         rafraichir(false);
     }
 
     /* Écran de compte (2.1.0) : connexion ou création du compte Supabase qui
        possède les données. Les politiques RLS exigent cet utilisateur : sans
        lui, ni lecture ni écriture. */
-    function feuilleCompte(premiereFois) {
+    function feuilleConnexionCompte(premiereFois) {
         var corps = ''
             + UI.champ({ id: 'ctEmail', label: 'Adresse e-mail', valeur: '', placeholder: 'vous@exemple.fr' })
             + UI.champ({ id: 'ctMdp', label: 'Mot de passe', valeur: '', placeholder: '8 caractères minimum', type: 'password' })
@@ -516,7 +516,7 @@
             if (res.ok) ajouter('ok', 'Serveur du projet', 'Votre projet répond.');
             else if (res.status === 401 || res.status === 403) {
                 ajouter('err', 'Serveur du projet', 'Clé refusée (HTTP ' + res.status + ') : '
-                    + 'la clé a été révoquée ou régénérée — reprenez la clé affichée aujourd’hui dans le tableau de bord.');
+                    + 'vérifiez que l’URL et la clé appartiennent au même projet (tableau de bord Supabase, Settings > API) ; une clé révoquée ou régénérée donne le même message.');
             } else if (res.status === -1) {
                 ajouter('err', 'Serveur du projet', 'Injoignable. Vérifiez votre connexion, l’orthographe de l’URL, '
                     + 'et que le projet n’est pas en veille : Supabase met les projets gratuits en pause '
@@ -2012,7 +2012,7 @@
             });
             c.querySelector('#rgCompte').addEventListener('click', function () {
                 document.querySelector('#voile').click();
-                setTimeout(function () { feuilleCompte(false); }, 220);
+                setTimeout(function () { feuilleConnexionCompte(false); }, 220);
             });
             c.querySelector('#rgDiag').addEventListener('click', function () {
                 document.querySelector('#voile').click();
@@ -2346,6 +2346,7 @@
         feuilleConnexion: feuilleConnexion,
         feuilleVirement: feuilleVirement,
         feuilleCompte: feuilleCompte,
+        feuilleConnexionCompte: feuilleConnexionCompte,
         feuilleCompteNouveau: feuilleCompteNouveau,
         feuilleApport: feuilleApport,
         CORRESPONDANCE_CONFIG: CORRESPONDANCE_CONFIG,
