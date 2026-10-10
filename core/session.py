@@ -1119,6 +1119,43 @@ def _derniere_reference(ctx: "Contexte") -> tuple[dt.date | None, object]:
     return date_ref, cree
 
 
+def _twr_strict_fenetre(df_calc, valeurs_c: list[float], flux_c: list[float],
+                        valorisations: dict) -> float | None:
+    """TWR strict d'une fenêtre de snapshots (2.2.0, A4).
+
+    Même méthode que la page Performance (`metrics.twr_exact`) : chaque flux
+    est encadré par sa valorisation juste avant. Le calcul se fait par POSITION
+    et non par date : en mode « Progression journalière », les deux points sont
+    souvent le snapshot nocturne et le direct d'un même jour, et doivent rester
+    deux instants distincts.
+
+    `flux_c[i]` est le flux survenu entre le point i-1 et le point i. Le premier
+    point n'a pas de flux (c'est la base). Un flux sans valorisation avant rend
+    `None` : le total est « non calculé », jamais un chaînage partiel.
+    """
+    n = len(valeurs_c)
+    if n < 2:
+        return 0.0
+    valo_par_jour: dict = {}
+    for cle, v in (valorisations or {}).items():
+        try:
+            valo_par_jour[pd.Timestamp(cle).date()] = v
+        except (TypeError, ValueError):
+            continue
+    flux_pos: dict[int, float] = {}
+    valo_pos: dict[int, float] = {}
+    for i in range(1, n):
+        f = float(flux_c[i])
+        if f == 0.0:
+            continue
+        flux_pos[i] = f
+        jour = pd.Timestamp(df_calc["date_dt"].iloc[i]).date()
+        if valo_par_jour.get(jour) is not None:
+            valo_pos[i] = valo_par_jour[jour]
+    total, _ = metrics.twr_exact(list(range(n)), [float(v) for v in valeurs_c], flux_pos, valo_pos)
+    return total
+
+
 def progression_periode(
     ctx: "Contexte",
     mode_periode: str = "Progression journalière",
@@ -1131,7 +1168,7 @@ def progression_periode(
     Utilise `serie_performance(ctx)` pour garantir la cohérence absolue des flux
     d'apports (`capital_investi_usd`) et du TWR avec la page Performance.
     """
-    df_base, _, flux_base, _valorisations = serie_performance(ctx)
+    df_base, _, flux_base, valorisations = serie_performance(ctx)
     if df_base.empty:
         return {"vide": True}
 
@@ -1233,7 +1270,11 @@ def progression_periode(
         delta_val_usd = v_fin_usd - v_debut_usd
         apports_periode_usd = sum(flux_c[1:])
         gain_marche_usd = delta_val_usd - apports_periode_usd
-        twr_per = metrics.twr_depuis(valeurs_c, flux_c)
+        # 2.2.0 (constat A4) : TWR STRICT de la fenêtre, la même méthode que la
+        # page Performance. L'ancienne convention « flux en fin de période » donnait
+        # +20 % là où le rendement réel était +10 %. Un flux non valorisé rend
+        # None (« — » à l'affichage), jamais une estimation.
+        twr_per = _twr_strict_fenetre(df_calc, valeurs_c, flux_c, valorisations)
         pct_brut = (delta_val_usd / v_debut_usd) if v_debut_usd > 0 else 0.0
     else:
         v_debut_usd = float(df_p[col_val_usd].iloc[-1])

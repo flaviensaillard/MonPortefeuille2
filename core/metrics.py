@@ -277,6 +277,13 @@ def valorisations_avant_flux(
     `valeur` vaut None quand l'origine est « manquante ». Une valorisation
     reconstruite est une APPROXIMATION : elle suppose le portefeuille inchangé
     entre le snapshot et le flux. Elle doit être présentée comme telle.
+
+    LIMITE DOCUMENTÉE (2.2.0, A6) : la reconstruction place le flux au DÉBUT de
+    l'intervalle (valorisation = snapshot antérieur). L'erreur sur le rendement
+    de cet intervalle est donc bornée par le mouvement de marché entre ce
+    snapshot et le flux réel. Une valorisation mesurée est toujours préférée.
+    Un flux sans snapshot antérieur n'est pas estimé : son intervalle est « non
+    calculé » et le TWR global l'est aussi.
     """
     import bisect
 

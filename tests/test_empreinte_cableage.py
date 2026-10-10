@@ -1,7 +1,7 @@
-"""Connexion par empreinte digitale (2.1.1, nouveauté) — câblage Android/JS.
+"""Connexion par empreinte digitale (2.1.1, nouveauté ; corrigée en 2.2.0) — câblage Android/JS.
 
 Verrous structurels sur les sources (le comportement de la biométrie lui-même
-ne se teste que sur appareil — voir telechargements/notes-2.1.1.md) :
+ne se teste que sur appareil — voir telechargements/notes-2.2.0.md) :
 
 - le pont natif expose les six méthodes d'empreinte et ne reçoit JAMAIS de
   mot de passe ;
@@ -15,7 +15,7 @@ ne se teste que sur appareil — voir telechargements/notes-2.1.1.md) :
 - le module JS est chargé par index.html et exigé par build.sh ;
 - les nouvelles méthodes du pont figurent sur la liste de revue du test de
   durcissement (toute méthode non revue fait échouer la suite) ;
-- version 2.1.1 cohérente partout, y compris core/__init__.py ;
+- version 2.2.0 cohérente partout, y compris core/__init__.py ;
 - les notes de version parlent de l'empreinte et de sa limite « appareil ».
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ STORE = (WWW / "js/store.js").read_text(encoding="utf-8")
 NET = (WWW / "js/net.js").read_text(encoding="utf-8")
 INDEX = (WWW / "index.html").read_text(encoding="utf-8")
 BUILD = (RACINE / "build.sh").read_text(encoding="utf-8")
-NOTES = (RACINE / "telechargements/notes-2.1.1.md").read_text(encoding="utf-8")
+NOTES = (RACINE / "telechargements/notes-2.2.0.md").read_text(encoding="utf-8")
 CORE = (RACINE / "core/__init__.py").read_text(encoding="utf-8")
 
 METHODES = ["empreinteEtat", "empreinteSessionGardee", "empreinteMajSession",
@@ -134,13 +134,13 @@ def test_les_six_methodes_sont_sur_la_liste_de_revue_du_pont():
         assert f"'{m}'" in bloc.group(1), f"{m} doit être admise sciemment par le test de durcissement"
 
 
-def test_version_2_1_1_coherente_dont_core():
-    assert re.search(r"__version__\s*=\s*\"2\.1\.1\"", CORE), \
+def test_version_2_2_0_coherente_dont_core():
+    assert re.search(r"__version__\s*=\s*\"2\.2\.0\"", CORE), \
         "core/__init__.py doit annoncer la même version que l'APK"
-    assert "VERSION_NAME:-2.1.1" in BUILD
+    assert "VERSION_NAME:-2.2.0" in BUILD
 
 
-def test_notes_2_1_1_parlent_de_l_empreinte_et_de_la_limite_appareil():
+def test_notes_2_2_0_parlent_de_l_empreinte_et_de_la_limite_appareil():
     assert re.search(r"empreinte", NOTES, re.I), "les notes doivent présenter la nouveauté"
     assert re.search(r"biométri", NOTES, re.I), \
         "les notes doivent parler de la biométrie elle-même"
@@ -150,7 +150,7 @@ def test_notes_2_1_1_parlent_de_l_empreinte_et_de_la_limite_appareil():
 
 # ---------------------------------------------------------------------------
 # 2.2.0 (constats B1-B4) : chaque échec nomme sa cause, et le chemin
-# CryptoObject/Keystore est cohérent. Ces tests sont rouges sur la 2.1.1.
+# CryptoObject/Keystore est cohérent. Ces tests sont rouges sur la 2.1.1 (chaque constat B1-B3 y est absent).
 # ---------------------------------------------------------------------------
 
 def _codes_java() -> set[str]:

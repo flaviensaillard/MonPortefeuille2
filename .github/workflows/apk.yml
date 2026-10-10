@@ -31,8 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '2.1.1'
-      VERSION_CODE: '29'
+      VERSION_NAME: '2.2.0'
+      VERSION_CODE: '30'
     steps:
       - uses: actions/checkout@v4
 
@@ -172,7 +172,7 @@ jobs:
                 exit 0
               fi
               echo "::error::La release $ETIQUETTE existe déjà avec un APK DIFFÉRENT (publié : $SHA_PUBLIE, construit : $SHA_NOUVEAU)."
-              echo "Une release est unique et immuable : aucun écrasement. Publiez une nouvelle version (2.1.1…) ou supprimez la release manuellement en connaissance de cause."
+              echo "Une release est unique et immuable : aucun écrasement. Publiez une nouvelle version (2.2.1…) ou supprimez la release manuellement en connaissance de cause."
               exit 1
             fi
             rm -rf "$TMP"
@@ -182,14 +182,14 @@ jobs:
             gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "APK ${VERSION_NAME}" \
-              --notes-file telechargements/notes-2.1.1.md
+              --notes-file telechargements/notes-2.2.0.md
             gh release upload "$ETIQUETTE" "dist/$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
           echo "SHA256 de l'APK publié : $SHA_NOUVEAU" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-2.1.1.apk
+          name: Porte-feuille-2.2.0.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 
