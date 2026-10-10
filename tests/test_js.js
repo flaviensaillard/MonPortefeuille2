@@ -366,6 +366,35 @@ test('apport : montant stocké positif, ajouté au capital', () => {
     return JSON.stringify(serie.flux) === JSON.stringify([0, 1125, 0]);
 });
 
+// --- Demande du 10/10/2026 : le bandeau des valorisations reconstruites est
+// retiré de l'écran Performance (la donnée reste dans `valorisationsDetail`,
+// qui sert au calcul et au diagnostic : seule la liste à l'écran disparaît).
+console.log('\nPerformance : plus de bandeau des valorisations reconstruites');
+test('un apport sans valorisation mesurée reste « reconstruite » dans la série', () => {
+    const ctx = PF.portefeuille.contexteVide();
+    ctx.serie = PF.metrics.seriePerformance([
+        { date: '2026-01-01', patrimoine_investi_usd: 10000, patrimoine_total_usd: 12000 },
+        { date: '2026-02-01', patrimoine_investi_usd: 11000, patrimoine_total_usd: 13000 },
+        { date: '2026-03-01', patrimoine_investi_usd: 12000, patrimoine_total_usd: 14000 }
+    ], [{ id: 1, date: '2026-02-15', type: 'apport', montant_usd: 500, montant_eur: 450 }]);
+    const detail = ctx.serie.valorisationsDetail['2026-02-15'];
+    return !!detail && detail.origine === 'reconstruite';
+});
+test('l’écran Performance n’affiche plus la liste des apports reconstruits', () => {
+    const ctx = PF.portefeuille.contexteVide();
+    ctx.tauxEurUsd = 1.125;
+    ctx.totauxInvestisUsd = 12000;
+    ctx.serie = PF.metrics.seriePerformance([
+        { date: '2026-01-01', patrimoine_investi_usd: 10000, patrimoine_total_usd: 12000 },
+        { date: '2026-02-01', patrimoine_investi_usd: 11000, patrimoine_total_usd: 13000 },
+        { date: '2026-03-01', patrimoine_investi_usd: 12000, patrimoine_total_usd: 14000 }
+    ], [{ id: 1, date: '2026-02-15', type: 'apport', montant_usd: 500, montant_eur: 450 }]);
+    const html = PF.vues.performance(ctx);
+    if (html.indexOf('par le snapshot') >= 0) throw new Error('le bandeau est encore affiché');
+    if (html.indexOf('valeur reconstruite') >= 0) throw new Error('le texte « valeur reconstruite » est encore affiché');
+    return true;
+});
+
 PF.util.todayISO = todayAvantTests;
 
 console.log('\nChargement complet (faux réseau)');
