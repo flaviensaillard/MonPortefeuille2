@@ -512,13 +512,17 @@ def generer_sql(lignes: list):
     return tampon.getvalue(), nb
 
 
-def tableau_twr(w, annees_twr: dict, base: str) -> None:
+def tableau_twr(w, annees_twr: dict, base: str, controle_annuel: dict | None = None) -> None:
     eur = annees_twr.get(("EUR", base), {})
     usd = annees_twr.get(("USD", base), {})
     annees = sorted((set(eur) | set(usd)) - {"_dernier_snapshot"})
     dernier = eur.get("_dernier_snapshot") or usd.get("_dernier_snapshot")
-    w("| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |\n"
-      "|---:|---:|---:|---:|---:|---|\n")
+    if controle_annuel is not None:
+        w("| Année | TWR EUR | TWR USD | Apports nets EUR | Valeur réf. EUR (début → fin) | Nb apports | Approximés (EUR / USD) | Motif si non calculé |\n"
+          "|---:|---:|---:|---:|---|---:|---:|---|\n")
+    else:
+        w("| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |\n"
+          "|---:|---:|---:|---:|---:|---|\n")
     for an in annees:
         e, u = eur.get(an, {}), usd.get(an, {})
         libelle = f"{an}"
@@ -529,8 +533,33 @@ def tableau_twr(w, annees_twr: dict, base: str) -> None:
             motifs.append("EUR : " + " ; ".join(e["raisons"]))
         if u.get("raisons"):
             motifs.append("USD : " + " ; ".join(u["raisons"]))
-        w(f"| {libelle} | {pct(e.get('twr'))} | {pct(u.get('twr'))} | {e.get('nb_apports', 0)} | "
-          f"{e.get('nb_approx', 0)} / {u.get('nb_approx', 0)} | {'; '.join(motifs) or '—'} |\n")
+        motif = '; '.join(motifs) or '—'
+        if controle_annuel is not None:
+            c = controle_annuel.get(an, {})
+            ref = (f"{fr(c['debut'])} → {fr(c['fin'])}" if c.get("debut") is not None and c.get("fin") is not None else "—")
+            w(f"| {libelle} | {pct(e.get('twr'))} | {pct(u.get('twr'))} | {fr(c.get('flux'))} | {ref} | "
+              f"{e.get('nb_apports', 0)} | {e.get('nb_approx', 0)} / {u.get('nb_approx', 0)} | {motif} |\n")
+        else:
+            w(f"| {libelle} | {pct(e.get('twr'))} | {pct(u.get('twr'))} | {e.get('nb_apports', 0)} | "
+              f"{e.get('nb_approx', 0)} / {u.get('nb_approx', 0)} | {motif} |\n")
+
+
+def controle_annuel_eur(lignes: list, snaps_ok: list) -> dict:
+    """Pour chaque année : apports nets (EUR) et valeur de référence début -> fin.
+
+    Permet au lecteur de voir si la valeur progresse moins que les apports versés.
+    """
+    annees = sorted({L["_date"].year for L in lignes} | {j.year for j, _ in snaps_ok})
+    sortie = {}
+    for an in annees:
+        flux = sum((1.0 if L["_sens"] == "apport" else -1.0) * abs(L["_montant_eur"])
+                   for L in lignes if L["_date"].year == an)
+        avant_annee = [(j, v) for j, v in snaps_ok if j < dt.date(an, 1, 1)]
+        dans_annee = [(j, v) for j, v in snaps_ok if j.year == an]
+        debut = avant_annee[-1][1] if avant_annee else (dans_annee[0][1] if dans_annee else None)
+        fin = dans_annee[-1][1] if dans_annee else None
+        sortie[an] = {"flux": flux, "debut": debut, "fin": fin}
+    return sortie
 
 
 def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans_total,
@@ -644,7 +673,10 @@ def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans
       "sans valeur, qu'un intervalle ne peut pas être chaîné, ou qu'elle n'est pas couverte par les snapshots. "
       "Les années avec approximations sont marquées.\n\n")
     w("### 5.1 Série demandée par la mission : patrimoine total\n\n")
-    tableau_twr(w, annees_twr, "total")
+    w("Colonnes de contrôle : les apports nets de l'année (EUR) et la valeur de référence du premier au "
+      "dernier snapshot complet de l'année. Si les apports dépassent la hausse de la valeur, le TWR "
+      "peut être négatif même si la valeur progresse en absolu.\n\n")
+    tableau_twr(w, annees_twr, "total", controle_annuel_eur(lignes, snaps_ok))
     w("\n### 5.2 Comparaison : patrimoine investi (série de l'application)\n\n")
     w("Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_investi_eur` (la trésorerie "
       "est exclue). Cette série sert à comparer avec les performances affichées par l'application. "
@@ -687,6 +719,12 @@ def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans
       "valeurs « avant » au total `patrimoine_total_eur`, mais la série de performance utilise "
       "`patrimoine_investi_eur` (`core/session.py`, `serie_performance`). Quand il y a de la trésorerie, "
       "ces deux séries diffèrent. Ce rapport, lui, utilise le total des deux côtés.\n")
+    w("- **Comparaison avec les performances documentées dans le code** (`core/session.py`, commentaire de la "
+      "revue 2.1.0) : 2023 : +9,33 % ; 2024 : +15,21 % ; 2025 : +13,92 % (convention dollars, performances Swissquote / v1 selon ce commentaire). "
+      "La série investie reproduit 2023 (section 5.2). **2024 ne concorde pas** : la valeur de référence "
+      "progresse moins que les apports versés. Causes possibles, NON TRANCHÉES : snapshots 2024 sous-évalués "
+      "(liquidités absentes, cours manquants, reconstruction depuis les transactions), ou écart réel. "
+      "Vérifier les snapshots de 2024 avant d'utiliser ce TWR.\n")
     w("- Les valeurs reconstruites supposent un portefeuille inchangé entre le snapshot et l'apport "
       "(voir `core/metrics.py`, limite A6). Elles sont donc des approximations.\n\n")
 
