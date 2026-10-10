@@ -40,7 +40,7 @@ Aucun.
 
 ## 5. TWR par année civile, avec les nouvelles valeurs
 
-> **Mise à jour (cas A, id 305 retiré).** Les lignes 2024 ci-dessous sont recalculées hors du workflow, en EUR seulement (méthode des flux au début de période). Les autres valeurs ont été calculées avant le retrait de l'id 305 et sont inchangées pour 2023, 2025 et 2026 (le retrait ne touche que 2024). Le TWR USD 2024 n'a pas été recalculé. Une nouvelle exécution du workflow devra confirmer ces chiffres avant validation.
+> **Mise à jour (cas A, id 305 retiré).** Ligne 2024 recalculée avec le même moteur que le workflow (`donnees-reconstituees/controle_twr_sans_305.csv`). Le moteur reproduit exactement les TWR d'origine (2023, 2025, 2026 et 2024 avec la ligne 305). Les TWR investi (§5.2) ne sont pas recalculés. Le TWR de référence est **en dollars** (confirmé par le propriétaire).
 
 Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avant (valeur reconstruite depuis son snapshot). Une année est **« non calculé »** dès qu'un de ses apports reste sans valeur, qu'un intervalle ne peut pas être chaîné, ou qu'elle n'est pas couverte par les snapshots. Les années avec approximations sont marquées.
 
@@ -51,7 +51,7 @@ Colonnes de contrôle : les apports nets de l'année (EUR) et la valeur de réf�
 | Année | TWR EUR | TWR USD | Apports nets EUR | Valeur réf. EUR (début → fin) | Nb apports | Approximés (EUR / USD) | Motif si non calculé |
 |---:|---:|---:|---:|---|---:|---:|---|
 | 2023 | +3,26 % | +4,05 % | 15 000,00 | 30 874,90 → 47 183,86 | 1 | 0 / 0 | — |
-| 2024 | +14,10 % (EUR, recalcul hors workflow, voir ci-dessous) | non recalculé | 22 060,00 | 47 183,86 → 77 354,57 | 17 | 0 / 0 | — |
+| 2024 | +13,93 % | +7,68 % | 22 060,00 | 47 183,86 → 77 354,57 | 17 | 0 / 0 | — |
 | 2025 | -1,48 % | +10,79 % | 4 220,00 | 77 354,57 → 80 370,86 | 10 | 0 / 0 | — |
 | 2026 (partielle, jusqu'au 2026-10-10) | +0,71 % | -3,89 % | 4 513,11 | 80 370,86 → 85 451,82 | 12 | 0 / 0 | — |
 
@@ -62,7 +62,7 @@ Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_i
 | Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |
 |---:|---:|---:|---:|---:|---|
 | 2023 | +9,09 % | +9,28 % | 1 | 0 / 0 | — |
-| 2024 | +18,81 % (EUR, recalcul hors workflow) | non recalculé | 17 | 0 / 0 | — |
+| 2024 | non recalculé | non recalculé | 17 | 0 / 0 | — |
 | 2025 | +4,35 % | +17,29 % | 10 | 0 / 0 | — |
 | 2026 (partielle, jusqu'au 2026-10-10) | +10,99 % | +5,94 % | 12 | 0 / 0 | — |
 
@@ -121,4 +121,4 @@ Exécuter `update_valeur_avant.sql` dans l'éditeur SQL Supabase, une seule fois
 - CSV `valeur_avant_apports.csv` : **non validé**.
 - Ce rapport : **non validé**.
 - Conversion USD au taux historique (`core/fx.py`) : **validée** par le propriétaire.
-- TWR 2024 : **non tranché** (voir section 8). Décision sur l'apport du 29/04/2024 : **cas A** (versement inexistant), retiré du CSV et du SQL. La ligne `pf2_apports` id 305 doit être supprimée dans Supabase par le propriétaire. Le SQL n'est exécutable qu'après validation écrite du CSV et du rapport.
+- TWR 2024 : **non tranché** (voir section 8). Décision sur l'apport du 29/04/2024 : **cas A** (versement inexistant), retiré du CSV et du SQL. TWR de référence en dollars : 2023 +4,05 %, 2024 +7,68 % sans ce versement (écart de ≈ 4 points avec l'attente de +12 %, non expliqué), 2025 +10,79 %. La ligne `pf2_apports` id 305 doit être supprimée dans Supabase par le propriétaire. Le SQL n'est exécutable qu'après validation écrite du CSV et du rapport.
