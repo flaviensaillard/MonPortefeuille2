@@ -3,7 +3,7 @@
 
 LECTURE SEULE : ce script n'écrit jamais dans Supabase. Il produit trois fichiers
 dans donnees-reconstituees/ : le CSV de contrôle, le script SQL à relire et le
-RAPPORT.md. Il est exécuté par .github/workflows/reconstitution-valeur-avant.yml,
+RAPPORT.md. Il a été exécuté une fois par un workflow GitHub Actions temporaire,
 le seul endroit où les secrets SUPABASE_URL / SUPABASE_KEY sont disponibles.
 Aucune valeur de secret n'est écrite ni affichée.
 
@@ -728,7 +728,11 @@ def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans
     w("- Les valeurs reconstruites supposent un portefeuille inchangé entre le snapshot et l'apport "
       "(voir `core/metrics.py`, limite A6). Elles sont donc des approximations.\n\n")
 
-    w("## 9. Application (à faire après validation écrite)\n\n")
+    w("## 9. Secrets\n\n")
+    w("Aucun secret (SUPABASE_URL, SUPABASE_KEY, identifiant du propriétaire en clair) n'est présent dans "
+      "`donnees-reconstituees/`. Le contrôle anti-secret est fait par le workflow AVANT toute publication "
+      "(section 6). Les secrets ne sont jamais écrits dans le code ni dans les journaux.\n\n")
+    w("## 10. Application (à faire après validation écrite)\n\n")
     w("Exécuter `update_valeur_avant.sql` dans l'éditeur SQL Supabase, une seule fois. Le fichier est une "
       "transaction BEGIN/COMMIT. Chaque instruction ne met à jour que les colonnes encore NULL.\n")
 
