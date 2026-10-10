@@ -1,0 +1,75 @@
+# Reconstitution des valeurs « avant apport » (pf2_apports.valeur_avant_eur / _usd).
+#
+# LECTURE SEULE sur Supabase : le script ne fait que des SELECT. Il produit, dans
+# donnees-reconstituees/, le CSV de contrôle, le script SQL à relire et le RAPPORT.md.
+# Rien n'est appliqué à la base : le SQL n'est exécuté que par le propriétaire,
+# après validation écrite.
+#
+# Secrets lus : SUPABASE_URL, SUPABASE_KEY (et SUPABASE_USER_ID si défini).
+# Ils ne sont jamais écrits dans les fichiers. Un contrôle vérifie leur absence
+# des fichiers générés AVANT toute publication.
+
+name: Reconstitution valeur_avant
+
+on:
+  push:
+    branches:
+      - arena/25fcff0b-monportefeuille2
+    paths:
+      - '.github/workflows/reconstitution-valeur-avant.yml'
+      - 'donnees-reconstituees/reconstruire_valeur_avant.py'
+  workflow_dispatch:
+
+concurrency:
+  group: reconstitution-valeur-avant
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  reconstitution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dépendances (mêmes bornes que requirements.txt)
+        run: pip install "pandas>=2.2,<3" "numpy>=1.24" "yfinance>=0.2.28,<2" "supabase>=2.3"
+      - name: Calcul (lecture seule)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+        run: python donnees-reconstituees/reconstruire_valeur_avant.py
+      - name: Contrôle anti-secret avant publication
+        env:
+          S_URL: ${{ secrets.SUPABASE_URL }}
+          S_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          set -eu
+          if [ -z "$S_URL" ] || [ -z "$S_KEY" ]; then
+            echo "Contrôle impossible : secrets absents."; exit 1
+          fi
+          echo "$S_URL" | sed -E 's#^https?://##; s#/.*$##' > /tmp/hote.txt
+          for motif in "$S_KEY" "$S_URL" "$(cat /tmp/hote.txt)" "supabase.co"; do
+            if grep -rqF -- "$motif" donnees-reconstituees/; then
+              echo "ECHEC : une valeur sensible apparaît dans donnees-reconstituees/ ; rien n'est publié."
+              exit 1
+            fi
+          done
+          echo "Contrôle anti-secret : OK"
+      - name: Publier les fichiers générés (branche de travail uniquement)
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add donnees-reconstituees/
+          if git diff --cached --quiet; then
+            echo "Aucun changement à publier."
+            exit 0
+          fi
+          git commit -m "valeur_avant : fichiers de contrôle regénérés (lecture seule, aucune écriture en base)"
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
