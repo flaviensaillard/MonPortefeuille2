@@ -145,7 +145,12 @@ jobs:
       # Release UNIQUE et IMMUABLE : si la release existe déjà avec un APK
       # identique (même SHA256), on ne fait rien ; si elle existe avec un APK
       # différent, on ÉCHOUE — l'écrasement d'un asset publié est interdit.
+      # La publication part de `main` (après fusion) : une exécution de branche
+      # ne fait que vérifier que l'APK se construit, sinon elle publierait
+      # l'APK de la branche avant la fusion et l'exécution de `main` échouerait
+      # aussitôt sur la règle d'immuabilité.
       - name: Publier l'APK dans une release unique
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
