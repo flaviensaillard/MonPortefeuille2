@@ -343,9 +343,18 @@ def main() -> int:
              "aucune source mixte : une devise mesurée seule laisse l'autre NULL", journal)
 
     # --- Recalcul du TWR par année (valeurs nouvelles) ---------------------
+    # Base « total » = demandée par la mission. Base « investi » = série de l'application,
+    # donnée de comparaison (même méthode, même règle de snapshot).
+    investi_par_date = {}
+    for s_ in snaps_brut:
+        if s_.get("complet") and nombre(s_.get("patrimoine_total_eur")) not in (None, 0.0) \
+                and nombre(s_.get("patrimoine_total_eur")) > 0:
+            investi_par_date[jour(s_["date"])] = nombre(s_.get("patrimoine_investi_eur"))
     annees_twr = {}
-    for devise in ("EUR", "USD"):
-        annees_twr[devise] = twr_par_devise(devise, lignes, snaps_ok, journal)
+    for base in ("total", "investi"):
+        for devise in ("EUR", "USD"):
+            annees_twr[(devise, base)] = twr_par_devise(devise, base, lignes, snaps_ok,
+                                                        investi_par_date, journal)
 
     # --- Fichiers ---------------------------------------------------------
     ecrire_csv(lignes)
@@ -373,56 +382,70 @@ def main() -> int:
 # TWR par année civile
 # ---------------------------------------------------------------------------
 
-def twr_par_devise(devise: str, lignes: list, snaps_ok: list, journal: list) -> dict:
-    cle_val = "_eur" if devise == "EUR" else "_usd"
+def twr_par_devise(devise: str, base: str, lignes: list, snaps_ok: list,
+                   investi_par_date: dict, journal: list) -> dict:
+    """TWR strict par année civile, même méthode que core/metrics.rendements_stricts.
+
+    devise : 'EUR' ou 'USD'.
+    base   : 'total' = patrimoine_total_eur (série demandée par la mission) ;
+             'investi' = patrimoine_investi_eur (série de l'application), comparaison.
+    """
     cle_mont = "_montant_eur" if devise == "EUR" else "_montant_usd"
 
-    points = []
-    for d, total in snaps_ok:
+    def en_devise(v_eur, j):
+        if v_eur is None:
+            return None
         if devise == "EUR":
-            points.append((d, total))
-        else:
-            t, _ = taux_eur_usd(d)
-            points.append((d, total * t if t else None))
+            return v_eur
+        t, _ = taux_eur_usd(j)
+        return v_eur * t if t else None
+
+    points = []
+    for j, total in snaps_ok:
+        v = total if base == "total" else investi_par_date.get(j)
+        points.append((j, en_devise(v, j)))
     if not points:
         return {}
+
+    # Valeur juste avant chaque apport, dans la devise et dans la base demandées.
+    valeur_avant = {}
+    for L in lignes:
+        if base == "total":
+            valeur_avant[L["id"]] = L["_eur"] if devise == "EUR" else L["_usd"]
+        else:
+            j = L["_date_snap"]
+            valeur_avant[L["id"]] = en_devise(investi_par_date.get(j), j) if j else None
 
     flux: dict = {}
     avant: dict = {}
     flux_sans_valeur: set = set()
-    annees_sans_valeur: set = set()
+    sans_valeur_par_annee: dict = {}
     for L in sorted(lignes, key=lambda x: (x["_date"], x["id"])):
         d = L["_date"]
         m = L[cle_mont]
-        signe = 1.0 if L["_sens"] == "apport" else -1.0
-        if m is None:
+        v = valeur_avant[L["id"]]
+        if m is None or v is None:
             flux_sans_valeur.add(d)
-            annees_sans_valeur.add(d.year)
-        else:
+            sans_valeur_par_annee[d.year] = sans_valeur_par_annee.get(d.year, 0) + 1
+        if m is not None:
+            signe = 1.0 if L["_sens"] == "apport" else -1.0
             flux[d] = flux.get(d, 0.0) + signe * abs(m)
-        if d not in avant:
-            v = L[cle_val]
-            if v is None:
-                flux_sans_valeur.add(d)
-                annees_sans_valeur.add(d.year)
-            else:
-                avant[d] = v
-        elif L[cle_val] is None:
-            flux_sans_valeur.add(d)
-            annees_sans_valeur.add(d.year)
+        if d not in avant and v is not None:
+            avant[d] = v
 
     intervalles = chaine(points, flux, avant, flux_sans_valeur)
 
     # Contrôle croisé avec le moteur de l'application, quand tout est valorisé.
     if all(v is not None for _, v in points) and not flux_sans_valeur:
-        dates = [d for d, _ in points]
+        dates = [j for j, _ in points]
         ref, _ = metrics.rendements_stricts(dates, [v for _, v in points], dict(flux), dict(avant))
         ours = [r for _, r, _ in intervalles]
         comparables = [(a, b) for a, b in zip(ours, ref) if a is not None and b is not None]
         controle(len(ours) == len(ref) and all(abs(a - b) < 1e-9 for a, b in comparables),
-                 f"chaînage TWR {devise} identique à core/metrics.rendements_stricts", journal)
+                 f"chaînage TWR {devise} ({base}) identique à core/metrics.rendements_stricts", journal)
 
-    annees = sorted({L["_date"].year for L in lignes} | {d.year for d, _ in points})
+    libelle_base = "valeur" if base == "total" else "investi"
+    annees = sorted({L["_date"].year for L in lignes} | {j.year for j, _ in points})
     sortie = {}
     for an in annees:
         ints = [(fin, r, why) for fin, r, why in intervalles if fin.year == an]
@@ -431,9 +454,8 @@ def twr_par_devise(devise: str, lignes: list, snaps_ok: list, journal: list) -> 
             raisons.append("aucun intervalle entre deux snapshots complets")
         if any(r is None for _, r, _ in ints):
             raisons.append("intervalle non calculé")
-        if an in annees_sans_valeur:
-            n = sum(1 for L in lignes if L["_date"].year == an and L[cle_val] is None)
-            raisons.append(f"{n} apport(s) sans valeur {devise}")
+        if sans_valeur_par_annee.get(an):
+            raisons.append(f"{sans_valeur_par_annee[an]} apport(s) sans {libelle_base} {devise}")
         hors = [L for L in lignes if L["_date"].year == an
                 and not (points[0][0] <= L["_date"] <= points[-1][0])]
         if hors:
@@ -442,12 +464,12 @@ def twr_par_devise(devise: str, lignes: list, snaps_ok: list, journal: list) -> 
         if not raisons:
             for _, r, _ in ints:
                 rend *= 1.0 + r
+        cle_orig = "origine_eur" if devise == "EUR" else "origine_usd"
         sortie[an] = {
             "twr": None if raisons else rend - 1.0,
             "raisons": raisons,
             "nb_apports": sum(1 for L in lignes if L["_date"].year == an),
-            "nb_approx": sum(1 for L in lignes if L["_date"].year == an
-                             and L["origine_eur" if devise == "EUR" else "origine_usd"].startswith("approx")),
+            "nb_approx": sum(1 for L in lignes if L["_date"].year == an and L[cle_orig].startswith("approx")),
         }
     sortie["_dernier_snapshot"] = points[-1][0]
     return sortie
@@ -488,6 +510,27 @@ def generer_sql(lignes: list):
     tampon.write(f"-- Nombre de lignes concernées : {nb}\n")
     tampon.write("COMMIT;\n")
     return tampon.getvalue(), nb
+
+
+def tableau_twr(w, annees_twr: dict, base: str) -> None:
+    eur = annees_twr.get(("EUR", base), {})
+    usd = annees_twr.get(("USD", base), {})
+    annees = sorted((set(eur) | set(usd)) - {"_dernier_snapshot"})
+    dernier = eur.get("_dernier_snapshot") or usd.get("_dernier_snapshot")
+    w("| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |\n"
+      "|---:|---:|---:|---:|---:|---|\n")
+    for an in annees:
+        e, u = eur.get(an, {}), usd.get(an, {})
+        libelle = f"{an}"
+        if dernier and an == dernier.year and dernier < dt.date(an, 12, 31):
+            libelle += f" (partielle, jusqu'au {dernier.isoformat()})"
+        motifs = []
+        if e.get("raisons"):
+            motifs.append("EUR : " + " ; ".join(e["raisons"]))
+        if u.get("raisons"):
+            motifs.append("USD : " + " ; ".join(u["raisons"]))
+        w(f"| {libelle} | {pct(e.get('twr'))} | {pct(u.get('twr'))} | {e.get('nb_apports', 0)} | "
+          f"{e.get('nb_approx', 0)} / {u.get('nb_approx', 0)} | {'; '.join(motifs) or '—'} |\n")
 
 
 def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans_total,
@@ -559,7 +602,16 @@ def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans
     w(f"- Lignes à compléter dans le SQL : **{nb_updates}**.\n")
     w(f"- Lignes où une seule devise est mesurée (l'autre laissée NULL pour ne pas mélanger les sources) : **{len(mixtes)}**"
       f"{' — ids ' + ', '.join(str(L['id']) for L in mixtes) if mixtes else ''}.\n")
-    w(f"- Montants EUR négatifs dans pf2_apports : {nb_negatifs} (le sens gouverne le signe du flux).\n\n")
+    w(f"- Montants EUR négatifs dans pf2_apports : {nb_negatifs} (le sens gouverne le signe du flux).\n")
+    ecarts = sorted(((L["_date"] - L["_date_snap"]).days, L["id"], L["_date_snap"]) for L in lignes
+                    if L["_date_snap"] is not None and L["_date_snap"] < L["_date"])
+    if ecarts:
+        mediane = ecarts[len(ecarts) // 2][0]
+        maxi = ecarts[-1]
+        w(f"- Écart entre le snapshot retenu et l'apport (reconstructions antérieures) : médiane **{mediane} jours**, "
+          f"maximum **{maxi[0]} jours** (apport id {maxi[1]}, snapshot du {maxi[2].isoformat()}). "
+          "Plus l'écart est grand, moins la valeur reconstruite est fiable.\n")
+    w("\n")
 
     w("## 3. Apports approximés (snapshot postérieur)\n\n")
     approx = [L for L in lignes if L["origine_eur"].startswith("approx") or L["origine_usd"].startswith("approx")]
@@ -588,26 +640,16 @@ def ecrire_rapport(lignes, apports, snaps_brut, snaps_ok, nb_incomplets, nb_sans
 
     w("## 5. TWR par année civile, avec les nouvelles valeurs\n\n")
     w("Méthode : TWR strict. Chaque apport est encadré par sa valorisation juste avant (valeur "
-      "mesurée ou reconstruite). Une année est **« non calculé »** dès qu'un de ses apports reste sans "
-      "valeur, ou qu'un intervalle de l'année ne peut pas être chaîné. Les années avec approximations "
-      "sont marquées.\n\n")
-    w("Le TWR EUR porte sur `patrimoine_total_eur`. Le TWR USD porte sur le même total converti au taux "
-      "historique de chaque date de snapshot.\n\n")
-    w("| Année | TWR EUR | TWR USD | Apports | Approximés (EUR / USD) | Motif si non calculé |\n"
-      "|---:|---:|---:|---:|---:|---|\n")
-    eur, usd = annees_twr.get("EUR", {}), annees_twr.get("USD", {})
-    annees = sorted((set(eur) | set(usd)) - {"_dernier_snapshot"})
-    dernier = eur.get("_dernier_snapshot") or usd.get("_dernier_snapshot")
-    for an in annees:
-        e, u = eur.get(an, {}), usd.get(an, {})
-        libelle = f"{an}" + (" (en cours)" if dernier and an == dernier.year and an == dt.date.today().year else "")
-        motifs = []
-        if e.get("raisons"):
-            motifs.append("EUR : " + " ; ".join(e["raisons"]))
-        if u.get("raisons"):
-            motifs.append("USD : " + " ; ".join(u["raisons"]))
-        w(f"| {libelle} | {pct(e.get('twr'))} | {pct(u.get('twr'))} | {e.get('nb_apports', 0)} | "
-          f"{e.get('nb_approx', 0)} / {u.get('nb_approx', 0)} | {'; '.join(motifs) or '—'} |\n")
+      "reconstruite depuis son snapshot). Une année est **« non calculé »** dès qu'un de ses apports reste "
+      "sans valeur, qu'un intervalle ne peut pas être chaîné, ou qu'elle n'est pas couverte par les snapshots. "
+      "Les années avec approximations sont marquées.\n\n")
+    w("### 5.1 Série demandée par la mission : patrimoine total\n\n")
+    tableau_twr(w, annees_twr, "total")
+    w("\n### 5.2 Comparaison : patrimoine investi (série de l'application)\n\n")
+    w("Même méthode, même snapshot retenu pour chaque apport, mais sur `patrimoine_investi_eur` (la trésorerie "
+      "est exclue). Cette série sert à comparer avec les performances affichées par l'application. "
+      "Elle ne remplace pas le TWR total de la section 5.1.\n\n")
+    tableau_twr(w, annees_twr, "investi")
     w("\n")
 
     w("## 6. Contrôles automatiques\n\n")
