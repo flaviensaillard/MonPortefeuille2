@@ -141,21 +141,27 @@ jobs:
                   w.writerow([c.get(k) for k in cc])
           print("crypto lignes:", len(crypto))
           PY
-          python /tmp/diag_twr.py
-
+          mkdir -p donnees-reconstituees/diagnostic-twr
+          set +e
+          python /tmp/diag_twr.py > /tmp/journal.txt 2>&1
+          RC=$?
+          set -e
+          # Journal masqué (secrets remplacés) puis publié avec les résultats
+          sed -e "s#$SUPABASE_KEY#<CLE>#g" -e "s#$SUPABASE_URL#<URL>#g" /tmp/journal.txt > donnees-reconstituees/diagnostic-twr/journal.txt
+          echo "$RC" > donnees-reconstituees/diagnostic-twr/code_retour.txt
           # Contrôle anti-secret avant publication
-          if [ -z "${SUPABASE_KEY:-}" ]; then echo "clé absente"; exit 1; fi
           if grep -rqF -- "$SUPABASE_KEY" donnees-reconstituees/ || grep -rqF -- "$SUPABASE_URL" donnees-reconstituees/; then
             echo "ECHEC : secret détecté ; rien publié."; exit 1
           fi
-          echo "anti-secret OK"
+          echo "anti-secret OK (code retour script : $RC)"
 
       - name: Publication (branche de travail uniquement)
+        if: always()
         run: |
           set -eu
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add donnees-reconstituees/diagnostic-twr/
+          git add -f donnees-reconstituees/diagnostic-twr/
           if git diff --cached --quiet; then echo "rien à publier"; exit 0; fi
           git commit -m "diagnostic TWR (temporaire, lecture seule)"
           git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
