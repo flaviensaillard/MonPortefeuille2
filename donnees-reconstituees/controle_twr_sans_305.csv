@@ -1,0 +1,17 @@
+scenario,devise,annee,twr_pct,nb_intervalles
+tous_apports,EUR,2023,3.26,9
+tous_apports,EUR,2024,-6.09,12
+tous_apports,EUR,2025,-1.48,12
+tous_apports,EUR,2026,0.71,154
+tous_apports,USD,2023,4.05,9
+tous_apports,USD,2024,-11.14,12
+tous_apports,USD,2025,10.79,12
+tous_apports,USD,2026,-3.89,154
+sans_id_305,EUR,2023,3.26,9
+sans_id_305,EUR,2024,13.93,12
+sans_id_305,EUR,2025,-1.48,12
+sans_id_305,EUR,2026,0.71,154
+sans_id_305,USD,2023,4.05,9
+sans_id_305,USD,2024,7.68,12
+sans_id_305,USD,2025,10.79,12
+sans_id_305,USD,2026,-3.89,154
