@@ -608,6 +608,85 @@ public class NativeBridge {
          et le repli email/mot de passe s'applique ;
        - la biométrie elle-même ne se teste que sur appareil. */
 
+    /* Erreur métier de l'empreinte, portant un code STABLE (2.2.0, constats B1-B3).
+       Le code est transmis tel quel à l'interface : aucun libellé fourre-tout. */
+    private static final class ErreurEmpreinte extends Exception {
+        final String code;
+        ErreurEmpreinte(String code, String message) {
+            super(message);
+            this.code = code;
+        }
+    }
+
+    /** Diagnostic de disponibilité, code stable. « ok » seulement si l'empreinte
+        peut servir à chiffrer/déchiffrer (classe forte, au moins une empreinte).
+        Une SecurityException signifie une permission manquante (B2, cause la plus
+        probable : USE_BIOMETRIC absent du manifeste) : elle est nommée, pas avalée. */
+    @SuppressWarnings("deprecation")
+    private String diagnosticEmpreinte() {
+        int sdk = android.os.Build.VERSION.SDK_INT;
+        if (sdk < 28) return "sdk_trop_ancien";
+        try {
+            if (sdk >= 29) {
+                android.hardware.biometrics.BiometricManager bm =
+                        (android.hardware.biometrics.BiometricManager)
+                                activity.getSystemService(Context.BIOMETRIC_SERVICE);
+                if (bm == null) return "materiel_absent";
+                int r = (sdk >= 30)
+                        ? bm.canAuthenticate(android.hardware.biometrics.BiometricManager
+                                .Authenticators.BIOMETRIC_STRONG)
+                        : bm.canAuthenticate();
+                return codeCanAuthenticate(r);
+            }
+            android.hardware.fingerprint.FingerprintManager fm = activity.getSystemService(
+                    android.hardware.fingerprint.FingerprintManager.class);
+            if (fm == null || !fm.isHardwareDetected()) return "materiel_absent";
+            return fm.hasEnrolledFingerprints() ? "ok" : "aucune_empreinte_enrolee";
+        } catch (SecurityException e) {
+            Log.w(TAG, "Permission biométrique absente : " + e.getMessage());
+            return "permission_manquante";
+        } catch (Throwable t) {
+            Log.w(TAG, "Diagnostic biométrique impossible : " + t.getMessage());
+            return "diagnostic_impossible";
+        }
+    }
+
+    /** BiometricManager.canAuthenticate(...) → code stable. Valeurs publiées par
+        le framework (BiometricManager.BIOMETRIC_*). */
+    static String codeCanAuthenticate(int r) {
+        switch (r) {
+            case 0:  return "ok";                        // BIOMETRIC_SUCCESS
+            case 1:  return "materiel_indisponible";     // BIOMETRIC_ERROR_HW_UNAVAILABLE
+            case 11: return "aucune_empreinte_enrolee";  // BIOMETRIC_ERROR_NONE_ENROLLED
+            case 12: return "materiel_absent";           // BIOMETRIC_ERROR_NO_HARDWARE
+            case 15: return "maj_securite_requise";      // BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED
+            default: return "non_supporte";              // BIOMETRIC_ERROR_UNSUPPORTED et autres
+        }
+    }
+
+    /** Codes d'erreur de BiometricPrompt (BiometricConstants, valeurs publiées)
+        → code stable de l'application. Chaque cause a son nom. Tenu en phase avec
+        js/biometrie.js (LIBELLES) par tests/test_empreinte_cableage.py. */
+    static String codeErreurBiometrie(int code) {
+        switch (code) {
+            case 1:  return "materiel_indisponible";     // ERROR_HW_UNAVAILABLE
+            case 2:  return "capteur_illisible";         // ERROR_UNABLE_TO_PROCESS
+            case 3:  return "delai_depasse";             // ERROR_TIMEOUT
+            case 4:  return "espace_insuffisant";        // ERROR_NO_SPACE
+            case 5:  return "annule_systeme";            // ERROR_CANCELED
+            case 7:  return "verrouillage_temporaire";   // ERROR_LOCKOUT
+            case 8:  return "erreur_fabricant";          // ERROR_VENDOR
+            case 9:  return "verrouillage_permanent";    // ERROR_LOCKOUT_PERMANENT
+            case 10: return "annule_utilisateur";        // ERROR_USER_CANCELED
+            case 11: return "aucune_empreinte_enrolee";  // ERROR_NO_BIOMETRICS
+            case 12: return "materiel_absent";           // ERROR_HW_NOT_PRESENT
+            case 13: return "repli_mot_de_passe";        // ERROR_NEGATIVE_BUTTON
+            case 14: return "pas_de_code_ecran";         // ERROR_NO_DEVICE_CREDENTIAL
+            case 15: return "maj_securite_requise";      // ERROR_SECURITY_UPDATE_REQUIRED
+            default: return "erreur_inconnue";
+        }
+    }
+
     private static final String PREFS_EMPREINTE = "pf_empreinte";
     private static final String CLE_SESSION_CHIFFREE = "session_chiffree";
     private static final String CLE_KEYSTORE_EMPREINTE = "pf_empreinte_v1";
@@ -616,7 +695,10 @@ public class NativeBridge {
         return activity.getSharedPreferences(PREFS_EMPREINTE, Context.MODE_PRIVATE);
     }
 
-    /** Clé AES du Keystore Android : créée au premier scellement, jamais exportée. */
+    /** Clé AES du Keystore Android : créée au premier scellement, jamais exportée.
+        Choix assumé : setUserAuthenticationRequired absent, voulu. Le scellement
+        silencieux des jetons rafraîchis est sinon impossible. La porte d'ouverture
+        reste le BiometricPrompt lié au CryptoObject. */
     private SecretKey cleEmpreinte(boolean creer) throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
         ks.load(null);
@@ -635,6 +717,19 @@ public class NativeBridge {
                 .setKeySize(256)
                 .build());
         return kg.generateKey();
+    }
+
+    /** Supprime la clé et les jetons gardés : après une invalidation, rien ne se
+        déchiffre plus, il faut resceller avec le mot de passe. */
+    private void effacerEmpreinteComplete() {
+        try {
+            KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            if (ks.containsAlias(CLE_KEYSTORE_EMPREINTE)) ks.deleteEntry(CLE_KEYSTORE_EMPREINTE);
+        } catch (Exception e) {
+            Log.w(TAG, "Suppression de la clé impossible : " + e.getMessage());
+        }
+        prefsEmpreinte().edit().remove(CLE_SESSION_CHIFFREE).apply();
     }
 
     /** Scellement silencieux : chiffre et garde la session (jetons seuls). */
@@ -672,36 +767,17 @@ public class NativeBridge {
         return blob != null && !blob.isEmpty();
     }
 
-    @SuppressWarnings("deprecation")
-    private boolean empreinteDisponible() {
-        // BiometricPrompt : Android 9 (API 28). Avant, indisponible — repli
-        // email/mot de passe, jamais une biométrie de fortune.
-        if (android.os.Build.VERSION.SDK_INT < 28) return false;
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                android.hardware.biometrics.BiometricManager bm =
-                        (android.hardware.biometrics.BiometricManager)
-                                activity.getSystemService(Context.BIOMETRIC_SERVICE);
-                return bm != null && bm.canAuthenticate()
-                        == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
-            }
-            android.hardware.fingerprint.FingerprintManager fm = activity.getSystemService(
-                    android.hardware.fingerprint.FingerprintManager.class);
-            return fm != null && fm.isHardwareDetected() && fm.hasEnrolledFingerprints();
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
     @JavascriptInterface
     public String empreinteEtat() {
         try {
+            String diag = diagnosticEmpreinte();
             JSONObject o = new JSONObject();
-            o.put("dispo", empreinteDisponible());
+            o.put("dispo", "ok".equals(diag));
+            o.put("raison", diag);
             o.put("sessionGardee", empreinteSessionGardee());
             return o.toString();
         } catch (Exception e) {
-            return "{\"dispo\":false,\"sessionGardee\":false}";
+            return "{\"dispo\":false,\"raison\":\"diagnostic_impossible\",\"sessionGardee\":false}";
         }
     }
 
@@ -719,49 +795,77 @@ public class NativeBridge {
                 "Confirmez votre identité pour rouvrir votre session");
     }
 
+    /** Prépare le chiffre AVANT l'appel du prompt (B3) : sans cela, un échec de
+        clé ou de déchiffrement apparaîtrait après la biométrie, sans cause. */
+    private Cipher preparerChiffre(String sessionJson) throws ErreurEmpreinte {
+        try {
+            Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+            if (sessionJson != null) {
+                try {
+                    c.init(Cipher.ENCRYPT_MODE, cleEmpreinte(true));
+                } catch (android.security.keystore.KeyPermanentlyInvalidatedException e) {
+                    effacerEmpreinteComplete();
+                    throw new ErreurEmpreinte("cle_invalidee", e.getMessage());
+                }
+                return c;
+            }
+            String blob = prefsEmpreinte().getString(CLE_SESSION_CHIFFREE, "");
+            if (blob == null || blob.indexOf(':') <= 0) {
+                throw new ErreurEmpreinte("sans_session", "Aucun jeton chiffré gardé");
+            }
+            SecretKey cle = cleEmpreinte(false);
+            if (cle == null) {
+                effacerEmpreinteComplete();
+                throw new ErreurEmpreinte("cle_absente", "La clé de chiffrement a disparu");
+            }
+            byte[] iv = Base64.decode(blob.split(":", 2)[0], Base64.NO_WRAP);
+            try {
+                c.init(Cipher.DECRYPT_MODE, cle, new GCMParameterSpec(128, iv));
+            } catch (android.security.keystore.KeyPermanentlyInvalidatedException e) {
+                effacerEmpreinteComplete();
+                throw new ErreurEmpreinte("cle_invalidee", e.getMessage());
+            }
+            return c;
+        } catch (ErreurEmpreinte e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ErreurEmpreinte("cle_indisponible", String.valueOf(e.getMessage()));
+        }
+    }
+
     /** Demande biométrique liée au chiffrement. Résultat : PF.biometrie._fin(id, r). */
     private void demanderEmpreinte(final String callbackId, final String sessionJson,
                                    final String titre, final String sousTitre) {
-        if (android.os.Build.VERSION.SDK_INT < 28) {
-            retourEmpreinte(callbackId, erreurEmpreinte("indispo",
-                    "BiometricPrompt absent (Android 9 requis)"));
-            return;
-        }
-        if (!empreinteDisponible()) {
-            retourEmpreinte(callbackId, erreurEmpreinte("indispo",
-                    "Aucune empreinte configurée sur cet appareil"));
+        final String diag = diagnosticEmpreinte();
+        if (!"ok".equals(diag)) {
+            retourEmpreinte(callbackId, erreurEmpreinte(diag, "Diagnostic : " + diag, -1));
             return;
         }
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                final Cipher chiffre;
                 try {
-                    final Cipher chiffre;
-                    if (sessionJson != null) {
-                        chiffre = Cipher.getInstance("AES/GCM/NoPadding");
-                        chiffre.init(Cipher.ENCRYPT_MODE, cleEmpreinte(true));
-                    } else {
-                        String blob = prefsEmpreinte().getString(CLE_SESSION_CHIFFREE, "");
-                        if (blob == null || blob.indexOf(':') <= 0) {
-                            retourEmpreinte(callbackId, erreurEmpreinte("sans_session",
-                                    "Aucun jeton chiffré gardé"));
-                            return;
-                        }
-                        byte[] iv = Base64.decode(blob.split(":", 2)[0], Base64.NO_WRAP);
-                        chiffre = Cipher.getInstance("AES/GCM/NoPadding");
-                        chiffre.init(Cipher.DECRYPT_MODE, cleEmpreinte(false),
-                                new GCMParameterSpec(128, iv));
-                    }
-
+                    chiffre = preparerChiffre(sessionJson);
+                } catch (ErreurEmpreinte e) {
+                    retourEmpreinte(callbackId, erreurEmpreinte(e.code, String.valueOf(e.getMessage()), -1));
+                    return;
+                }
+                try {
                     android.hardware.biometrics.BiometricPrompt.Builder constructeur =
                             new android.hardware.biometrics.BiometricPrompt.Builder(activity);
                     constructeur.setTitle(titre).setSubtitle(sousTitre);
+                    // Même exigence qu'au déverrouillage : classe forte (CryptoObject).
+                    if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        constructeur.setAllowedAuthenticators(
+                                android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG);
+                    }
                     constructeur.setNegativeButton("Utiliser le mot de passe", pool,
                             new DialogInterface.OnClickListener() {
                                 @Override
                                 public void onClick(DialogInterface dialog, int which) {
                                     retourEmpreinte(callbackId,
-                                            erreurEmpreinte("repli", "Repli demandé : mot de passe"));
+                                            erreurEmpreinte("repli_mot_de_passe", "Repli demandé", 13));
                                 }
                             });
                     android.hardware.biometrics.BiometricPrompt prompt = constructeur.build();
@@ -794,42 +898,41 @@ public class NativeBridge {
                                     } catch (Exception e) {
                                         Log.w(TAG, "Jetons illisibles après biométrie : " + e.getMessage());
                                         retourEmpreinte(callbackId,
-                                                erreurEmpreinte("echec", "Jetons illisibles"));
+                                                erreurEmpreinte("jetons_illisibles", String.valueOf(e.getMessage()), -1));
                                     }
                                 }
 
                                 @Override
                                 public void onAuthenticationError(int code, CharSequence message) {
-                                    // Codes stables de BiometricPrompt (BiometricConstants) :
-                                    // 5 = ERROR_CANCELED, 10 = ERROR_USER_CANCELED. Les
-                                    // constantes du champ ne sont pas résolues via la classe
-                                    // dans android.jar-35 : on garde les valeurs publiées.
-                                    boolean annulation = (code == 10 || code == 5);
+                                    // Code système conservé (B1) : la cause réelle remonte à l'app.
                                     retourEmpreinte(callbackId, erreurEmpreinte(
-                                            annulation ? "annule" : "echec", String.valueOf(message)));
+                                            codeErreurBiometrie(code), String.valueOf(message), code));
                                 }
 
                                 // onAuthenticationFailed : doigt inconnu — le prompt reste
                                 // ouvert, on ne rend rien, l'utilisateur peut réessayer.
                             });
+                } catch (SecurityException e) {
+                    Log.w(TAG, "Permission biométrique refusée : " + e.getMessage());
+                    retourEmpreinte(callbackId, erreurEmpreinte("permission_manquante", String.valueOf(e.getMessage()), -1));
                 } catch (Exception e) {
                     Log.w(TAG, "Demande biométrique impossible : " + e.getMessage());
-                    retourEmpreinte(callbackId,
-                            erreurEmpreinte("echec", String.valueOf(e.getMessage())));
+                    retourEmpreinte(callbackId, erreurEmpreinte("erreur_prompt", String.valueOf(e.getMessage()), -1));
                 }
             }
         });
     }
 
-    private static String erreurEmpreinte(String code, String message) {
+    private static String erreurEmpreinte(String code, String message, int systeme) {
         try {
             JSONObject o = new JSONObject();
             o.put("ok", false);
             o.put("code", code);
             o.put("message", message);
+            if (systeme >= 0) o.put("systeme", systeme);
             return o.toString();
         } catch (Exception e) {
-            return "{\"ok\":false,\"code\":\"echec\"}";
+            return "{\"ok\":false,\"code\":\"erreur_prompt\"}";
         }
     }
 

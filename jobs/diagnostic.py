@@ -946,6 +946,116 @@ def conclure() -> None:
     log.info("")
 
 
+def lignes_flux_valorises(dates: list, valeurs: list[float], apports: pd.DataFrame,
+                          depuis_annee: int) -> list[dict]:
+    """Pour chaque jour d'apport depuis `depuis_annee` : la valorisation UTILISÉE
+    par le TWR, son origine, et le snapshot retenu (2.2.0, constat A3).
+
+    Lecture seule, fonction pure : même règle que `metrics.valorisations_avant_flux`
+    (valeur mesurée > snapshot strictement antérieur > manquante). Un flux daté
+    avant le premier snapshot est marqué « hors fenêtre » : il n'entre dans aucun
+    intervalle du TWR.
+    """
+    if apports is None or apports.empty or not {"date", "sens", "montant_eur"} <= set(apports.columns):
+        return []
+    d = pd.to_datetime(apports["date"], errors="coerce")
+    sens = apports["sens"].astype(str).str.strip().str.lower().map(
+        {"apport": 1.0, "ajout": 1.0, "retrait": -1.0})
+    montant = pd.to_numeric(apports["montant_eur"], errors="coerce")
+    if "valeur_avant_eur" in apports.columns:
+        avant = pd.to_numeric(apports["valeur_avant_eur"], errors="coerce")
+    else:
+        avant = pd.Series([float("nan")] * len(apports), index=apports.index)
+
+    flux: dict = {}
+    nb: dict = {}
+    mesurees_brutes: dict = {}
+    for dd, ss, mm, vv in zip(d, sens, montant, avant):
+        if pd.isna(dd) or ss is None or pd.isna(mm):
+            continue
+        jour = dd.date()
+        flux[jour] = flux.get(jour, 0.0) + ss * float(mm)
+        nb[jour] = nb.get(jour, 0) + 1
+        if not pd.isna(vv):
+            mesurees_brutes.setdefault(jour, float(vv))
+    # Un jour à plusieurs apports ne porte pas de valorisation mesurée : attribution ambiguë.
+    mesurees = {j: v for j, v in mesurees_brutes.items() if nb.get(j) == 1}
+
+    detail = metrics.valorisations_avant_flux(dates, valeurs, list(flux.keys()), mesurees)
+    premier = dates[0] if dates else None
+    sorties = []
+    for jour in sorted(flux):
+        if jour.year < depuis_annee:
+            continue
+        e = detail[jour]
+        sorties.append({
+            "date": jour,
+            "montant": round(flux[jour], 2),
+            "nb_apports": nb[jour],
+            "mesuree": mesurees.get(jour),
+            "origine": e["origine"],
+            "valorisation": e["valeur"],
+            "snapshot": e["snapshot"],
+            "raison": e["raison"],
+            "hors_fenetre": premier is not None and jour <= premier,
+        })
+    return sorties
+
+
+def examiner_flux_valorises(snaps: pd.DataFrame, apports: pd.DataFrame) -> None:
+    """Journal : pour chaque flux des 3 dernières années, la valorisation utilisée
+    (mesurée, reconstruite ou manquante), le snapshot retenu, et le TWR global
+    qui en résulte. Lecture seule."""
+    _titre("FLUX DES 3 DERNIÈRES ANNÉES : VALORISATION UTILISÉE PAR LE TWR")
+    if snaps.empty or "patrimoine_investi_eur" not in snaps.columns or "Date_DT" not in snaps.columns:
+        log.info("  Pas de snapshots : rien à examiner.")
+        return
+    dates = [d.date() for d in snaps["Date_DT"]]
+    valeurs = pd.to_numeric(snaps["patrimoine_investi_eur"], errors="coerce").fillna(0.0).tolist()
+    depuis = dt.date.today().year - 2
+    lignes = lignes_flux_valorises(dates, valeurs, apports, depuis)
+    if not lignes:
+        log.info("  Aucun apport depuis %d.", depuis)
+        return
+
+    log.info("  Premier snapshot : %s — les flux antérieurs sont « hors fenêtre ».", dates[0])
+    log.info("  %-10s %12s %5s %-13s %14s %-10s  %s",
+             "Date", "Montant €", "nb", "Origine", "Valorisation €", "Snapshot", "Note")
+    for L in lignes:
+        note = ""
+        if L["hors_fenetre"]:
+            note = "hors fenêtre (avant le premier snapshot)"
+        elif L["origine"] == "reconstruite":
+            note = "reconstruite : approximation (portefeuille supposé inchangé)"
+        elif L["origine"] == "manquante":
+            note = L["raison"]
+        val = f"{L['valorisation']:,.2f}" if L["valorisation"] is not None else "—"
+        snap = str(L["snapshot"]) if L["snapshot"] is not None else "—"
+        log.info("  %-10s %+12.2f %5d %-13s %14s %-10s  %s",
+                 L["date"], L["montant"], L["nb_apports"], L["origine"], val, snap, note)
+
+    nb_mes = sum(1 for L in lignes if L["origine"] == "mesurée")
+    nb_rec = sum(1 for L in lignes if L["origine"] == "reconstruite")
+    nb_man = sum(1 for L in lignes if L["origine"] == "manquante" and not L["hors_fenetre"])
+    log.info("")
+    log.info("  Bilan : %d mesurée(s), %d reconstruite(s), %d manquante(s) dans la fenêtre.",
+             nb_mes, nb_rec, nb_man)
+
+    # TWR global tel que l'app le calcule (2.2.0 : None si un intervalle manque).
+    flux_jour = {L["date"]: L["montant"] for L in lignes}
+    valorisations = {L["date"]: L["valorisation"] for L in lignes if L["valorisation"] is not None}
+    twr, non_calcules = metrics.twr_exact(dates, valeurs, flux_jour, valorisations)
+    if twr is None:
+        log.info("  TWR global : NON CALCULÉ — %d intervalle(s) sans valorisation.", len(non_calcules))
+        for nc in non_calcules:
+            log.info("    du %s au %s : %s", nc["de"], nc["a"], nc.get("raison", ""))
+        verdicts.append("TWR global non calculé : voir les intervalles listés ci-dessus.")
+    else:
+        log.info("  TWR global calculé : %+.2f %%", twr * 100)
+        if nb_rec:
+            verdicts.append(f"{nb_rec} flux valorisé(s) par reconstruction (approximation).")
+
+
 def main() -> int:
     log.info("Diagnostic v3 — %s (lecture seule)",
              dt.datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -981,6 +1091,7 @@ def main() -> int:
             apports = pd.DataFrame()
 
         examiner_sauts(snaps, apports)
+        examiner_flux_valorises(snaps, apports)
         reconcilier_apports(hist, apports)
         reconcilier_capital(hist)
         recalculer_twr(snaps)

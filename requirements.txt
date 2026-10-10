@@ -13,6 +13,9 @@ plotly>=5.18
 # la famille de versions pour prévenir tout autre changement silencieux.
 yfinance>=0.2.28,<2
 supabase>=2.3
+# Sauvegarde chiffrée (2.2.0) : AES-GCM. Déclaré explicitement, pas via une
+# dépendance transitive, car core/sauvegarde.py l'importe directement.
+cryptography>=42
 pytest>=7.4
 # Tests RLS réels (2.1.0) : un PostgreSQL embarqué rejoue les migrations et
 # vérifie que `anon` ne peut ni lire ni écrire. Aucun Supabase live requis.

@@ -844,6 +844,20 @@
                     + 'n\u2019est invent\u00e9. Depuis la 2.1.0, chaque apport enregistre la valeur '
                     + 'du portefeuille au moment du geste.</div>';
             }
+            /* 2.2.0 (constat A1) : une valorisation RECONSTRUITE (snapshot précédent)
+               n'est pas une mesure. Elle est signalée, avec ses dates. */
+            var detailVal = ctx.serie.valorisationsDetail || {};
+            var reconstruits = Object.keys(detailVal).filter(function (f) {
+                return detailVal[f].origine === 'reconstruite';
+            }).sort();
+            if (reconstruits.length) {
+                out += '<div class="aide" style="padding:8px 12px">\u2139\ufe0f ' + reconstruits.length
+                    + ' apport(s) valoris\u00e9(s) par le snapshot pr\u00e9c\u00e9dent (valeur reconstruite, '
+                    + 'approximation : le portefeuille est suppos\u00e9 inchang\u00e9 entre ce snapshot et '
+                    + 'l\u2019apport) : ' + reconstruits.map(function (f) {
+                        return UI.h(f) + ' (snapshot du ' + UI.h(detailVal[f].snapshot) + ')';
+                    }).join(', ') + '.</div>';
+            }
             out += '</div>';
         }
 

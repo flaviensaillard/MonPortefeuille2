@@ -60,7 +60,9 @@ verifier('le rendement est null, pas +20 %', r.rendements.length === 1 && r.rend
 verifier('l’intervalle est annoncé', r.nonCalcules.length === 1
     && approx(r.nonCalcules[0].flux, 100), JSON.stringify(r.nonCalcules));
 var t = PF.metrics.twrStricts(['2026-01-01', '2026-01-31'], [100, 220], { '2026-01-13': 100 });
-verifier('twrStricts : rien de chaîné, un écart annoncé', t.twr === 0 && t.nonCalcules.length === 1);
+// 2.2.0 (constat A2) : un intervalle non calculé rend le TWR non calculé (null).
+// Avant : 0, présenté comme un total.
+verifier('twrStricts : TWR non calculé (null), écart annoncé', t.twr === null && t.nonCalcules.length === 1);
 
 console.log('Intervalle sans flux : exact quelle que soit sa longueur');
 r = R(['2026-01-31', '2026-03-31'], [1000, 1210], {});
@@ -81,7 +83,8 @@ r = R(['2026-01-01', '2026-01-02', '2026-01-03'], [100, 260, 286], { '2026-01-02
 verifier('l’intervalle du flux est null', r.rendements[0] === null);
 verifier('l’intervalle suivant reste exact (+10 %)', approx(r.rendements[1], 0.10));
 t = PF.metrics.twrStricts(['2026-01-01', '2026-01-02', '2026-01-03'], [100, 260, 286], { '2026-01-02': 100 });
-verifier('le TWR chaîne le seul intervalle exact', approx(t.twr, 0.10) && t.nonCalcules.length === 1);
+// 2.2.0 (constat A2) : le seul intervalle exact ne fait pas un total. Avant : +10 %.
+verifier('le TWR global n’est pas un total partiel (null)', t.twr === null && t.nonCalcules.length === 1);
 
 console.log('Flux du premier jour : déjà dans la valeur de départ');
 r = R(['2026-01-01', '2026-01-31'], [100, 110], { '2026-01-01': 500 });

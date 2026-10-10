@@ -133,10 +133,11 @@ class TestTwrPortefeuille:
         ctx = CtxBidon(snaps, apports)
         assert S.twr_portefeuille(ctx) == pytest.approx(0.10)
 
-    def test_sans_valorisation_l_intervalle_n_est_pas_calcule(self):
-        """2.1.0 (revue F-07) : un apport sans valeur « avant » ne doit plus
-        produire un TWR dépendant du moment supposé du versement — le point est
-        annoncé non calculé, pas estimé en fin de période."""
+    def test_sans_valeur_avant_la_valeur_est_reconstruite_du_snapshot_precedent(self):
+        """2.2.0 (constat A1) : un apport sans valeur « avant » capturée est
+        valorisé par le snapshot STRICTEMENT antérieur (ici 100 € au 1er janvier).
+        100 € → +100 € versés → 220 € : rendement (100/100)·(220/200) − 1 = +10 %.
+        Avant 2.2.0 : intervalle non calculé, TWR None."""
         snaps = pd.DataFrame({
             "Date": pd.to_datetime([dt.date(2024, 1, 1), dt.date(2024, 12, 31)]),
             "patrimoine_investi_eur": [100.0, 220.0],
@@ -145,9 +146,13 @@ class TestTwrPortefeuille:
             "date": ["2024-06-15"], "sens": ["apport"], "montant_eur": [100.0],
         })
         ctx = CtxBidon(snaps, apports)
-        assert S.twr_portefeuille(ctx) is None
-        assert len(ctx.twr_non_calcules) == 1
-        assert ctx.twr_non_calcules[0]["flux"] == pytest.approx(100.0)
+        assert S.twr_portefeuille(ctx) == pytest.approx(0.10)
+        assert ctx.twr_non_calcules == []
+        detail = S.serie_performance(ctx)[0].attrs["valorisations_detail"]
+        entree = detail[dt.date(2024, 6, 15)]
+        assert entree["origine"] == "reconstruite"
+        assert entree["snapshot"] == dt.date(2024, 1, 1)
+        assert entree["valeur"] == pytest.approx(100.0)
 
 
 class TestTwrEnOrPortefeuille:
