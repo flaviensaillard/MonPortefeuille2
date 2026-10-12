@@ -27,30 +27,24 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
 ## Mettre la base en place (l'ordre compte)
 
-1. **Vérifier une vraie sauvegarde réussie avant toute écriture de millésimes.**
-   Le 12/10/2026, « Sauvegarde chiffrée » a échoué à la lecture de `Config` :
-   `permission denied`, avec une suggestion de `GRANT ... TO anon` dans le log.
-   **Ne surtout pas suivre cette suggestion** : exposer `Config` à la clé
-   publique serait une fuite. La clé `SUPABASE_KEY` configurée dans les secrets
-   GitHub semble être de rôle `anon`, alors que les jobs serveur attendent une
-   clé **service_role** (ou nouvelle clé `sb_secret_…`). Corriger *uniquement*
-   ce secret GitHub depuis Supabase → Project Settings → API Keys, puis relancer
-   « Sauvegarde chiffrée ». Ne jamais communiquer la clé, ni la mettre dans
-   l'APK ou le dépôt. Le code bloque désormais avant lecture si le secret a le
-   rôle `anon`. Ces scripts SQL ne suppriment ni ne modifient vos tables de
-   transactions, ni les autres données fiscales `Config`.
-   La prochaine sauvegarde, si elle réussit, inclura les deux nouvelles tables
-   fiscales comme tables optionnelles ; contrôlez le compte rendu pour confirmer
-   qu'elles y figurent après l'import (une table absente est explicitement signalée).
-2. Dans **Supabase → SQL Editor**, exécuter `migrations/009_collectes_fiscales.sql`
-   puis `migrations/010_fiscal_annees.sql`. Aucune clé service rôle n'est à
-   transmettre dans la conversation. La migration 010 peut être rejouée ; elle
-   conserve les éventuelles collectes IR de la 009, qui deviennent révision 1.
-3. Une fois le code sur `main`, GitHub → **Actions → Reprendre les millésimes
-   fiscaux existants → Run workflow**, laisser « Écrire » sur **Non** et lire
-   les années proposées (simulation). Ce workflow emploie les secrets serveur
-   déjà utilisés par les robots : `SUPABASE_URL`, `SUPABASE_KEY` (service_role)
-   et `SUPABASE_USER_ID`. Il ne demande aucune valeur dans l'APK.
+1. **Sauvegarde avant toute écriture de millésimes : effectuée le 12/10/2026.**
+   Le workflow avait d'abord échoué sur `Config` avec une clé `anon`. Le secret
+   GitHub a été corrigé côté utilisateur, puis la relance du run 38254476762
+   a réussi : export chiffré, restauration de contrôle et artefact présent.
+   **Ne jamais exécuter `GRANT ... TO anon`** malgré la suggestion initiale
+   de l'erreur : cela exposerait `Config`. La sauvegarde de `main` couvre les
+   anciennes tables ; après fusion de cette branche, une sauvegarde inclura
+   aussi les deux nouvelles tables fiscales comme tables optionnelles. Vérifier
+   le compte rendu après l'import. Ne jamais communiquer la clé serveur, ni la
+   placer dans l'APK ou le dépôt.
+2. **Migrations 009 puis 010 : exécutées par le propriétaire** dans Supabase SQL
+   Editor le 12/10/2026 ; retour « Success. No rows returned » pour chacune.
+   La migration 010 conserve les éventuelles collectes IR de 009 en révision 1.
+3. **Simulation : effectuée en lecture seule** sur la branche via Actions run
+   38257679857. Résultat : aucune année présente dans `pf2_fiscal_annees` ;
+   années proposées : **2022, 2023, 2024, 2025, 2026**. Aucune ligne insérée.
+   Le workflow manuel de simulation restera disponible sur `main` après fusion.
+   Il utilise `SUPABASE_URL`, `SUPABASE_KEY` (service_role) et `SUPABASE_USER_ID`.
 4. Si le rapport convient, relancer le workflow avec **Écrire = Oui**. Seules
    les années ABSENTES sont insérées en révision 1. Si une année possède déjà
    une révision, elle est laissée intacte. Relancer une deuxième fois ne crée
@@ -65,9 +59,10 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
    Ne copiez pas de données sensibles depuis d'autres tables dans un journal
    public. Le numéro de version `2.2.1` du téléphone ne change pas à cette étape.
 
-**Je n'ai pas exécuté ces SQL sur votre projet Supabase.** La branche prépare
-l'opération mais la connexion SQL à votre base n'est pas disponible ici ; l'ordre
-09 → 10 → simulation → import réel est indispensable.
+**Import réel NON exécuté : en attente de l'accord du propriétaire.** Les SQL ont
+été exécutés par le propriétaire, la sauvegarde et la simulation sont réussies.
+Les données proposées proviennent toujours du code embarqué, non des textes
+fiscaux officiellement revérifiés.
 
 ## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
 
