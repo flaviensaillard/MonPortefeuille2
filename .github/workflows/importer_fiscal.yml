@@ -4,10 +4,6 @@
 name: Reprendre les millésimes fiscaux existants
 
 on:
-  # Temporaire : une simulation strictement en lecture seule sur cette branche.
-  # Supprimer ce déclencheur après lecture du rapport, AVANT tout merge.
-  push:
-    branches: [arena/4e8a2b4d-monportefeuille2]
   workflow_dispatch:
     inputs:
       appliquer:
@@ -18,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # uniquement pour publier le résultat non sensible de simulation
 
 jobs:
   importer:
@@ -37,21 +32,8 @@ jobs:
           SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
           APPLIQUER: ${{ inputs.appliquer }}
         run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$APPLIQUER" = "true" ]; then
+          if [ "$APPLIQUER" = "true" ]; then
             python jobs/importer_fiscal_existant.py --appliquer
           else
-            python jobs/importer_fiscal_existant.py --dry-run | tee /tmp/rapport-fiscal.txt
+            python jobs/importer_fiscal_existant.py --dry-run
           fi
-      - name: Publier seulement les années proposées dans la PR
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo 'Simulation fiscale en lecture seule — AUCUNE année insérée :'
-            echo '```'
-            cat /tmp/rapport-fiscal.txt
-            echo '```'
-          } > /tmp/commentaire-fiscal.txt
-          gh pr comment 22 --repo "$GITHUB_REPOSITORY" --body-file /tmp/commentaire-fiscal.txt
