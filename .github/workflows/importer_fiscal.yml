@@ -1,14 +1,9 @@
 # Reprise des barèmes intégrés à la 2.2.1 ; PAS une veille officielle.
-# 009/010 ont été appliquées, sauvegarde réussie, simulation validée.
-# TEMPORAIRE : le push sur cette branche exécute UNE FOIS l'import autorisé
-# par le propriétaire, contrôle les années puis sauvegarde. Retirer le push
-# et ce job immédiatement après, AVANT toute fusion.
+# PRÉREQUIS manuel : appliquer 009 puis 010 dans l'éditeur SQL de Supabase.
+# Toujours lancer d'abord en simulation et lire le résultat.
 name: Reprendre les millésimes fiscaux existants
 
 on:
-  push:
-    branches: [arena/4e8a2b4d-monportefeuille2]
-    paths: [.github/workflows/importer_fiscal.yml]
   workflow_dispatch:
     inputs:
       appliquer:
@@ -19,11 +14,9 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # temporaire : publier un bilan sans données sensibles
 
 jobs:
   importer:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,83 +37,3 @@ jobs:
           else
             python jobs/importer_fiscal_existant.py --dry-run
           fi
-
-  importer_autorise_une_fois:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - name: Import réel autorisé (2022–2026, révision 1 si absente)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
-        run: |
-          set -euo pipefail
-          python jobs/importer_fiscal_existant.py --appliquer | tee /tmp/rapport-import-fiscal.txt
-      - name: Contrôler en base les cinq lignes et leur provenance
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
-        run: |
-          python - <<'PY'
-          import json
-          from core import db, fiscal_bars
-          from jobs import cle_service
-          from jobs.importer_fiscal_existant import TABLE, parametres_du_code
-          cle_service.configurer()
-          uid = db.proprietaire_service()
-          assert uid, 'propriétaire absent'
-          for an in sorted(fiscal_bars.BAREMES):
-              lignes = (db.client().table(TABLE)
-                        .select('revision,origine,parametres')
-                        .eq('user_id', uid).eq('annee_revenus', an)
-                        .order('revision', desc=True).limit(1).execute().data or [])
-              assert len(lignes) == 1, f'Année absente : {an}'
-              ligne = lignes[0]
-              assert ligne['revision'] == 1, f'Révision inattendue : {an}'
-              assert ligne['origine'] == 'reprise_code_non_verifiee', f'Origine inattendue : {an}'
-              attendu = json.loads(json.dumps(parametres_du_code(an)))
-              assert ligne['parametres'] == attendu, f'Paramètres différents : {an}'
-              print(f'Vérifié en base : revenus {an}, révision 1, copie non revérifiée')
-          PY
-      - name: Sauvegarde chiffrée des nouvelles tables (même si import partiel)
-        if: always()
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
-        run: python jobs/sauvegarde.py
-      - name: Restaurer et vérifier la sauvegarde
-        env:
-          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
-        run: |
-          fichier=$(ls sauvegardes/*.pf2)
-          python jobs/restauration.py "$fichier" --csv /tmp/controle-csv
-          (cd sauvegardes && sha256sum -c "$(basename "$fichier").sha256")
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sauvegarde-fiscale-${{ github.run_id }}
-          path: sauvegardes/
-          retention-days: 90
-          if-no-files-found: error
-      - name: Communiquer les seules années importées et le contrôle
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo 'Import fiscal autorisé et vérifié :'
-            echo '```'
-            cat /tmp/rapport-import-fiscal.txt
-            echo '```'
-            echo 'Sauvegarde chiffrée de contrôle réussie (artefact de ce run, 90 jours).'
-            echo 'Les calculs de l’application ne changent pas.'
-          } > /tmp/commentaire-fiscal.txt
-          gh pr comment 22 --repo "$GITHUB_REPOSITORY" --body-file /tmp/commentaire-fiscal.txt
