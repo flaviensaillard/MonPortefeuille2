@@ -28,16 +28,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      # Simulation temporaire, lecture seule, sur la branche de migration fiscale.
-      - name: Simulation de la reprise fiscale
-        if: github.ref == 'refs/heads/arena/4e8a2b4d-monportefeuille2'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
-        run: python jobs/importer_fiscal_existant.py --dry-run
       - name: Diagnostic du portefeuille
-        if: github.ref != 'refs/heads/arena/4e8a2b4d-monportefeuille2'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
