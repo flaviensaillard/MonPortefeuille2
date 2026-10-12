@@ -27,10 +27,18 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
 ## Mettre la base en place (l'ordre compte)
 
-1. **Sauvegarder la base** avec votre procédure habituelle. Le workflow de
-   sauvegarde avait échoué lors du dernier contrôle : vérifiez qu'il a réussi
-   depuis avant d'intervenir en production. Ces scripts ne suppriment ni ne
-   modifient vos tables de transactions, ni les autres données fiscales `Config`.
+1. **Vérifier une vraie sauvegarde réussie avant toute écriture de millésimes.**
+   Le 12/10/2026, « Sauvegarde chiffrée » a échoué à la lecture de `Config` :
+   `permission denied`, avec une suggestion de `GRANT ... TO anon` dans le log.
+   **Ne surtout pas suivre cette suggestion** : exposer `Config` à la clé
+   publique serait une fuite. La clé `SUPABASE_KEY` configurée dans les secrets
+   GitHub semble être de rôle `anon`, alors que les jobs serveur attendent une
+   clé **service_role** (ou nouvelle clé `sb_secret_…`). Corriger *uniquement*
+   ce secret GitHub depuis Supabase → Project Settings → API Keys, puis relancer
+   « Sauvegarde chiffrée ». Ne jamais communiquer la clé, ni la mettre dans
+   l'APK ou le dépôt. Le code bloque désormais avant lecture si le secret a le
+   rôle `anon`. Ces scripts SQL ne suppriment ni ne modifient vos tables de
+   transactions, ni les autres données fiscales `Config`.
    La prochaine sauvegarde, si elle réussit, inclura les deux nouvelles tables
    fiscales comme tables optionnelles ; contrôlez le compte rendu pour confirmer
    qu'elles y figurent après l'import (une table absente est explicitement signalée).

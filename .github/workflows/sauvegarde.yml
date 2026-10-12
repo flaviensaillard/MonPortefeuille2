@@ -9,7 +9,8 @@
 #    copie hors ligne. Télécharger l'artefact depuis l'onglet « Actions ».
 #
 # Secrets requis (Settings > Secrets and variables > Actions) :
-#   SUPABASE_URL, SUPABASE_KEY : lecture ;
+#   SUPABASE_URL, SUPABASE_KEY : lecture avec clé serveur service_role ;
+#   surtout PAS la clé publique/anon, qui masquerait silencieusement des lignes.
 #   SAUVEGARDE_CLE : phrase de chiffrement, 12 caractères minimum. Sans elle,
 #   le job s'arrête : aucune sauvegarde en clair n'est produite.
 #

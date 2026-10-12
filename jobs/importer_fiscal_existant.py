@@ -72,14 +72,17 @@ def importer(client, proprietaire: str, appliquer: bool = False) -> tuple[list[i
             deja.append(annee)
             continue
         if appliquer:
-            client.table(TABLE).insert({
+            # Point d'écriture centralisé : vérifie aussi SUPABASE_USER_ID et
+            # refuse une ligne attribuée à un autre propriétaire avant l'envoi.
+            from core import db
+            db.ecrire(TABLE, [{
                 "user_id": proprietaire,
                 "annee_revenus": annee,
                 "revision": 1,
                 "parametres": params,
                 "origine": "reprise_code_non_verifiee",
                 "source_ref": SOURCE,
-            }).execute()
+            }])
         nouvelles.append(annee)
     return nouvelles, deja
 
@@ -91,6 +94,11 @@ def main() -> int:
     mode.add_argument("--dry-run", action="store_true", help="Lire sans écrire (défaut)")
     args = parser.parse_args()
     from core import db
+    from jobs import cle_service
+    try:
+        cle_service.configurer()
+    except cle_service.CleServiceManquante as exc:
+        parser.error(str(exc))
     uid = db.proprietaire_service()
     if not uid:
         parser.error("SUPABASE_USER_ID absent : aucune lecture/écriture engagée")

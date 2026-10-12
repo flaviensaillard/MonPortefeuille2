@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from core import fiscal_bars as fb
+from core import db, fiscal_bars as fb
 from jobs.importer_fiscal_existant import importer, parametres_du_code
 
 
@@ -40,14 +40,14 @@ class FauxClient:
         return self
 
     def insert(self, valeurs):
-        self.valeurs = valeurs
+        self.valeurs = valeurs if isinstance(valeurs, list) else [valeurs]
         return self
 
     def execute(self):
         if self.valeurs is not None:
             self.ecritures += 1
-            self.lignes.append(self.valeurs)
-            return Reponse([self.valeurs])
+            self.lignes.extend(self.valeurs)
+            return Reponse(self.valeurs)
         return Reponse([{'revision': x['revision']} for x in self.lignes
                         if all(x.get(c) == v for c, v in self.filtres.items())][:1])
 
@@ -62,9 +62,10 @@ class TestReprise(unittest.TestCase):
         attendu = [2022, 2023, 2025, 2026]
         self.assertEqual(importer(c, owner), (attendu, [2024]))
         self.assertEqual(c.ecritures, 0)
-        self.assertEqual(importer(c, owner, appliquer=True), (attendu, [2024]))
-        self.assertEqual(c.ecritures, 4)
-        self.assertEqual(importer(c, owner, appliquer=True), ([], [2022, 2023, 2024, 2025, 2026]))
+        with patch.object(db, 'client', return_value=c), patch.dict('os.environ', {'SUPABASE_USER_ID': owner}):
+            self.assertEqual(importer(c, owner, appliquer=True), (attendu, [2024]))
+            self.assertEqual(c.ecritures, 4)
+            self.assertEqual(importer(c, owner, appliquer=True), ([], [2022, 2023, 2024, 2025, 2026]))
         self.assertEqual(c.ecritures, 4)
         self.assertEqual(c.lignes[1]['revision'], 2, 'année 2024 déjà présente intacte')
         self.assertTrue(all(x['origine'] == 'reprise_code_non_verifiee' for x in c.lignes[2:]))
