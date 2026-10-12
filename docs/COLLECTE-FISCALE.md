@@ -45,12 +45,17 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
    années proposées : **2022, 2023, 2024, 2025, 2026**. Aucune ligne insérée.
    Le workflow manuel de simulation restera disponible sur `main` après fusion.
    Il utilise `SUPABASE_URL`, `SUPABASE_KEY` (service_role) et `SUPABASE_USER_ID`.
-4. Si le rapport convient, relancer le workflow avec **Écrire = Oui**. Seules
-   les années ABSENTES sont insérées en révision 1. Si une année possède déjà
-   une révision, elle est laissée intacte. Relancer une deuxième fois ne crée
-   rien. Commande équivalente sur un poste équipé et configuré :
-   `python jobs/importer_fiscal_existant.py --dry-run`, puis `--appliquer`.
-5. Vérifier côté Supabase :
+4. **Import réel autorisé puis effectué le 12/10/2026**, run Actions 38258384611 :
+   2022, 2023, 2024, 2025, 2026 insérées en révision 1, aucune année déjà
+   présente. Le job a relu chaque ligne et comparé les paramètres avec la
+   copie attendue du code. La sauvegarde chiffrée de cette version a ensuite
+   été restaurée pour contrôle ; l'artefact `sauvegarde-fiscale-38258384611`
+   est disponible 90 jours dans Actions : le télécharger et conserver la phrase
+   `SAUVEGARDE_CLE` dans un gestionnaire de mots de passe pour pouvoir l'ouvrir.
+   Le déclencheur automatique ponctuel a été retiré
+   de la branche après succès. **Ne pas relancer l'import** : il est idempotent,
+   mais ne le répéter que pour un besoin vérifié.
+5. Contrôle facultatif côté Supabase :
    ```sql
    select annee_revenus, revision, origine, cree_le
      from public.pf2_fiscal_annees
@@ -59,10 +64,12 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
    Ne copiez pas de données sensibles depuis d'autres tables dans un journal
    public. Le numéro de version `2.2.1` du téléphone ne change pas à cette étape.
 
-**Import réel NON exécuté : en attente de l'accord du propriétaire.** Les SQL ont
-été exécutés par le propriétaire, la sauvegarde et la simulation sont réussies.
-Les données proposées proviennent toujours du code embarqué, non des textes
-fiscaux officiellement revérifiés.
+**Import réel effectué et contrôlé sur Supabase le 12/10/2026.** Il s'agit
+seulement d'une reprise des données du code embarqué, non de chiffres
+fiscaux officiellement revérifiés. La PR #22 reste à examiner : ni le bouton
+ni les sauvegardes périodiques incluant les nouvelles tables ne sont encore
+livrés sur `main`. Une sauvegarde chiffrée ponctuelle avec les deux nouvelles
+tables a été produite et contrôlée lors de l'import.
 
 ## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
 
