@@ -6,9 +6,12 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
 ## Modèle de données
 
-- `pf2_fiscal_annees` contient une **copie complète, par année de revenus**, des
-  paramètres actuellement embarqués dans `core/fiscal_bars.py` : barème, décote,
-  IR forfaitaire, prélèvements sociaux, frais et autres constantes du moteur.
+- `pf2_fiscal_annees` contient une **copie par année de revenus de plusieurs
+  constantes** embarquées dans `core/fiscal_bars.py` : barème, décote,
+  IR forfaitaire, taux annuel de prélèvements sociaux, frais et autres constantes.
+  **Ce n'est pas un modèle complet des règles de calcul** : le plafond du quotient
+  familial, codé en dur dans `core/tax.py` et le JS, n'est notamment pas importé ;
+  le taux de PS n'est pas ventilé par catégorie ni par date de prélèvement.
   L'année est une ligne, pas une nouvelle table. Chaque ligne porte une
   `revision` et une référence vers le commit source. Ces lignes sont lisibles
   depuis l'APK connectée mais insérables uniquement côté serveur.
@@ -70,6 +73,13 @@ fiscaux officiellement revérifiés. La PR #22 reste à examiner : ni le bouton
 ni les sauvegardes périodiques incluant les nouvelles tables ne sont encore
 livrés sur `main`. Une sauvegarde chiffrée ponctuelle avec les deux nouvelles
 tables a été produite et contrôlée lors de l'import.
+
+**Audit fiscal daté du 12/10/2026 :** voir
+[`AUDIT-FISCAL-2025-2026.md`](AUDIT-FISCAL-2025-2026.md). Des écarts officiels
+sont confirmés pour la décote, le quotient familial et les prélèvements sociaux
+de certains gains 2025. L'import reste **non vérifié** ; aucune révision importée
+ne doit être activée automatiquement pour les calculs sur la seule foi de cette
+reprise.
 
 ## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
 
