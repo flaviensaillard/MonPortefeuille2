@@ -1,4 +1,4 @@
-"""Fiscalité — Simulateur complet & déclaration pré-remplie case par case.\n\nRestaure l'intégralité des fonctionnalités de la v1 (situation familiale,\nsalaires 1AJ/1BJ, frais réels kilométriques et repas 1AK/1BK mémorisés dans\n`Config`, intérêts étrangers 2047/2TR, formulaires 2042, 3916-bis, 2047, 2074\nlignes 511-524 / 905 / 913 / Cadres 11-12 et 2086 lignes 211-224, taux de PAS\nfoyer et individualisés) tout en sélectionnant automatiquement les barèmes\nofficiels de l'année des revenus (IR, décote, barème kilométrique URSSAF,\nforfait repas URSSAF, PFU & prélèvements sociaux, CSG déductible à 6,8 %).\n"""
+"""Fiscalité — Simulateur complet & déclaration pré-remplie case par case.\n\nRestaure l'intégralité des fonctionnalités de la v1 (situation familiale,\nsalaires 1AJ/1BJ, frais réels kilométriques et repas 1AK/1BK mémorisés dans\n`Config`, intérêts étrangers 2047/2TR, formulaires 2042, 3916-bis, 2047, 2074\nlignes 511-524 / 905 / 913 / Cadres 11-12 et 2086 lignes 211-224, taux de PAS\nfoyer et individualisés) tout en sélectionnant automatiquement les barèmes\nintégrés de l'année des revenus (IR, décote, frais, PFU des titres et PS selon\ncatégorie). Les millésimes et les cas particuliers ne sont pas tous certifiés.\n"""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ except ValueError as exc:
     st.stop()
 
 st.markdown(
-    f"""<div style="background-color:rgba(30,41,59,0.75);color:#ffffff;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #2ecc71;font-size:0.93rem;">\n    <strong>🟢 Barèmes fiscaux automatiques — Revenus {annee} (déclaration {annee + 1})</strong><br>\n    <span style="font-size:0.86rem;opacity:0.9;">\n    • <b>Tranches IR {annee}</b> : 0 % jusqu'à {bareme_ir.tranches[0]:,.0f} € · 11 % jusqu'à {bareme_ir.tranches[1]:,.0f} € · 30 % jusqu'à {bareme_ir.tranches[2]:,.0f} € · 41 % jusqu'à {bareme_ir.tranches[3]:,.0f} € · 45 % au-delà<br>\n    • <b>Décote {annee}</b> : Célibataire (base {bareme_ir.decote_base_celibataire:,.0f} €, plafond {bareme_ir.decote_plafond_celibataire:,.0f} €) · Couple (base {bareme_ir.decote_base_couple:,.0f} €, plafond {bareme_ir.decote_plafond_couple:,.0f} €)<br>\n    • <b>PFU (Flat Tax) {annee}</b> : {fb.IR_FORFAITAIRE * 100:.1f} % IR + {ps_taux * 100:.1f} % PS = <b>{pfu_taux * 100:.1f} %</b> (CSG déductible au barème : 6,8 %)<br>\n    • <b>Frais professionnels {annee}</b> : Barème kilométrique officiel URSSAF/DGFiP (3 à 7+ CV) · Forfait repas : <b>{repas_unit:.2f} €/repas</b>\n    </span>\n    </div>""".replace(",", " "),
+    f"""<div style="background-color:rgba(30,41,59,0.75);color:#ffffff;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #2ecc71;font-size:0.93rem;">\n    <strong>Barèmes intégrés — Revenus {annee} (déclaration {annee + 1})</strong><br>\n    <span style="font-size:0.86rem;opacity:0.9;">\n    • <b>Tranches IR {annee}</b> : 0 % jusqu'à {bareme_ir.tranches[0]:,.0f} € · 11 % jusqu'à {bareme_ir.tranches[1]:,.0f} € · 30 % jusqu'à {bareme_ir.tranches[2]:,.0f} € · 41 % jusqu'à {bareme_ir.tranches[3]:,.0f} € · 45 % au-delà<br>\n    • <b>Décote {annee}</b> : Célibataire (base {bareme_ir.decote_base_celibataire:,.0f} €, plafond {bareme_ir.decote_plafond_celibataire:,.0f} €) · Couple (base {bareme_ir.decote_base_couple:,.0f} €, plafond {bareme_ir.decote_plafond_couple:,.0f} €)<br>\n    • <b>PFU des plus-values mobilières {annee}</b> : {fb.IR_FORFAITAIRE * 100:.1f} % IR + {ps_taux * 100:.1f} % PS = <b>{pfu_taux * 100:.1f} %</b> (revenus précomptés : taux distinct)<br>\n    • <b>Frais professionnels {annee}</b> : Barème kilométrique officiel URSSAF/DGFiP (3 à 7+ CV) · Forfait repas : <b>{repas_unit:.2f} €/repas</b>\n    </span>\n    </div>""".replace(",", " "),
     unsafe_allow_html=True,
 )
 
@@ -113,7 +113,7 @@ elif etat_maj_baremes["disponible"]:
     st.markdown(
         f"""<a href="{etat_maj_baremes['url']}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
         <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:10px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
-        <strong>🔔 Nouvelle version des barèmes fiscaux disponible !</strong><br>
+        <strong>🔔 Vérification fiscale requise</strong><br>
         <span style="font-size:0.88rem;color:#ffffff;">{etat_maj_baremes['message']}</span><br>
         <span style="text-decoration:underline;font-weight:600;color:#38bdf8;">👉 Cliquez ici pour ouvrir votre assistant Arena et mettre à jour les barèmes fiscaux ↗</span>
         </div></a>""",
@@ -134,8 +134,9 @@ with st.expander("🤖 Prompt à copier-coller dans l'IA pour générer le nouve
     )
     st.code(fb.generer_prompt_maj_baremes(annee), language="markdown")
 
-if annee in fb.PS_ANNEE_INCERTAINE:
-    st.info("ℹ️ " + fb.PS_ANNEE_INCERTAINE[annee])
+if annee == 2026:
+    st.warning("Les barèmes et la décote pour les revenus 2026 sont provisoires : déclaration 2027 à revérifier.")
+st.warning("Le quotient familial ne couvre que le plafonnement général. Si vous êtes parent isolé ou bénéficiez d'une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP de ce simulateur.")
 
 # ---------------------------------------------------------------------------
 # 1. Paramètres du foyer : Situation familiale & Déclaration de base (repliables)
@@ -268,6 +269,14 @@ with st.expander(
             "Intérêts nets encaissés à l'étranger (€) → 2047 Ligne 250 & 2042 Case 2TR ✍️",
             min_value=0.0, value=int_def, step=10.0,
         ))
+        statut_ps_interets = (st.selectbox(
+            f"PS des intérêts {annee} déjà précomptés lors du versement ?",
+            ["À préciser", "Oui — déjà précomptés", "Non — pas précomptés"],
+            key=f"ps_interets_{annee}",
+            help="Vérifiez le justificatif du versement : le pays de l'établissement ne permet pas de déduire le précompte.",
+        ) if interets_etrangers > 0 else "À préciser")
+        interets_ps_precomptes = {"Oui — déjà précomptés": True,
+                                  "Non — pas précomptés": False}.get(statut_ps_interets)
     with ce2:
         st.markdown("**Comptes à l'étranger à déclarer (Formulaire 3916 / 3916-bis & Case 8UU)**")
         defauts_comptes = guide.comptes_par_defaut()
@@ -437,6 +446,10 @@ if not (d2074["calcul_complet"] and d2086["calcul_complet"]):
     )
     st.stop()
 
+if interets_etrangers > 0 and interets_ps_precomptes is None:
+    st.error("Bilan indisponible : indiquez si les PS de vos intérêts ont réellement été précomptés. Le pays du courtier ne suffit pas.")
+    st.stop()
+
 sim = tax.simuler_foyer_complet(
     annee=annee,
     statut=statut,
@@ -456,6 +469,7 @@ sim = tax.simuler_foyer_complet(
     electrique_2=elec_2,
     interets_etrangers_eur=interets_etrangers,
     pays_interets_etrangers=pays_etranger,
+    interets_ps_precomptes=interets_ps_precomptes,
     bilan_pv_actions_eur=d2074["bilan_net"],
     bilan_pv_crypto_imposable_eur=d2086["case_3an"],
 )
@@ -793,31 +807,38 @@ if arb is not None:
     st.markdown("#### ⚖️ Flat Tax (PFU) ou Barème Progressif (Case `2OP`) ?")
     ca1, ca2 = st.columns(2)
     with ca1:
-        st.markdown(f"**Option 1 — Flat Tax (PFU {pfu_taux * 100:.1f} %)**")
+        st.markdown(f"**Option 1 — PFU (titres : {pfu_taux * 100:.1f} % ; intérêts selon précompte)**")
         st.metric(f"Impôt sur le revenu ({fb.IR_FORFAITAIRE * 100:.1f} %)", ui.eur(arb["pfu"]["ir"]))
-        st.metric(f"Prélèvements sociaux ({ps_taux * 100:.1f} %)", ui.eur(arb["pfu"]["ps"]))
+        st.metric("PS (titres + intérêts, selon précompte)", ui.eur(arb["pfu"]["ps"]))
         st.metric("Coût total avec la Flat Tax", ui.eur(arb["pfu"]["total"]))
     with ca2:
         st.markdown("**Option 2 — Barème Progressif (Case `2OP` cochée)**")
         st.metric("Supplément d'IR au barème (après décote)", ui.eur(arb["bareme"]["ir_marginal"]))
-        st.metric(f"Prélèvements sociaux ({ps_taux * 100:.1f} %)", ui.eur(arb["bareme"]["ps"]))
+        st.metric("PS (titres + intérêts, selon précompte)", ui.eur(arb["bareme"]["ps"]))
         st.metric(
-            "Dont abattement CSG déductible (6,8 %)",
+            "CSG déductible cette année (intérêts précomptés)",
             ui.eur(arb["bareme"]["csg_deductible"]),
-            help="Réduction de votre base imposable au barème (l'économie d'IR correspondante est déjà intégrée dans le supplément d'IR ci-dessus).",
+            help="Seule la CSG payée cette année entre dans la comparaison IR de cette année.",
+        )
+        st.caption(
+            "CSG potentiellement déductible après paiement, non comptée dans cet arbitrage : "
+            + ui.eur(arb["bareme"]["csg_deductible_apres_paiement_estimee"])
+            + ". PS déjà précomptés sur intérêts : " + ui.eur(arb["ps_deja_precomptes"])
+            + " (ne pas les payer une seconde fois)."
         )
         st.metric("Coût total avec le Barème", ui.eur(arb["bareme"]["total"]))
 
+    st.caption("Comparaison sur les revenus de l'année ; elle n'anticipe pas la déduction éventuelle de CSG lors d'un paiement ultérieur. Les PS déjà précomptés sont inclus dans le coût annuel, pas à reverser.")
     if sim["cocher_2op"]:
         st.success(
             f"✅ **Recommandation : COCHEZ la case `2OP` (Barème Progressif) !** "
             f"Le barème vous coûte **{ui.eur(arb['bareme']['total'])}** contre **{ui.eur(arb['pfu']['total'])}** "
             f"au PFU, soit une économie nette de **{ui.eur(arb['gain'])}** "
-            f"(grâce à votre quotient familial de `{parts}` parts et à la CSG déductible de 6,8 %)."
+            f"(pour votre situation modélisée à `{parts}` parts ; ne tient pas compte de la CSG déductible à une date ultérieure)."
         )
     else:
         explication_decote = (
-            " *(Note : bien que votre TMI soit à 11 %, votre foyer bénéficie de la **décote** : chaque euro ajouté au barème réduit votre décote de 45,25 %, ce qui porte le taux marginal réel d'IR au barème à 14,89 % après CSG déductible, contre 12,80 % au PFU.)*"
+            " *(La décote peut augmenter l'impôt marginal au barème ; le calcul tient compte du millésime et de la CSG payée cette année seulement.)*"
             if (sim["ir_salaires"].decote > 0 and abs(sim["ir_salaires"].tmi - 0.11) < 1e-4)
             else ""
         )

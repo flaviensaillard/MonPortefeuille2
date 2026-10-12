@@ -25,6 +25,10 @@
         salaireNetImposable2: 0,
         interetsEtrangers: 0,
         paysEtranger: 'Lituanie',
+        // Option locale par année : PS réellement précomptés sur les intérêts.
+        // null = inconnu, jamais déduit du pays du courtier.
+        interetsPs2022: null, interetsPs2023: null, interetsPs2024: null,
+        interetsPs2025: null, interetsPs2026: null,
         nbEnfants: 2,
         utiliserFraisReels1: true,
         fraisKm1: 9120, cvFiscal1: 5, joursRepas1: 240, vehiculeElectrique1: false,

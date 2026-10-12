@@ -174,8 +174,8 @@ class TestTaux:
         """LFSS 2026, art. 12 : CSG capital a 10,6 %, donc PS a 18,6 %."""
         assert fb.taux_pfu(2026) == pytest.approx(0.314)
 
-    def test_2025_est_a_30_pour_cent(self):
-        assert fb.taux_pfu(2025) == pytest.approx(0.300)
+    def test_2025_pv_titres_est_a_31_4_pour_cent(self):
+        assert fb.taux_pfu(2025) == pytest.approx(0.314)
 
 
     def test_l_ir_n_est_pas_une_soustraction(self):
@@ -271,6 +271,7 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
         jours_repas_2=200,
         interets_etrangers_eur=200.0,
         pays_interets_etrangers="Lituanie",
+        interets_ps_precomptes=False,
         bilan_pv_actions_eur=651.48,
         bilan_pv_crypto_imposable_eur=0.0,
     )
@@ -281,7 +282,7 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
     assert sim["case_2tr"] == 200
     # Avec 50 545 € de revenu imposable et 3 parts, le foyer est dans la zone de
     # décote (IR brut = 1 731,95 € < plafond couple), où le taux marginal effectif
-    # au barème est de 11 % × 1,4525 × (1 - 0,068) = 14,89 % > 12,8 % (PFU).
+    # au barème de 11 % × 1,4525 = 15,98 % > 12,8 % (PFU) pour les titres.
     assert sim["cocher_2op"] is False
 
 

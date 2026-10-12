@@ -59,17 +59,16 @@ class TestReprise(unittest.TestCase):
         autre = str(uuid4())
         c.lignes.append({'user_id': autre, 'annee_revenus': 2022, 'revision': 1})
         c.lignes.append({'user_id': owner, 'annee_revenus': 2024, 'revision': 2})
-        attendu = [2022, 2023, 2025, 2026]
-        self.assertEqual(importer(c, owner), (attendu, [2024]))
-        self.assertEqual(c.ecritures, 0)
+        # Le commit initial a déjà servi à importer le compte réel. Depuis
+        # l'audit les constantes ont changé : même une simulation ne doit plus
+        # proposer une révision 1 étiquetée avec l'ancienne source.
+        with self.assertRaisesRegex(RuntimeError, 'Import initial figé'):
+            importer(c, owner)
         with patch.object(db, 'client', return_value=c), patch.dict('os.environ', {'SUPABASE_USER_ID': owner}):
-            self.assertEqual(importer(c, owner, appliquer=True), (attendu, [2024]))
-            self.assertEqual(c.ecritures, 4)
-            self.assertEqual(importer(c, owner, appliquer=True), ([], [2022, 2023, 2024, 2025, 2026]))
-        self.assertEqual(c.ecritures, 4)
+            with self.assertRaisesRegex(RuntimeError, 'Import initial figé'):
+                importer(c, owner, appliquer=True)
+        self.assertEqual(c.ecritures, 0)
         self.assertEqual(c.lignes[1]['revision'], 2, 'année 2024 déjà présente intacte')
-        self.assertTrue(all(x['origine'] == 'reprise_code_non_verifiee' for x in c.lignes[2:]))
-        self.assertEqual(c.lignes[-1]['parametres']['prelevements_sociaux'], .186)
 
     def test_pas_de_reprise_silencieuse_d_un_forfait_d_annee_precedente(self):
         sans_2026 = {k: v for k, v in fb.FORFAIT_REPAS_PAR_ANNEE.items() if k != 2026}
@@ -82,7 +81,7 @@ class TestReprise(unittest.TestCase):
         self.assertEqual(p['bareme']['tranches'], fb.BAREMES[2025].tranches)
         self.assertEqual(p['bareme_km']['5'], list(fb.BAREME_KM_VOITURE[5]))
         self.assertIn('non revérifiée', p['avertissement'])
-        self.assertTrue(p['incertitude_ps'])
+        self.assertIsNone(p['incertitude_ps'])
 
     def test_uid_invalide_refuse_avant_la_base(self):
         c = FauxClient()

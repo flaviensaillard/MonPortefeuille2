@@ -12,7 +12,7 @@
         2022: { tranches: [10777, 27478, 78570, 168994], taux: [0.11, 0.30, 0.41, 0.45], dc: 846, dcPlafond: 1870, dcCouple: 1395, dcPlafondCouple: 3100 },
         2023: { tranches: [11294, 28797, 82341, 177106], taux: [0.11, 0.30, 0.41, 0.45], dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
         2024: { tranches: [11520, 29370, 83984, 180648], taux: [0.11, 0.30, 0.41, 0.45], dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
-        2025: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 898, dcPlafond: 1986, dcCouple: 1486, dcPlafondCouple: 3284 },
+        2025: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 897, dcPlafond: 1982, dcCouple: 1483, dcPlafondCouple: 3277 },
         2026: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 898, dcPlafond: 1986, dcCouple: 1486, dcPlafondCouple: 3284 }
     };
     var TAUX_DECOTE = 0.4525;
@@ -20,20 +20,20 @@
         2022: 'Vérifié — données historiques stables',
         2023: 'Vérifié — données historiques stables',
         2024: 'Vérifié — données historiques stables',
-        2025: 'Sources publiques concordantes — à recouper BOFiP',
-        2026: 'Sources publiques concordantes — à recouper BOFiP'
+        2025: 'Tranches et décote recoupées BOFiP — autres règles à valider',
+        2026: 'Hypothèses provisoires — revenus 2026 non vérifiés'
     };
 
     var IR_FORFAITAIRE = 0.128;               // part IR du PFU (CGI art. 200 A)
+    // Revenus du patrimoine non précomptés : PV de titres/crypto et RCM non précomptés.
     var PS_PAR_ANNEE = {
         2018: 0.172, 2019: 0.172, 2020: 0.172, 2021: 0.172, 2022: 0.172,
-        2023: 0.172, 2024: 0.172, 2025: 0.172, 2026: 0.186
+        2023: 0.172, 2024: 0.172, 2025: 0.186, 2026: 0.186
     };
-    var PS_ANNEE_INCERTAINE = {
-        2025: 'LFSS 2026 art. 12 : la hausse de CSG s’applique aux revenus du patrimoine dès 2025, '
-            + 'aux produits de placement à partir du 1ᵉʳ janvier 2026. Chez un courtier étranger aucune CSG '
-            + 'n’est précomptée : l’assiette est celle du patrimoine, donc 18,6 %. Le module retient 17,2 % '
-            + 'par prudence — la fourchette vous est montrée.'
+    // RCM déjà soumis aux PS lors du versement, sans double prélèvement.
+    var PS_PRECOMPTES_PAR_ANNEE = {
+        2018: 0.172, 2019: 0.172, 2020: 0.172, 2021: 0.172, 2022: 0.172,
+        2023: 0.172, 2024: 0.172, 2025: 0.172, 2026: 0.186
     };
     var CSG_DEDUCTIBLE = 0.068;
     var CRYPTO_FRANCHISE_CESSIONS = 305.0;    // seuil sur le TOTAL des prix de cession
@@ -57,6 +57,17 @@
         return PS_PAR_ANNEE[annee];
     }
     function tauxPFU(annee) { return IR_FORFAITAIRE + tauxPS(annee); }
+    function tauxPSRevenuMobilier(annee, precompte) {
+        if (typeof precompte !== 'boolean') throw new Error('Préciser si les PS des intérêts ont déjà été précomptés.');
+        if (!precompte) return tauxPS(annee);
+        if (PS_PRECOMPTES_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de PS précomptés pour ' + annee + '.');
+        return PS_PRECOMPTES_PAR_ANNEE[annee];
+    }
+    var PLAFOND_QF_GENERAL = { 2022: 1759, 2023: 1759, 2024: 1759, 2025: 1807, 2026: 1807 }; // 2026 provisoire
+    function plafondQF(annee) {
+        if (PLAFOND_QF_GENERAL[annee] === undefined) throw new Error('Aucun plafond QF pour ' + annee + '.');
+        return PLAFOND_QF_GENERAL[annee];
+    }
 
     // ----------------------------------------------------------- impôt sur le revenu
 
@@ -90,7 +101,7 @@
         var impot, gainMax;
         if (parts > partsBase) {
             var impotBase = impotParPart(revenu / partsBase, b) * partsBase;
-            gainMax = (parts - partsBase) * 2 * 1759;
+            gainMax = (parts - partsBase) * 2 * plafondQF(annee);
             if ((impotBase - impotNonPlafonne) > gainMax) {
                 impot = Math.max(0, impotBase - gainMax);
                 qf = revenu / partsBase;
@@ -183,27 +194,34 @@
         return { montant: U.arrondi(montant, 2), formule: formule + ' = ' + U.nombre(montant, 2) + ' €' };
     }
 
-    /* PFU ou barème ? La CSG déductible (6,8 %) réduit le revenu imposable en
-       cas d'option pour le barème : l'omettre, c'est surévaluer le barème. */
-    function comparerPfuBareme(pv, autresRevenus, parts, annee, statut) {
+    /* Option 2OP : ne pas mélanger le taux des titres et celui des RCM déjà
+       précomptés ; la CSG des titres est déductible à son paiement (N+1). */
+    function comparerPfuBareme(pv, autresRevenus, parts, annee, statut, interets, interetsPrecomptes) {
         pv = Math.max(0, U.num(pv, 0));
-        if (pv <= 0) return { choix: 'PFU', gain: 0, detail: 'Aucune plus-value imposable.' };
-        var pfuIr = pv * IR_FORFAITAIRE;
-        var pfuPs = pv * tauxPS(annee);
-        var pfuTotal = pfuIr + pfuPs;
+        interets = Math.max(0, U.num(interets, 0));
+        if (interets > 0 && typeof interetsPrecomptes !== 'boolean')
+            throw new Error('Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays ne suffit pas.');
+        if (pv + interets <= 0) return { choix: 'PFU', gain: 0, detail: 'Aucun revenu mobilier imposable.' };
+        var psInterets = interets ? interets * tauxPSRevenuMobilier(annee, interetsPrecomptes) : 0;
+        var ps = pv * tauxPS(annee) + psInterets;
+        var pfuIr = (pv + interets) * IR_FORFAITAIRE;
+        var pfuTotal = pfuIr + ps;
 
-        var csgDeductible = pv * CSG_DEDUCTIBLE;
-        var irAvec = impotRevenu(autresRevenus + pv - csgDeductible, parts, annee, statut);
+        var csgCetteAnnee = interetsPrecomptes ? interets * CSG_DEDUCTIBLE : 0;
+        var csgApresPaiement = (pv + (interetsPrecomptes ? 0 : interets)) * CSG_DEDUCTIBLE;
+        var irAvec = impotRevenu(autresRevenus + pv + interets - csgCetteAnnee, parts, annee, statut);
         var irSans = impotRevenu(autresRevenus, parts, annee, statut);
         var irMarginal = Math.max(0, irAvec.impot_net - irSans.impot_net);
-        var ps = pv * tauxPS(annee);
         var baremeTotal = irMarginal + ps;
         var avantage = pfuTotal - baremeTotal;
 
         return {
-            annee: annee, plus_value_nette: pv,
-            pfu: { ir: pfuIr, ps: pfuPs, total: pfuTotal },
-            bareme: { ir_marginal: irMarginal, ps: ps, total: baremeTotal, csg_deductible: csgDeductible },
+            annee: annee, plus_value_nette: pv + interets,
+            pfu: { ir: pfuIr, ps: ps, total: pfuTotal },
+            bareme: { ir_marginal: irMarginal, ps: ps, total: baremeTotal,
+                csg_deductible: csgCetteAnnee, csg_deductible_apres_paiement_estimee: csgApresPaiement },
+            ps_titres: pv * tauxPS(annee), ps_interets: psInterets,
+            ps_deja_precomptes: interetsPrecomptes ? psInterets : 0,
             choix: baremeTotal < pfuTotal ? 'Barème progressif' : 'PFU',
             gain: Math.abs(avantage), tmi: irAvec.tmi, cocher_2op: baremeTotal < pfuTotal
         };
@@ -238,22 +256,23 @@
         if (an > derniere || cible > derniere) {
             return {
                 disponible: true, derniere_annee: derniere, url: URL_MAJ_BAREMES,
-                message: 'Les barèmes fiscaux pour les revenus ' + Math.max(an, cible)
-                    + ' sont publiés, alors que l’application s’arrête au millésime ' + derniere + '.'
+                message: 'Revenus ' + Math.max(an, cible) + ' absents (dernier millésime : ' + derniere
+                    + '). Vérifiez leur publication officielle avant tout ajout.'
             };
         }
         var src = SOURCE_PAR_ANNEE[cible] || '';
-        if (src.toLowerCase().indexOf('recouper') >= 0 && auj >= new Date(cible + 1, 3, 1)) {
+        if ((/recouper|provisoire/i).test(src) && auj >= new Date(cible + 1, 3, 1)) {
             return {
                 disponible: true, derniere_annee: derniere, url: URL_MAJ_BAREMES,
-                message: 'La campagne de déclaration des revenus ' + cible + ' est ouverte au BOFiP : '
-                    + 'une consolidation officielle des seuils est disponible.'
+                message: 'Hypothèses pour les revenus ' + cible + ' : vérification officielle requise. '
+                    + 'La date seule ne prouve pas la publication des barèmes.'
             };
         }
         return {
             disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
-            message: 'Barèmes à jour jusqu’aux revenus ' + derniere + ' (IR, décote, PFU '
-                + U.nombre(tauxPFU(derniere) * 100, 1) + ' %, barème kilométrique et forfait repas).'
+            message: 'Constantes intégrées jusqu’aux revenus ' + derniere + ' (PFU titres '
+                + U.nombre(tauxPFU(derniere) * 100, 1) + ' %). '
+                + 'Cela ne prouve ni l’exactitude des règles ni l’absence de rectification.'
         };
     }
 
@@ -693,7 +712,8 @@
         var interetsPos = Math.max(0, U.num(o.interetsEtrangers, 0));
         var assiette2op = pvActionsPos + interetsPos;
         var arbitrage = assiette2op > 0
-            ? comparerPfuBareme(assiette2op, revNetSalaires, o.parts, annee, o.statut)
+            ? comparerPfuBareme(pvActionsPos, revNetSalaires, o.parts, annee, o.statut,
+                interetsPos, o.interetsPrecomptes)
             : null;
 
         var pvCryptoPos = Math.max(0, U.num(o.pvCryptoImposable, 0));
@@ -807,7 +827,7 @@
 
         // --- Bandeau de mise à jour
         if (maj.disponible) {
-            out += '<div class="info"><b>Nouveaux barèmes disponibles.</b> ' + UI.h(maj.message)
+            out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">Ouvrir l’assistant de mise à jour</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="prompt">Voir le prompt à envoyer à l’IA</button></div></div>';
         } else {
@@ -822,10 +842,10 @@
             + '<b>les nouveaux chiffres ne sont pas appliqués aux calculs.</b></div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Chercher les données fiscales disponibles</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px"></div></div>';
-        if (PS_ANNEE_INCERTAINE[annee]) {
-            out += '<div class="info"><b>Prélèvements sociaux ' + annee + ' : taux discuté.</b> '
-                + UI.h(PS_ANNEE_INCERTAINE[annee]) + '</div>';
+        if (annee === 2026) {
+            out += '<div class="info">Revenus 2026 : barème et décote provisoires, à revérifier pour la déclaration 2027.</div>';
         }
+        out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.</div>';
 
         // --- 1. Paramètres fiscaux
         var couple = estCouple(r.statutFiscal);
@@ -855,6 +875,13 @@
             + '<div class="sep"></div>'
             + ligneReglage('Revenus d’intérêts encaissés à l’étranger (€)', U.eur(r.interetsEtrangers, { dec: 0 }), 'interetsEtrangers')
             + ligneReglage('Pays d’origine de ces intérêts', String(r.paysEtranger || '—'), 'paysEtranger')
+            + (U.num(r.interetsEtrangers, 0) > 0
+                ? '<div class="info">PS des intérêts ' + annee + ' : déjà précomptés lors du versement ? '
+                    + '<button class="chip' + (r['interetsPs' + annee] === 'oui' ? ' actif' : '') + '" data-fisc="ps-interets" data-valeur="oui">Oui</button> '
+                    + '<button class="chip' + (r['interetsPs' + annee] === 'non' ? ' actif' : '') + '" data-fisc="ps-interets" data-valeur="non">Non</button> '
+                    + (['oui', 'non'].indexOf(r['interetsPs' + annee]) < 0
+                        ? '<b>À préciser : bilan et recommandation indisponibles.</b>' : '')
+                    + ' Vérifiez votre justificatif : le pays du courtier ne permet pas de répondre.</div>' : '')
             + '<div style="font-size:12px;color:var(--txt-3);margin:6px 0 10px">Formulaire <b>2047</b> '
             + 'ligne 250, puis report en <b>2TR</b> sur la 2042 — en cochant « revenus encaissés à l’étranger ».</div>'
             + '<div class="ligne" style="padding-top:4px"><div class="gr"><div class="tt">Comptes détenus hors de France</div>'
@@ -899,6 +926,8 @@
                 fraisReels2: U.estVrai(r.utiliserFraisReels2), km2: r.fraisKm2, cv2: r.cvFiscal2,
                 joursRepas2: r.joursRepas2, elec2: U.estVrai(r.vehiculeElectrique2),
                 interetsEtrangers: r.interetsEtrangers, pays: r.paysEtranger,
+                interetsPrecomptes: r['interetsPs' + annee] === 'oui' ? true
+                    : r['interetsPs' + annee] === 'non' ? false : null,
                 bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
             });
             var f = document.getElementById('fiscFormulaires');
@@ -919,13 +948,18 @@
             /* Sans les cours de change du jour, les montants ne peuvent pas être
                reconstitués : un formulaire à moitié rempli est pire qu'un
                formulaire vide, on le dit au lieu de deviner. */
-            var msg = '<div class="erreur">Formulaires non préremplis : ' + UI.h(String(err && err.message || err))
-                + '. Recopiez vos écritures depuis l’onglet Portefeuille › Opérations.</div>';
+            var erreur = String(err && err.message || err);
+            var psInconnus = erreur.indexOf('précomptés') >= 0;
+            var msg = '<div class="erreur">' + (psInconnus ? 'Bilan fiscal indisponible : ' : 'Formulaires non préremplis : ')
+                + UI.h(erreur)
+                + (psInconnus ? ' Choisissez Oui ou Non ci-dessus après vérification.'
+                    : ' Recopiez vos écritures depuis l’onglet Portefeuille › Opérations.') + '</div>';
             var f2b = document.getElementById('fiscFormulaires');
             if (f2b) f2b.innerHTML = msg;
             var g2 = document.getElementById('fiscBilan');
             if (g2) g2.innerHTML = '<div class="card"><div class="vide" style="padding:14px">'
-                + 'Bilan indisponible sans la lecture des écritures.</div></div>';
+                + (psInconnus ? 'Bilan indisponible tant que le prélèvement des PS des intérêts n’est pas précisé.'
+                    : 'Bilan indisponible sans la lecture des écritures.') + '</div></div>';
         });
 
         return out;
@@ -1246,13 +1280,13 @@
                 + '<div style="flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:10px">'
                 + '<div style="font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.06em">Flat tax</div>'
                 + ligneResultat('IR ' + U.nombre(IR_FORFAITAIRE * 100, 1) + ' %', U.eur(a.pfu.ir, { dec: 0 }))
-                + ligneResultat('Prélèvements sociaux ' + U.nombre(tauxPS(annee) * 100, 1) + ' %', U.eur(a.pfu.ps, { dec: 0 }))
+                + ligneResultat('PS (titres ' + U.nombre(tauxPS(annee) * 100, 1) + ' %, intérêts selon précompte)', U.eur(a.pfu.ps, { dec: 0 }))
                 + ligneResultat('Total', U.eur(a.pfu.total, { dec: 0 }), true)
                 + '</div>'
                 + '<div style="flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:10px">'
                 + '<div style="font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.06em">Barème</div>'
                 + ligneResultat('Supplément d’IR', U.eur(a.bareme.ir_marginal, { dec: 0 }))
-                + ligneResultat('Prélèvements sociaux ' + U.nombre(tauxPS(annee) * 100, 1) + ' %', U.eur(a.bareme.ps, { dec: 0 }))
+                + ligneResultat('PS (titres ' + U.nombre(tauxPS(annee) * 100, 1) + ' %, intérêts selon précompte)', U.eur(a.bareme.ps, { dec: 0 }))
                 + ligneResultat('Total', U.eur(a.bareme.total, { dec: 0 }), true)
                 + '</div></div>'
                 + '<div class="' + (sim.cocher_2op ? 'info' : 'ok-vert') + '" style="margin-top:10px">'
@@ -1261,8 +1295,13 @@
                     ? 'Cochez la case <b>2OP</b> : l’option est globale et court jusqu’à révocation.'
                     : 'Laissez la case <b>2OP</b> vide.')
                 + (a.bareme.csg_deductible > 0
-                    ? ' Le barème déduit ' + U.eur(a.bareme.csg_deductible, { dec: 0 }) + ' de CSG déductible : '
-                      + 'c’est ce qui, parfois, le rend gagnant.' : '')
+                    ? ' CSG déductible cette année sur intérêts précomptés : '
+                      + U.eur(a.bareme.csg_deductible, { dec: 0 }) + '.' : '')
+                + (a.bareme.csg_deductible_apres_paiement_estimee > 0
+                    ? ' CSG potentiellement déductible l’année de son paiement (non comptée dans ce choix) : '
+                      + U.eur(a.bareme.csg_deductible_apres_paiement_estimee, { dec: 0 }) + '.' : '')
+                + (a.ps_deja_precomptes > 0
+                    ? ' Dont PS déjà précomptés sur intérêts : ' + U.eur(a.ps_deja_precomptes, { dec: 0 }) + '.' : '')
                 + '</div>'
                 + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Assiette soumise à l’option : '
                 + U.eur(a.plus_value_nette, { dec: 0 }) + ' — plus-values mobilières et intérêts étrangers réunis.</div>'
@@ -1275,6 +1314,8 @@
 
         // --- Bilan de l'impôt du foyer
         out += '<div class="card"><div class="lbl">Bilan de votre impôt sur le revenu ' + annee + '</div>'
+            + (sim.arbitrage && sim.arbitrage.ps_deja_precomptes > 0
+                ? '<div class="st">Coût annuel incluant les PS déjà précomptés : ils ne sont pas à payer deux fois.</div>' : '')
             + ligneResultat('Impôt sur vos salaires', U.eur(sim.ir_salaires.impot_net, { dec: 0 }))
             + ligneResultat('Impôt + PS sur vos revenus du capital', U.eur(sim.impot_capital_retenu, { dec: 0 }))
             + ligneResultat('Impôt total du foyer', U.eur(sim.impot_total_foyer, { dec: 0 }), true)
@@ -1365,6 +1406,16 @@
                     if (etat) etat.textContent = 'Actualisation interrompue : ' + (err.message || err)
                         + ' Vérifiez les migrations 009 et 010, votre connexion et la source ; relancez après vérification.';
                 }).then(function () { collecte.disabled = false; });
+                return;
+            }
+            var psBtn = cible.closest('[data-fisc="ps-interets"]');
+            if (psBtn) {
+                var choix = psBtn.getAttribute('data-valeur');
+                if (choix !== 'oui' && choix !== 'non') return;
+                var patch = {};
+                patch['interetsPs' + anneeEnCours()] = choix; // local et millésimé, jamais Config sans année
+                PF.store.sauverReglages(patch);
+                PF.app.rendre();
                 return;
             }
             var anneeBtn = cible.closest('[data-fisc="annee"]');

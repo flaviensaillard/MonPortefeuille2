@@ -206,7 +206,16 @@ def test_toutes_les_pages_s_executent_sans_erreur():
         racine / "pages" / "4_Fiscalite.py",
     ]
     ctx = _contexte_realiste()
+    import streamlit as st
+    selectbox_original = st.selectbox
+
+    def selectbox_avec_precompte(label, *args, **kwargs):
+        if "PS des intérêts" in label:
+            return "Non — pas précomptés"  # donnée déclarée du scénario, jamais inférée du pays
+        return selectbox_original(label, *args, **kwargs)
+
     with (
+        patch("streamlit.selectbox", side_effect=selectbox_avec_precompte),
         patch("core.session.charger", return_value=ctx),
         patch("core.db.soldes_comptes_liquidites", return_value={
             "USD": {"ticker": "USD", "quantite": 7.39},

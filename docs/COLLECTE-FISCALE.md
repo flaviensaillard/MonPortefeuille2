@@ -46,8 +46,10 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 3. **Simulation : effectuée en lecture seule** sur la branche via Actions run
    38257679857. Résultat : aucune année présente dans `pf2_fiscal_annees` ;
    années proposées : **2022, 2023, 2024, 2025, 2026**. Aucune ligne insérée.
-   Le workflow manuel de simulation restera disponible sur `main` après fusion.
-   Il utilise `SUPABASE_URL`, `SUPABASE_KEY` (service_role) et `SUPABASE_USER_ID`.
+   Le workflow manuel de simulation existe, mais la **reprise initiale est
+   désormais figée** : après correction des constantes, simulation et application
+   refusent de proposer des chiffres sous l'ancienne provenance. Il utilise
+   `SUPABASE_URL`, `SUPABASE_KEY` (service_role) et `SUPABASE_USER_ID`.
 4. **Import réel autorisé puis effectué le 12/10/2026**, run Actions 38258384611 :
    2022, 2023, 2024, 2025, 2026 insérées en révision 1, aucune année déjà
    présente. Le job a relu chaque ligne et comparé les paramètres avec la
@@ -56,8 +58,10 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
    est disponible 90 jours dans Actions : le télécharger et conserver la phrase
    `SAUVEGARDE_CLE` dans un gestionnaire de mots de passe pour pouvoir l'ouvrir.
    Le déclencheur automatique ponctuel a été retiré
-   de la branche après succès. **Ne pas relancer l'import** : il est idempotent,
-   mais ne le répéter que pour un besoin vérifié.
+   de la branche après succès. **Ne pas relancer l'import** : depuis la correction
+   locale des constantes 2025, simulation et `--appliquer` sont refusés pour
+   empêcher d'attribuer les nouvelles valeurs au commit source ancien. Une
+   correction ultérieure doit emprunter une publication de révision 2 distincte.
 5. Contrôle facultatif côté Supabase :
    ```sql
    select annee_revenus, revision, origine, cree_le

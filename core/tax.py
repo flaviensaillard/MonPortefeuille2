@@ -12,12 +12,12 @@ CORRECTIONS PAR RAPPORT À LA V1
    l'Épargne propose aussi l'or physique, qui relève de l'article 150 VI avec un
    régime très différent. Le moteur sait désormais faire la distinction.
 
-3. **L'abattement de 305 € sur la plus-value crypto manquait**, et les
-   prélèvements sociaux n'étaient pas isolés.
+3. Le seuil d'exonération crypto de 305 € porte sur le total des cessions,
+   sans abattement sur la plus-value.
 
-4. **La comparaison PFU / barème était incomplète** : pas de CSG déductible
-   (6,8 %), pas d'abattement pour durée, et l'affichage final abdiquait
-   (« À calculer ») en renvoyant la main à l'utilisateur.
+4. La comparaison PFU / barème distingue les PS des titres et les intérêts
+   précomptés ; la CSG n'est déduite que l'année de son paiement. Les cas
+   particuliers et l'option crypto 3CN restent hors de cette comparaison.
 
 AVERTISSEMENT
 -------------
@@ -76,37 +76,6 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> 
     return impot
 
 
-def _quotient_plafonne(revenu: float, parts: float, parts_couple: float = 2.0) -> float:
-    """Plafonne le gain procuré par les parts au-delà de `parts_couple`.
-
-    Règle (CGI art. 197 I-2) : l'avantage en impôt procuré par chaque demi-part
-    supplémentaire est plafonné à 1 759 € par demi-part.
-    """
-    if parts <= parts_couple:
-        return revenu / parts
-    demi_parts = (parts - parts_couple) * 2.0
-    plafond_par_demi_part = 1_759.0
-    gain_max = demi_parts * plafond_par_demi_part
-
-    impot_sans = _impot_par_part(revenu / parts_couple) * parts_couple
-    impot_avec = _impot_par_part(revenu / parts) * parts
-    gain = impot_sans - impot_avec
-    if gain <= gain_max:
-        return revenu / parts
-
-    impot_cible = impot_sans - gain_max
-    if impot_cible <= 0:
-        return revenu / parts
-    bas, haut = revenu / parts_couple, revenu
-    for _ in range(80):
-        milieu = (bas + haut) / 2
-        if _impot_par_part(milieu) * parts_couple < impot_cible:
-            bas = milieu
-        else:
-            haut = milieu
-    return (bas + haut) / 2
-
-
 def _est_couple(statut: str) -> bool:
     s = statut.lower()
     return "mari" in s or "pacs" in s
@@ -135,7 +104,7 @@ def impot_revenu(
     if parts > parts_base:
         impot_base = _impot_par_part(revenu / parts_base, bareme) * parts_base
         demi_parts_supp = (parts - parts_base) * 2.0
-        gain_max = demi_parts_supp * 1_759.0
+        gain_max = demi_parts_supp * fb.plafond_qf_general(annee)
         if (impot_base - impot_non_plafonne) > gain_max:
             impot = max(0.0, impot_base - gain_max)
             qf = revenu / parts_base
@@ -269,10 +238,8 @@ def pv_crypto(lignes: list[dict], annee: int,
       - ligne 223 : fraction du capital correspondant (220-221) × 213/212
       - ligne 224 : plus-value = 213 - 223
 
-    La plus-value globale annuelle est ensuite réduite d'un abattement de 305 €.
-
-    CORRECTION : la v1 implémentait bien la mécanique des lignes, mais oubliait
-    l'abattement de 305 € et n'appliquait aucun taux.
+    Le seuil de 305 € porte sur le total des prix de cession du foyer :
+    au-delà, la plus-value entière est imposable (aucun abattement).
     """
     details: list[PlusValue] = []
     pv_globale = 0.0
@@ -437,42 +404,49 @@ def comparer_pfu_bareme(
     parts: float,
     annee: int,
     statut: str = "Célibataire",
+    *,
+    interets_eur: float = 0.0,
+    interets_ps_precomptes: bool | None = None,
 ) -> dict:
-    """Compare le PFU et le barème progressif sur une plus-value.
+    """Option globale 2OP : titres + intérêts, PS selon leur traitement réel.
 
-    CORRECTION : la v1 omettait la CSG déductible (6,8 % de la CSG), qui réduit
-    le revenu imposable quand on opte pour le barème. Elle appliquait aussi la
-    décote dans les deux branches de la soustraction, ce qui pouvait produire un
-    écart négatif.
+    La CSG sur les PV et les RCM non précomptés, payée sur l'avis N+1,
+    n'est PAS déductible des revenus N. Le futur avantage n'est pas chiffré
+    dans l'arbitrage N (les revenus et le paiement futurs sont inconnus).
     """
-    if plus_value_nette <= 0:
-        return {"choix": "PFU", "gain": 0.0, "detail": "Aucune plus-value imposable."}
+    pv = max(0.0, float(plus_value_nette))
+    interets = max(0.0, float(interets_eur))
+    if interets > 0 and not isinstance(interets_ps_precomptes, bool):
+        raise ValueError("Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays du courtier ne suffit pas.")
+    if pv + interets <= 0:
+        return {"choix": "PFU", "gain": 0.0, "detail": "Aucun revenu mobilier imposable."}
 
-    # --- Option PFU : 12,8 % d'IR + les PS de l'annee de cession.
-    # Le taux de PS depend de l'annee (LFSS 2026, art. 12) : 17,2 % jusqu'en
-    # 2025, 18,6 % en 2026. Un taux fige comparait deux regimes sur des bases
-    # differentes selon l'exercice.
-    pfu_ir = plus_value_nette * fb.IR_FORFAITAIRE
-    pfu_ps = plus_value_nette * fb.taux_ps(annee)
-    pfu_total = pfu_ir + pfu_ps
+    ps_pv = pv * fb.taux_ps(annee)
+    ps_interets = interets * fb.taux_ps_revenu_mobilier(
+        annee, precompte=interets_ps_precomptes,
+    ) if interets else 0.0
+    ps = ps_pv + ps_interets  # dette totale, déjà versée en partie si précomptée
+    pfu_ir = (pv + interets) * fb.IR_FORFAITAIRE
+    pfu_total = pfu_ir + ps
 
-    # --- Option barème : la PV s'ajoute au revenu, PS dus par ailleurs.
-    csg_deductible = plus_value_nette * fb.CSG_DEDUCTIBLE
-    revenu_imposable_supp = plus_value_nette - csg_deductible
-
+    csg_annee = interets * fb.CSG_DEDUCTIBLE if interets_ps_precomptes else 0.0
+    csg_ulterieure = (pv + (0.0 if interets_ps_precomptes else interets)) * fb.CSG_DEDUCTIBLE
+    revenu_imposable_supp = pv + interets - csg_annee
     ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut)
     ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
     ir_marginal = max(0.0, ir_avec.impot_net - ir_sans.impot_net)
-    ps = plus_value_nette * fb.taux_ps(annee)
     bareme_total = ir_marginal + ps
 
     avantage = pfu_total - bareme_total
     return {
         "annee": annee,
-        "plus_value_nette": plus_value_nette,
-        "pfu": {"ir": pfu_ir, "ps": pfu_ps, "total": pfu_total},
+        "plus_value_nette": pv + interets,
+        "pfu": {"ir": pfu_ir, "ps": ps, "total": pfu_total},
         "bareme": {"ir_marginal": ir_marginal, "ps": ps, "total": bareme_total,
-                   "csg_deductible": csg_deductible},
+                   "csg_deductible": csg_annee,
+                   "csg_deductible_apres_paiement_estimee": csg_ulterieure},
+        "ps_titres": ps_pv, "ps_interets": ps_interets,
+        "ps_deja_precomptes": ps_interets if interets_ps_precomptes else 0.0,
         "choix": "Barème progressif" if bareme_total < pfu_total else "PFU",
         "gain": abs(avantage),
         "tmi": ir_avec.tmi,
@@ -1096,6 +1070,7 @@ def simuler_foyer_complet(
     electrique_2: bool = False,
     interets_etrangers_eur: float = 0.0,
     pays_interets_etrangers: str = "Lituanie",
+    interets_ps_precomptes: bool | None = None,
     bilan_pv_actions_eur: float = 0.0,
     bilan_pv_crypto_imposable_eur: float = 0.0,
 ) -> dict:
@@ -1144,7 +1119,9 @@ def simuler_foyer_complet(
 
     if assiette_2op > 0:
         arbitrage = comparer_pfu_bareme(
-            assiette_2op, revenu_net_salaires, parts, annee, statut
+            pv_actions_pos, revenu_net_salaires, parts, annee, statut,
+            interets_eur=interets_pos,
+            interets_ps_precomptes=interets_ps_precomptes,
         )
     else:
         arbitrage = None

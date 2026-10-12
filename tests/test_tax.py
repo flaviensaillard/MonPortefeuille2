@@ -67,14 +67,14 @@ class TestPlusValuesTitres:
         r = tax.pv_titres(lignes, 2025)
         assert r.regime == "150-0 A"
         assert r.plus_value_brute == pytest.approx(200.0)
-        # Cession 2025 : 12,8 % d'IR + 17,2 % de PS = 30 % de 200 = 60,00.
+        # Cession 2025 : 12,8 % d'IR + 18,6 % de PS = 31,4 % de 200 = 62,80.
         #
         # Ce test attendait 61,60 (30,8 %). L'ancien taux venait d'une
         # soustraction : `PFU_TAUX - PRELEVEMENTS_SOCIAUX` = 0,308 - 0,172 =
         # 0,136 d'IR, au lieu des 12,8 % de l'article 200 A du CGI.
         assert r.impot_ir == pytest.approx(25.60)
-        assert r.prelevements_sociaux == pytest.approx(34.40)
-        assert r.total_du == pytest.approx(60.00)
+        assert r.prelevements_sociaux == pytest.approx(37.20)
+        assert r.total_du == pytest.approx(62.80)
 
     def test_seule_l_annee_demandee(self):
         lignes = [
@@ -124,7 +124,7 @@ class TestCrypto:
         # Aucun abattement : la totalite du gain est imposable.
         assert r.abattement == pytest.approx(0.0)
         assert r.plus_value_imposable == pytest.approx(500.0)
-        assert r.total_du == pytest.approx(150.0)      # 500 x 30 % en 2025
+        assert r.total_du == pytest.approx(157.0)      # 500 x 31,4 % en 2025
 
     def test_sous_le_seuil_de_305_tout_est_exonere(self):
         """200 EUR de cessions : sous le seuil, la plus-value est exonérée.
@@ -162,7 +162,7 @@ class TestCrypto:
         assert r.plus_value_brute == pytest.approx(20.0)
         assert r.exonere_par_franchise is False
         assert r.plus_value_imposable == pytest.approx(20.0)
-        assert r.total_du == pytest.approx(6.0)        # 20 x 30 %
+        assert r.total_du == pytest.approx(6.28)       # 20 x 31,4 %
 
     def test_le_seuil_porte_sur_les_cessions_pas_sur_le_gain(self):
         """Deux cessions de 200 EUR : 400 EUR cédés, donc imposable.
@@ -247,8 +247,8 @@ class TestOrPhysique:
         }]
         r = tax.pv_titres(lignes, 2025)
         assert r.regime == "150-0 A"
-        # 30 % pour une cession 2025, pas 30,8 %.
-        assert r.total_du == pytest.approx(60.00)
+        # 31,4 % pour une cession 2025, pas 30 %.
+        assert r.total_du == pytest.approx(62.80)
 
 
 class TestPfuOuBareme:
@@ -257,10 +257,11 @@ class TestPfuOuBareme:
         comp = tax.comparer_pfu_bareme(5_000, 20_000, 2.0, 2025, "Marié(e) / Pacsé(e)")
         assert comp["choix"] == "Barème progressif"
 
-    def test_csg_deductible_prise_en_compte(self):
-        """La v1 oubliait la CSG déductible de 6,8 %."""
+    def test_csg_deductible_seulement_apres_paiement(self):
+        """CSG des titres 2025 payée en 2026 : aucune déduction en 2025."""
         comp = tax.comparer_pfu_bareme(5_000, 20_000, 2.0, 2025, "Marié(e) / Pacsé(e)")
-        assert comp["bareme"]["csg_deductible"] == pytest.approx(340.0)
+        assert comp["bareme"]["csg_deductible"] == 0
+        assert comp["bareme"]["csg_deductible_apres_paiement_estimee"] == pytest.approx(340.0)
 
     def test_pas_de_plus_value_pas_de_choix(self):
         comp = tax.comparer_pfu_bareme(0, 20_000, 2.0, 2025, "Célibataire")
@@ -289,8 +290,10 @@ class TestBaremeTable:
         assert fb.IR_FORFAITAIRE == pytest.approx(0.128)
         assert fb.taux_ps(2024) == pytest.approx(0.172)
         assert fb.taux_pfu(2024) == pytest.approx(0.300)
-        assert fb.taux_ps(2025) == pytest.approx(0.172)
-        assert fb.taux_pfu(2025) == pytest.approx(0.300)
+        assert fb.taux_ps(2025) == pytest.approx(0.186)
+        assert fb.taux_pfu(2025) == pytest.approx(0.314)
+        assert fb.taux_ps_revenu_mobilier(2025, precompte=True) == pytest.approx(0.172)
+        assert fb.taux_ps_revenu_mobilier(2025, precompte=False) == pytest.approx(0.186)
         assert fb.taux_ps(2026) == pytest.approx(0.186)
         assert fb.taux_pfu(2026) == pytest.approx(0.314)
 
@@ -324,10 +327,10 @@ class TestQuotientFamilialCoupleEnfants:
 
     def test_plafonnement_quotient_familial_couple_3_parts(self):
         """CGI art. 197 I-2 : l'avantage procuré par les 2 demi-parts des 2 enfants
-        est plafonné à 2 × 1 759 € = 3 518 €."""
+        est plafonné à 2 × 1 807 € = 3 614 €."""
         res_3p = tax.impot_revenu(180_000.0, parts=3.0, annee=2025, statut="Marié(e) / Pacsé(e)")
         res_2p = tax.impot_revenu(180_000.0, parts=2.0, annee=2025, statut="Marié(e) / Pacsé(e)")
-        assert res_2p.impot_brut - res_3p.impot_brut == pytest.approx(2 * 1_759.0, abs=0.05)
+        assert res_2p.impot_brut - res_3p.impot_brut == pytest.approx(2 * 1_807.0, abs=0.05)
 
     def test_taux_pas_individualises_cgi_204m(self):
         """CGI art. 204 M : la somme des prélèvements aux taux individualisés

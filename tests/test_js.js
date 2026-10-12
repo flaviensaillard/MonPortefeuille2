@@ -159,7 +159,40 @@ test('IR positif au-delà', () => PF.fiscal.impotRevenu(60000, 1, 2025, 'Céliba
 test('abattement 10 % plancher', () => proche(PF.fiscal.abattement10(1000, 2025), 509));
 test('abattement 10 % plafond', () => proche(PF.fiscal.abattement10(200000, 2025), 14555));
 test('PFU 2026 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2026), 0.314, 1e-9));
-test('PFU 2025 = 30,0 %', () => proche(PF.fiscal.tauxPFU(2025), 0.30, 1e-9));
+test('PFU titres 2025 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2025), 0.314, 1e-9));
+test('décote 2025 DGFiP : célibataire 897/1982, couple 1483/3277', () => {
+    const b = PF.fiscal.BAREMES[2025];
+    return b.dc === 897 && b.dcPlafond === 1982 && b.dcCouple === 1483 && b.dcPlafondCouple === 3277
+        && proche(PF.fiscal.impotRevenu(11600 + 1000 / .11, 1, 2025, 'Célibataire').decote, 444.5);
+});
+test('quotient familial général 2025 = 1807 € par demi-part', () => {
+    const c = 'Marié(e) / Pacsé(e)';
+    return proche(PF.fiscal.impotRevenu(180000, 2, 2025, c).impot_brut
+        - PF.fiscal.impotRevenu(180000, 3, 2025, c).impot_brut, 3614);
+});
+test('PV titres + intérêts 2025 précomptés : PS 18,6 % + 17,2 %', () => {
+    const a = PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000, true);
+    return proche(a.pfu.total, 614) && proche(a.ps_deja_precomptes, 172)
+        && proche(a.bareme.csg_deductible, 68)
+        && proche(a.bareme.csg_deductible_apres_paiement_estimee, 68);
+});
+test('intérêts non précomptés : taux 18,6 % et CSG différée', () => {
+    const a = PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000, false);
+    return proche(a.pfu.total, 628) && proche(a.bareme.csg_deductible, 0)
+        && proche(a.bareme.csg_deductible_apres_paiement_estimee, 136);
+});
+test('intérêts sans statut de précompte : calcul refusé', () => {
+    try { PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000); }
+    catch (e) { return /précomptés/.test(e.message); }
+    return false;
+});
+test('statut de précompte Android local et distinct par année', () => {
+    PF.store.sauverReglages({ interetsPs2025: 'oui' });
+    const local = JSON.parse(localStorage.getItem('pf.reglages.v1'));
+    const ok = local.interetsPs2025 === 'oui' && PF.store.reglages().interetsPs2024 === null;
+    PF.store.sauverReglages({ interetsPs2025: null });
+    return ok;
+});
 test('comparaison PFU / barème renvoie un choix', () => {
     const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2026, 'Marié(e) / Pacsé(e)');
     return (c.choix === 'PFU' || c.choix === 'Barème progressif') && c.pfu.total > 0;

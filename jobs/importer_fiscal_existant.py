@@ -59,9 +59,21 @@ def parametres_du_code(annee: int) -> dict:
 
 
 def importer(client, proprietaire: str, appliquer: bool = False) -> tuple[list[int], list[int]]:
-    """Retourne (années créées/simulées, déjà présentes) ; jamais d'UPDATE."""
+    """Reprise historique ; refuse toute écriture après changement du code source."""
     # La clé service_role contourne RLS : l'uid doit être explicite et valide.
     proprietaire = str(UUID(proprietaire))
+    # La révision 1 importée provient du commit SOURCE (décote 898/1986,
+    # 1486/3284 et PS 17,2 % en 2025). Après l'audit, ces valeurs diffèrent :
+    # ne jamais déposer un nouveau jeu sous la provenance du commit ancien.
+    # Les corrections de 2025 devront passer par une NOUVELLE révision dédiée.
+    if (
+        fb.BAREMES[2025].decote_base_celibataire != 898.0
+        or fb.BAREMES[2025].decote_plafond_celibataire != 1986.0
+        or fb.BAREMES[2025].decote_base_couple != 1486.0
+        or fb.BAREMES[2025].decote_plafond_couple != 3284.0
+        or fb.PS_PAR_ANNEE[2025] != 0.172
+    ):
+        raise RuntimeError("Import initial figé au commit source : les constantes ont changé. Créer une révision fiscale corrigée, ne pas relancer la simulation ni --appliquer.")
     nouvelles, deja = [], []
     for annee in sorted(fb.BAREMES):
         params = parametres_du_code(annee)
