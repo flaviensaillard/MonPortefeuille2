@@ -18,6 +18,7 @@ la finance de marché.
 | `GUIDE-INDEXATION-PAS-A-PAS.md` | Mettre le corpus dans l'IA et suivre l'avancement, jour par jour |
 | `INSTALLATION-IA-EN-LIGNE.md` | Brancher le service IA (Cloudflare, clés, application) |
 | `QUOI-FAIRE.md` | Ce qui reste à décider ou à vérifier sur les données |
+| `docs/COLLECTE-FISCALE.md` | Reprise de l'existant fiscal vers Supabase, révisions et limites de la collecte |
 
 ---
 

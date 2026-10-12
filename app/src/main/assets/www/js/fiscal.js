@@ -813,6 +813,15 @@
         } else {
             out += '<div class="ok-vert">' + UI.h(maj.message) + '</div>';
         }
+        // Vérification des sources : la collecte annuelle est séparée du
+        // moteur fiscal. Un IR seul ne suffit PAS à une mise à jour des calculs.
+        out += '<div class="card tight" style="margin:10px 0">'
+            + '<b>Sources fiscales par année</b>'
+            + '<div class="st" style="margin:6px 0">Le barème IR est recherché dans une source structurée. Une loi rectificative crée une nouvelle révision de l’année concernée ; les autres années et les anciennes révisions restent intactes. '
+            + 'Décote, prélèvements sociaux, frais et règles de déclaration ne sont pas encore couverts : '
+            + '<b>les nouveaux chiffres ne sont pas appliqués aux calculs.</b></div>'
+            + '<button class="btn sec" data-fisc="collecter">⟳ Chercher les données fiscales disponibles</button>'
+            + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px"></div></div>';
         if (PS_ANNEE_INCERTAINE[annee]) {
             out += '<div class="info"><b>Prélèvements sociaux ' + annee + ' : taux discuté.</b> '
                 + UI.h(PS_ANNEE_INCERTAINE[annee]) + '</div>';
@@ -1338,6 +1347,26 @@
         vue.addEventListener('click', function (e) {
             var cible = e.target.closest ? e.target : null;
             if (!cible) return;
+            var collecte = cible.closest('[data-fisc="collecter"]');
+            if (collecte) {
+                var etat = vue.querySelector('#etatCollecteFiscale');
+                if (!PF.fiscalSources) { if (etat) etat.textContent = 'Module de collecte absent.'; return; }
+                collecte.disabled = true;
+                if (etat) etat.textContent = 'Recherche auprès d’OpenFisca…';
+                PF.fiscalSources.synchroniser().then(function (res) {
+                    if (etat) etat.textContent = (res.ajoutees.length
+                        ? 'Années enregistrées : ' + res.ajoutees.join(', ') + '. '
+                        : 'Aucune nouvelle année enregistrée. Dernière trouvée : '
+                            + (res.derniere || 'aucune') + '. ')
+                        + (res.corrigees.length ? 'Révision(s) mise(s) à jour pour '
+                            + res.corrigees.join(', ') + ' ; anciennes versions conservées. ' : '')
+                        + 'Source partielle : calculs inchangés.';
+                }).catch(function (err) {
+                    if (etat) etat.textContent = 'Actualisation interrompue : ' + (err.message || err)
+                        + ' Vérifiez les migrations 009 et 010, votre connexion et la source ; relancez après vérification.';
+                }).then(function () { collecte.disabled = false; });
+                return;
+            }
             var anneeBtn = cible.closest('[data-fisc="annee"]');
             if (anneeBtn) { anneeFiscale = Number(anneeBtn.getAttribute('data-valeur')); PF.app.rendre(); return; }
             var lien = cible.closest('[data-fisc="ouvrir-lien"]');
