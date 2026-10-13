@@ -35,8 +35,17 @@
 
     function chercher() {
         return PF.net.req('GET', SOURCE, { Accept: 'application/json' }).then(function (rep) {
-            if (!rep.ok || !rep.json || rep.json.id !== 'impot_revenu.bareme_ir_depuis_1945.bareme') {
-                throw new Error('Source OpenFisca injoignable ou format modifié : aucun chiffre enregistré.');
+            if (!rep.ok) {
+                if (typeof rep.error === 'string' && rep.error.indexOf('Hôte non autorisé') >= 0) {
+                    throw new Error('Accès à OpenFisca bloqué par cette version de l’APK : installez la version corrigée. Aucun chiffre enregistré.');
+                }
+                var code = Number(rep.status);
+                throw new Error('Source OpenFisca inaccessible'
+                    + (entier(code) && code >= 100 && code <= 599 ? ' (HTTP ' + code + ')' : ' (réseau)')
+                    + ' : aucun chiffre enregistré.');
+            }
+            if (!rep.json || rep.json.id !== 'impot_revenu.bareme_ir_depuis_1945.bareme') {
+                throw new Error('Format de la réponse OpenFisca inattendu : aucun chiffre enregistré.');
             }
             var maintenant = new Date().getFullYear();
             var annees = [];

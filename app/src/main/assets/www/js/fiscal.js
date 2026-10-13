@@ -1639,8 +1639,10 @@
                             + res.corrigees.join(', ') + ' ; anciennes versions conservées. ' : '')
                         + 'Source partielle : calculs inchangés.';
                 }).catch(function (err) {
-                    if (etat) etat.textContent = 'Actualisation interrompue : ' + (err.message || err)
-                        + ' Vérifiez les migrations 009 et 010, votre connexion et la source ; relancez après vérification.';
+                    var message = String(err && err.message || err);
+                    if (etat) etat.textContent = 'Actualisation interrompue : ' + message
+                        + ' Cette collecte partielle ne modifie ni la révision fiscale publiée ni les calculs.'
+                        + ' Ne rejouez pas les migrations ; vérifiez la cause indiquée avant de réessayer.';
                 }).then(function () { collecte.disabled = false; });
                 return;
             }

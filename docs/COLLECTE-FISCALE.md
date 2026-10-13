@@ -97,16 +97,24 @@ avec différences attendues et règles non auditées ; ce n'est ni une simulatio
 de lecture Supabase, ni une ligne publiable, ni une sauvegarde. Aucune écriture
 de paramètres fiscaux n'a été effectuée pendant cette préparation : seule la structure de la table a été étendue par 011.
 
-## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
+## Collecte sur le téléphone (APK de branche, distincte de la release publique 2.2.1)
 
 Le bouton « Chercher les données fiscales disponibles » lit le barème IR sur
 `https://api.fr.openfisca.org/latest/parameter/impot_revenu/bareme_ir_depuis_1945/bareme`.
+Le pont réseau de l'APK de branche doit autoriser l'hôte HTTPS **exact**
+`api.fr.openfisca.org` : son omission a causé le message « source injoignable »
+alors que Supabase fonctionnait. Une APK antérieure au correctif ne peut pas
+réussir cette collecte. Ni la migration 009 ni la 010 ne doivent être rejouées
+pour corriger un refus de cet hôte. Le serveur et son format restent des
+dépendances externes : un accès à l'hôte ne garantit pas une réponse valide.
 Une entrée explicite pour l'année des revenus est exigée ; aucun barème de l'année
 précédente n'est supposé valable. Si la source rectifie une année déjà collectée,
 le bouton ajoute une révision, conserve la précédente et laisse les calculs
 inchangés. OpenFisca est une modélisation ouverte, **pas le texte officiel de la
-loi**. Ne pas installer un paquet APK signé avec une clé de développement sur la
-2.2.1 : une prochaine release aura son propre numéro et la signature habituelle.
+loi**. Tester uniquement l'artefact de branche construit avec la signature
+habituelle ; la release publique `apk-2.2.1` correspond à un ancien commit et
+ne contient pas le lecteur R2 ni le correctif d'accès OpenFisca. Ne pas
+installer un APK signé avec une clé de développement par-dessus l'application.
 
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.

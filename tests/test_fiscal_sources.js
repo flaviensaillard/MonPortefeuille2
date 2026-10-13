@@ -61,9 +61,16 @@ const collecteur = contexte.PF.fiscalSources;
     assert.equal(lignes[0].annee_revenus, 2022, 'année antérieure inchangée');
     await collecteur.synchroniser();
     assert.equal(ecritures, 2, 'pas de doublon après rectification');
+    contexte.PF.net.req = async () => ({ ok: false, status: -1,
+        error: 'Hôte non autorisé (HTTPS requis, allowlist) : ' + source });
+    await assert.rejects(collecteur.synchroniser(), /bloqué par cette version de l’APK/);
+    assert.equal(ecritures, 2, 'hôte bloqué : aucune écriture');
     contexte.PF.net.req = async () => ({ ok: false, status: 503 });
-    await assert.rejects(collecteur.synchroniser(), /Source OpenFisca injoignable/);
+    await assert.rejects(collecteur.synchroniser(), /Source OpenFisca inaccessible \(HTTP 503\)/);
     assert.equal(ecritures, 2, 'panne réseau : aucune écriture');
+    contexte.PF.net.req = async () => ({ ok: true, json: { id: 'autre' } });
+    await assert.rejects(collecteur.synchroniser(), /Format de la réponse OpenFisca inattendu/);
+    assert.equal(ecritures, 2, 'réponse inattendue : aucune écriture');
 
     const sql = fs.readFileSync(path.join(__dirname, '../migrations/010_fiscal_annees.sql'), 'utf8');
     assert.match(sql, /primary key \(user_id, annee_revenus, source, revision\)/);
@@ -75,5 +82,7 @@ const collecteur = contexte.PF.fiscalSources;
     assert.match(html, /js\/fiscal_sources\.js/);
     assert.match(fiscal, /data-fisc="collecter"/);
     assert.match(fiscal, /ses chiffres isolés ne sont pas appliqués aux calculs/);
+    assert.match(fiscal, /Ne rejouez pas les migrations/);
+    assert.doesNotMatch(fiscal, /Vérifiez les migrations 009 et 010/);
     console.log('Révisions fiscales annuelles : tests réussis');
 })().catch(e => { console.error(e); process.exitCode = 1; });

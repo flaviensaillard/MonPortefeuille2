@@ -7,7 +7,7 @@
    - le WebView n'accorde plus l'accès universel ni l'accès fichier-fichier
      depuis file://, ni l'accès contenu, et Safe Browsing n'est plus désactivé ;
    - le pont réseau n'ouvre QUE des URL HTTPS vers une allowlist d'hôtes
-     (Supabase, Yahoo Finance, INSEE) et refuse les autres ;
+     (Supabase, Yahoo Finance, INSEE, OpenFisca exact) et refuse les autres ;
    - les méthodes HTTP du pont sont limitées à GET/POST/PATCH/DELETE ;
    - les en-têtes sont validés (pas d'injection CR/LF) ;
    - les redirections automatiques sont coupées (un hôte autorisé ne peut pas
@@ -57,6 +57,14 @@ verifier('allowlist HTTPS : Supabase', /supabase\.co/.test(pont));
 verifier('allowlist HTTPS : Yahoo Finance', /query1\.finance\.yahoo\.com/.test(pont)
     && /query2\.finance\.yahoo\.com/.test(pont));
 verifier('allowlist HTTPS : INSEE', /api\.insee\.fr/.test(pont));
+const listeHotes = pont.match(/HOTES_AUTORISES\s*=\s*\{([^}]+)\}/);
+const sourceFiscale = lire('app/src/main/assets/www/js/fiscal_sources.js');
+const urlOpenFisca = sourceFiscale.match(/var SOURCE = '(https:\/\/[^']+)'/);
+verifier('source OpenFisca autorisée par hôte exact, sans wildcard',
+    !!listeHotes && !!urlOpenFisca &&
+    listeHotes[1].includes('"' + new URL(urlOpenFisca[1]).hostname + '"') &&
+    !listeHotes[1].includes('".openfisca.org"') &&
+    /h\.equals\(a\)/.test(pont));
 verifier('les URL non HTTPS sont refusées par le pont',
     /!"https"\.equalsIgnoreCase/.test(pont) || /https.*equalsIgnoreCase.*getProtocol/.test(pont),
     'executer() doit rejeter tout ce qui n’est pas https');

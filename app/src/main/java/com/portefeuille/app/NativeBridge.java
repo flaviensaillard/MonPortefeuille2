@@ -73,14 +73,16 @@ public class NativeBridge {
        vers cette liste d'hôtes. Une entrée commençant par « . » autorise le
        domaine et ses sous-domaines. Le projet Supabase du porteur est toujours
        un sous-domaine de supabase.co ; les cours viennent de Yahoo Finance ;
-       l'inflation de l'INSEE ; le service IA du porteur, s'il en configure un,
-       vit sur un worker Cloudflare (.workers.dev). Toute autre destination est
+       l'inflation de l'INSEE ; la collecte du seul barème IR vient d'OpenFisca ;
+       le service IA du porteur, s'il en configure un, vit sur un worker
+       Cloudflare (.workers.dev). Toute autre destination est
        refusée, même si le JavaScript la demande. */
     private static final String[] HOTES_AUTORISES = {
             ".supabase.co",
             "query1.finance.yahoo.com",
             "query2.finance.yahoo.com",
             "api.insee.fr",
+            "api.fr.openfisca.org",  // hôte exact, jamais *.openfisca.org
             ".workers.dev"
     };
 
