@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const code = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/js/fiscal_revisions.js'), 'utf8');
 let appels = [];
@@ -17,13 +18,17 @@ const contexte = vm.createContext({ PF: { net: { supabase: {
 } } }, Set, Promise, Object, Number, String, Error, Array, isFinite });
 vm.runInContext(code, contexte);
 const lecteur = contexte.PF.fiscalRevisions;
-const utilises = ['bareme.tranches', 'bareme.taux', 'prelevements_sociaux'];
+const candidat = spawnSync(process.env.PF2_PYTHON || 'python3', ['-c',
+    'import json; from jobs.preparer_revision_fiscale_2025 import parametres_2025; from jobs.controle_couverture_2025 import verifier; p=parametres_2025(); print(json.dumps({"parametres":p,"chemins":verifier(p)["parametres_inventories"]}))'
+], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+assert.equal(candidat.status, 0, candidat.stderr);
+const donnees = JSON.parse(candidat.stdout);
+const utilises = donnees.chemins;
 function r2() {
     return {
         annee_revenus: 2025, revision: 2, origine: 'nouvelle_publication',
         source_ref: 'https://exemple.test/version-figee',
-        parametres: { bareme: { tranches: [11600, 29579], taux: [.11, .30] },
-            prelevements_sociaux: .186 },
+        parametres: structuredClone(donnees.parametres),
         statut_validation: 'valide_pour_perimetre', actif: true,
         perimetre_validation: {
             couverture: 'integrale_parametres_utilises', annee_revenus: 2025,
@@ -61,6 +66,14 @@ invalide(r => { delete r.perimetre_validation.sources_par_parametre['bareme.taux
 invalide(r => { r.parametres.bareme.tranches = []; }, 'valeur vide');
 invalide(r => { r.parametres.bareme.tranches = [11600, [null]]; }, 'valeur imbriquée absente');
 invalide(r => { r.parametres.bareme.champ_inconnu = 10; }, 'champ non inventorié');
+invalide(r => { r.parametres.bareme.tranches[1] = 100; }, 'tranches non croissantes');
+invalide(r => { r.parametres.bareme.taux[0] = .9; }, 'taux aberrant');
+invalide(r => { r.parametres.prelevements_sociaux = .99; }, 'PS aberrants');
+invalide(r => { r.parametres.quotient_familial.plafonds_particuliers_modelises = true; },
+    'QF spécial non pris en charge par le moteur');
+invalide(r => { r.parametres.regles_km.seuils_distance_km = [5000, 21000]; },
+    'changer une formule non dynamique exige du nouveau code');
+invalide(r => { r.parametres.bareme_km['5'] = [1, 2]; }, 'barème km mal formé');
 invalide(r => { r.source_ref = ''; }, 'provenance manquante');
 invalide(r => { r.origine = 'reprise_code_non_verifiee'; }, 'R1 ne peut être homologuée par un drapeau');
 assert.equal(lecteur.examiner([r2(), { ...r2(), revision: 3 }], 2025, utilises), null,

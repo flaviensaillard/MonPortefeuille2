@@ -52,6 +52,67 @@
         return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
     }
 
+    function nombre(x, bas, haut) {
+        return typeof x === 'number' && isFinite(x) && x >= bas && x <= haut;
+    }
+    /* Format compatible avec le moteur ACTUEL 2025 ; les seuils de mode de
+       calcul non configurables sont exigés à leur valeur embarquée. Ne prouve
+       PAS que ces chiffres soient légalement exacts. */
+    function forme2025(v) {
+        try {
+            if (!objet(v) || !objet(v.bareme) || v.bareme.annee !== 2025) return false;
+            var b = v.bareme;
+            if (!Array.isArray(b.tranches) || b.tranches.length !== 4 ||
+                !b.tranches.every(function (x, i) {
+                    return entier(x) && x > (i ? b.tranches[i - 1] : 0) && x < 10000000;
+                }) || !Array.isArray(b.taux) || b.taux.length !== 4 ||
+                !b.taux.every(function (x, i) {
+                    return nombre(x, 0, .6) && x > (i ? b.taux[i - 1] : 0);
+                })) return false;
+            if (!['decote_base_celibataire', 'decote_plafond_celibataire',
+                'decote_base_couple', 'decote_plafond_couple'].every(function (k) {
+                return nombre(b[k], 0, 10000);
+            }) || b.decote_taux !== .4525) return false;
+            var ps = v.prelevements_sociaux_par_categorie;
+            if (!objet(ps) || !nombre(v.prelevements_sociaux, 0, .4) ||
+                !['plus_values_titres', 'plus_values_crypto_privees',
+                    'rcm_precomptes_en_2025', 'rcm_non_precomptes'].every(function (k) {
+                    return nombre(ps[k], 0, .4);
+                }) || ps.plus_values_titres !== v.prelevements_sociaux ||
+                ps.plus_values_crypto_privees !== v.prelevements_sociaux ||
+                ps.rcm_non_precomptes !== v.prelevements_sociaux) return false;
+            if (!objet(v.quotient_familial) ||
+                !nombre(v.quotient_familial.plafond_general_par_demi_part, 0, 10000) ||
+                v.quotient_familial.plafonds_particuliers_modelises !== false ||
+                v.ir_forfaitaire !== .128 || v.seuil_non_recouvrement_ir !== 61 ||
+                !nombre(v.csg_deductible, 0, .2)) return false;
+            var cal = v.calendrier_csg, options = v.options_fiscales;
+            if (!objet(cal) || cal.deduction_selon_annee_paiement !== true ||
+                cal.rcm_precomptes_deduction_possible_en_2025_si_bareme !== true ||
+                cal.csg_payee_ulterieurement_non_deduite_du_revenu_2025 !== true ||
+                !objet(options) || options.deux_op_globale_titres_et_rcm !== true ||
+                options.trois_cn_crypto_independante !== true ||
+                options.trois_cn_disponible_pour_cessions_depuis !== 2023) return false;
+            var ab = v.abattement_10, km = v.bareme_km, regles = v.regles_km;
+            if (!objet(ab) || ab.taux !== .10 || !nombre(ab.plancher, 0, 10000) ||
+                !nombre(ab.plafond, ab.plancher, 100000) ||
+                !nombre(v.forfait_repas, 0, 100) || !objet(km) ||
+                Object.keys(km).sort().join(',') !== '3,4,5,6,7' ||
+                !Object.keys(km).every(function (cv) {
+                    return Array.isArray(km[cv]) && km[cv].length === 4 &&
+                        km[cv].every(function (x, i) { return nombre(x, 0, i === 2 ? 10000 : 2); });
+                }) || !objet(regles) ||
+                !Array.isArray(regles.seuils_distance_km) ||
+                regles.seuils_distance_km.length !== 2 ||
+                regles.seuils_distance_km[0] !== 5000 ||
+                regles.seuils_distance_km[1] !== 20000 ||
+                regles.majoration_electrique !== .20 ||
+                !nombre(v.franchise_crypto, 0, 10000) ||
+                'or_physique' in v || 'pas' in v) return false;
+            return true;
+        } catch (_) { return false; }
+    }
+
     /* L'inventaire du moteur est fourni par l'appelant ; jamais inféré des
        seules données distantes. Aucun repli sur R1 ni sur la dernière révision. */
     function examiner(lignes, annee, cheminsConsommes) {
@@ -87,7 +148,7 @@
             attendus.some(function (chemin) {
                 var ref = p.sources_par_parametre[chemin];
                 return typeof ref !== 'string' || !/^https:\/\//.test(ref);
-            })) return null;
+            }) || annee !== 2025 || !forme2025(r.parametres)) return null;
         // Résultat purement structurel : aucune constante n'est branchée au
         // moteur, même si les métadonnées prétendent une couverture intégrale.
         return { annee_revenus: annee, revision: r.revision,
