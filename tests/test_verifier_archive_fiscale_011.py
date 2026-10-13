@@ -21,7 +21,8 @@ def _lignes():
               "prelevements_sociaux": .172}
     return [{"user_id": uid, "annee_revenus": a, "revision": 1,
              "parametres": deepcopy(params), "origine": "reprise_code_non_verifiee",
-             "source_ref": prep.SOURCE_REVISION_1, "cree_le": "2026-10-12T00:00:00Z"}
+             "source_ref": prep.SOURCE_REVISION_1, "cree_le": "2026-10-12T00:00:00Z",
+             "statut_validation": "historique_non_verifie", "perimetre_validation": {}, "actif": False}
             for a in (2022, 2023, 2024, 2025, 2026)]
 
 
@@ -73,3 +74,11 @@ def test_derives_archive_ou_lecture_bloquent(tmp_path):
     derapage[-1]["revision"] = 2
     with pytest.raises(ValueError, match="Années ou révisions"):
         controle.controler_archive(_archive(tmp_path, derapage), PHRASE)
+    sans_meta = deepcopy(lignes)
+    del sans_meta[0]["statut_validation"]
+    with pytest.raises(ValueError, match="incomplète"):
+        controle.controler_archive(_archive(tmp_path, sans_meta), PHRASE)
+    active = deepcopy(lignes)
+    active[3]["actif"] = True
+    with pytest.raises(ValueError, match="différent"):
+        controle.controler_archive(_archive(tmp_path, active), PHRASE)

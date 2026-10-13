@@ -279,7 +279,15 @@ test('comparaison PFU / barème renvoie un choix', () => {
     const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2026, 'Marié(e) / Pacsé(e)');
     return (c.choix === 'PFU' || c.choix === 'Barème progressif') && c.pfu.total > 0;
 });
-test('frais kilométriques 20 000 km / 5 CV', () => proche(PF.fiscal.fraisKilometriques(20000, 5).montant, 20000 * 0.357 + 1395, 0.01));
+test('frais kilométriques 20 000 km / 5 CV (revenus 2025)', () =>
+    proche(PF.fiscal.fraisKilometriques(20000, 5, false, 2025).montant, 20000 * 0.357 + 1395, 0.01));
+test('frais kilométriques : pas de millésime implicite', () => {
+    for (const annee of [undefined, 2027]) {
+        try { PF.fiscal.fraisKilometriques(100, 5, false, annee); return false; }
+        catch (e) { if (!/Aucun barème kilométrique/.test(e.message)) return false; }
+    }
+    return true;
+});
 
 console.log('\nRééquilibrage');
 function fauxContexte() {

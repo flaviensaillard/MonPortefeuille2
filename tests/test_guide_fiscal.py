@@ -249,7 +249,7 @@ class TestInvariants:
 
 def test_frais_kilometriques_et_repas_et_simulation_foyer():
     from core import fiscal_bars as fb, tax
-    km_val, km_txt = fb.frais_kilometriques(9120, 5)
+    km_val, km_txt = fb.frais_kilometriques(9120, 5, annee=2025)
     assert km_val == pytest.approx(9120 * 0.357 + 1395.0)
     assert "5 CV" in km_txt and "4 650,84 €" in km_txt
 

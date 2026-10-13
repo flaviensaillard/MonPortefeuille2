@@ -50,7 +50,8 @@ def _lignes(uid=None):
         "mention_source_code_non_verifiee": "ancienne",
     }
     base = [{"user_id": uid, "annee_revenus": a, "revision": 1, "origine": "reprise_code_non_verifiee",
-             "source_ref": prep.SOURCE_REVISION_1, "parametres": deepcopy(params)}
+             "source_ref": prep.SOURCE_REVISION_1, "parametres": deepcopy(params),
+             "statut_validation": "historique_non_verifie", "perimetre_validation": {}, "actif": False}
             for a in (2022, 2023, 2024, 2025, 2026)]
     return base
 
@@ -114,8 +115,16 @@ def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
     assert "cessions_titres_hors_portefeuille_non_confirmees" not in tous_flux_absents[
         "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
     assert prep.simuler_ligne_2025()["perimetre_personnel_hors_parametres_fiscaux"]["rcm_hors_portefeuille_2025"] == "inconnu"
+    hypothese_sans_avoirs = prep.simuler_ligne_2025(aucun_avoir_crypto_externe_aux_cessions=True)
+    assert hypothese_sans_avoirs["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
+    assert hypothese_sans_avoirs["portee_calcul_2025"]["plus_value_2086_complete_confirmee"] is False
+    assert "inventaire_crypto_hors_application_non_confirme" not in hypothese_sans_avoirs[
+        "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
+    assert hypothese_sans_avoirs["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
     with pytest.raises(ValueError, match="booléennes"):
         prep.simuler_ligne_2025(aucun_autre_rcm="non")
+    with pytest.raises(ValueError, match="booléennes"):
+        prep.simuler_ligne_2025(aucun_avoir_crypto_externe_aux_cessions="non")
 
 
 def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
@@ -124,7 +133,8 @@ def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
     lignes = verification.lire_revisions(client, uid)
     assert lignes == client.lignes
     assert client.appels == [("table", "pf2_fiscal_annees"),
-                            ("select", "user_id,annee_revenus,revision,parametres,origine,source_ref"),
+                            ("select", "user_id,annee_revenus,revision,parametres,origine,source_ref,"
+                             "statut_validation,perimetre_validation,actif"),
                             ("eq", "user_id", uid), ("execute",)]
     with pytest.raises(ValueError, match="autre propriétaire"):
         verification.lire_revisions(ClientLectureSeule(_lignes(str(uuid4()))), uid)
@@ -159,6 +169,9 @@ def test_diff_distinguant_ajouts_et_modifications_ne_produit_pas_de_ligne_a_inse
     (lambda lignes: lignes.pop(0), "2022"),
     (lambda lignes: lignes[3]["parametres"].update(champ_imprevu="sensible"), "champs inconnus"),
     (lambda lignes: lignes[0].update(revision=2), "2022"),
+    (lambda lignes: lignes[3].update(actif=True), "métadonnées"),
+    (lambda lignes: lignes[3].update(statut_validation="valide_pour_perimetre"), "métadonnées"),
+    (lambda lignes: lignes[3].update(perimetre_validation={"couverture": "partielle"}), "métadonnées"),
 ])
 def test_derives_bloquent_numero_suppose(mutation, attendu):
     lignes = _lignes()

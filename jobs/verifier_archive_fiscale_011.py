@@ -1,4 +1,4 @@
-"""Précondition HORS BASE de la migration 011 : archive chiffrée + lecture identiques.
+"""Contrôle HORS BASE : archive chiffrée + lecture fiscale 011 identiques.
 
 N'effectue aucune requête réseau ni écriture Supabase. Le rapport `--rapport`
 provient d'une lecture seule toute récente du même run de sauvegarde. Ne
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jobs import restauration  # noqa: E402
 from jobs import verifier_revision_fiscale_2025 as lecture  # noqa: E402
 
-CHAMPS_PROJETES = ("user_id", "annee_revenus", "revision", "parametres", "origine", "source_ref")
+CHAMPS_PROJETES = tuple(lecture.CHAMPS.split(","))
 ATTENDUS = {(annee, 1) for annee in (2022, 2023, 2024, 2025, 2026)}
 
 
@@ -73,7 +73,7 @@ def main() -> int:
         return 1
     print("Archive fiscale restaurée : 5 lignes R1 (2022–2026), propriétaire unique, empreintes validées.")
     if args.rapport:
-        print("Lecture fiscale distante : identique à la sauvegarde restaurée. Aucune migration exécutée.")
+        print("Lecture fiscale distante : identique à la sauvegarde restaurée. Aucune écriture Supabase par ce contrôle.")
     return 0
 
 

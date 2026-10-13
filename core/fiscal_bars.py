@@ -253,6 +253,14 @@ BAREME_KM_VOITURE: dict[int, tuple[float, float, float, float]] = {
     6: (0.665, 0.374, 1457.0, 0.447),
     7: (0.697, 0.394, 1515.0, 0.470),
 }
+# Copie de la constante historique pour chaque année prise en charge. Seul
+# 2025 est recoupé avec l'aide fiscale citée dans docs/AUDIT-FISCAL-2025-2026.md ;
+# les autres années conservent les hypothèses antérieures, NON homologuées.
+# Des dictionnaires distincts permettent une rectification sans écraser les
+# autres années. Une année absente ne reprend jamais celle de 2025/2026.
+BAREME_KM_VOITURE_PAR_ANNEE: dict[int, dict[int, tuple[float, float, float, float]]] = {
+    annee: dict(BAREME_KM_VOITURE) for annee in (2022, 2023, 2024, 2025, 2026)
+}
 
 FORFAIT_REPAS_PAR_ANNEE: dict[int, float] = {
     2022: 5.00,
@@ -305,17 +313,22 @@ def frais_kilometriques(
     km: float,
     cv: int = 5,
     electrique: bool = False,
+    *, annee: int,
 ) -> tuple[float, str]:
-    """Calcule les frais kilométriques selon le barème officiel URSSAF / DGFiP.
+    """Calcule les frais kilométriques du millésime demandé (hypothèses historiques).
+
+    La présence d'une année dans la table ne certifie pas ses coefficients.
 
     Retourne `(montant_eur, formule_explicative)` prête à copier dans la note
     jointe à la déclaration (case 1AK / 1BK).
     """
+    if annee not in BAREME_KM_VOITURE_PAR_ANNEE:
+        raise ValueError(f"Aucun barème kilométrique pour les revenus {annee}.")
     d = max(0.0, float(km))
     if d <= 0:
         return 0.0, "0 km"
     cv_cle = min(max(int(cv), 3), 7)
-    a1, a2, b2, a3 = BAREME_KM_VOITURE[cv_cle]
+    a1, a2, b2, a3 = BAREME_KM_VOITURE_PAR_ANNEE[annee][cv_cle]
     if d <= 5_000:
         montant = d * a1
         formule = f"{d:,.0f} km × {a1:.3f}".replace(",", " ").replace(".", ",")

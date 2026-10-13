@@ -92,7 +92,7 @@ def parametres_2025() -> dict:
             "plafond": fb.PLAFOND_ABATTEMENT_10_PAR_ANNEE[ANNEE],
         },
         "forfait_repas": fb.FORFAIT_REPAS_PAR_ANNEE[ANNEE],
-        "bareme_km": {str(cv): list(valeurs) for cv, valeurs in fb.BAREME_KM_VOITURE.items()},
+        "bareme_km": {str(cv): list(valeurs) for cv, valeurs in fb.BAREME_KM_VOITURE_PAR_ANNEE[ANNEE].items()},
         "regles_km": {"seuils_distance_km": [5000, 20000], "majoration_electrique": 0.20},
         "franchise_crypto": fb.CRYPTO_FRANCHISE_CESSIONS,
         # IGLN.L est un ETC (classe OR, régime des titres), PAS un bien
@@ -142,7 +142,7 @@ def construire_brouillon() -> dict:
             "ir_forfaitaire": "recoupe_DGFiP_pour_titres_crypto_et_RCM_saisis",
             "csg_deductible_calendrier": "recoupe_DGFiP_sous_conditions",
             "abattement_10.plancher_plafond": "recoupe_BOFiP_revenus_2025",
-            "abattement_10.taux": "non_audite_independamment",
+            "abattement_10.taux": "recoupe_DGFiP_revenus_2025_sous_condition_salaire_eligible",
             "forfait_repas": "montant_recoupe_DGFiP_conditions_personnelles_non_validees",
             "bareme_km": "coefficients_recoupes_conditions_et_portee_non_exhaustives",
             "regles_km": "tranches_et_maj_electrique_recoupees_BOFiP_conditions_personnelles_non_exhaustives",
@@ -168,7 +168,8 @@ def construire_brouillon() -> dict:
 
 def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
                        aucune_autre_cession_crypto: bool = False,
-                       aucune_autre_cession_titres: bool = False) -> dict:
+                       aucune_autre_cession_titres: bool = False,
+                       aucun_avoir_crypto_externe_aux_cessions: bool = False) -> dict:
     """Enveloppe R2 hors ligne, non insérable, avec confirmations ÉPHÉMÈRES.
 
     Les réponses concernent uniquement 2025 et ne sont pas sauvegardées dans
@@ -178,14 +179,16 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
     compter pour le calcul du 2086 : une absence de cessions n'est PAS un inventaire.
     """
     if any(type(v) is not bool for v in (
-        aucun_autre_rcm, aucune_autre_cession_crypto, aucune_autre_cession_titres
+        aucun_autre_rcm, aucune_autre_cession_crypto, aucune_autre_cession_titres,
+        aucun_avoir_crypto_externe_aux_cessions
     )):
         raise ValueError("Les confirmations de périmètre doivent être explicites (booléennes).")
     brouillon = construire_brouillon()
     params = brouillon["parametres_candidats"]
     assert "or_physique" not in params and "pas" not in params
-    regles_exclues = ["or_physique", "pas_officiel", "rcm_du_portefeuille_non_audites",
-                      "inventaire_crypto_hors_application_non_confirme"]
+    regles_exclues = ["or_physique", "pas_officiel", "rcm_du_portefeuille_non_audites"]
+    if not aucun_avoir_crypto_externe_aux_cessions:
+        regles_exclues.append("inventaire_crypto_hors_application_non_confirme")
     if not aucune_autre_cession_titres:
         regles_exclues.append("cessions_titres_hors_portefeuille_non_confirmees")
     if not aucun_autre_rcm:
@@ -207,6 +210,10 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
             "cessions_titres_hors_portefeuille_2025": (
                 "absence_confirmee_pour_cette_simulation" if aucune_autre_cession_titres else "inconnu_non_presume_nul"
             ),
+            "avoirs_crypto_hors_application_aux_dates_de_cession_2025": (
+                "absence_confirmee_pour_cette_simulation"
+                if aucun_avoir_crypto_externe_aux_cessions else "inconnu"
+            ),
         },
         "portee_calcul_2025": {
             "franchise_crypto_evaluable_sur_les_cessions_chargees": aucune_autre_cession_crypto,
@@ -221,7 +228,12 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
                 "Flux hors portefeuille non confirmés ; choix fiscal indicatif."
             ),
             "plus_value_2086_complete_confirmee": False,
-            "raison_2086": "Aucune cession externe ne prouve l'absence de crypto déjà détenue hors application.",
+            "raison_2086": (
+                "Une absence d'avoirs externes ponctuellement confirmée ne vérifie ni l'exhaustivité "
+                "des opérations chargées, ni les cours et prix d'acquisition du portefeuille."
+                if aucun_avoir_crypto_externe_aux_cessions else
+                "Aucune cession externe ne prouve l'absence de crypto déjà détenue hors application."
+            ),
         },
         "proposition_metadonnees_brouillon_non_publie": {
             "statut_validation": "brouillon",
@@ -246,7 +258,9 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
             "paramètres or physique exclus ; une publication générale serait trompeuse",
             "PAS couple = estimation sur salaires, non un taux officiel activable",
             "revenus mobiliers de ce portefeuille non inventoriés exhaustivement (dividendes/coupons) ; 2OP non certifiée",
-            "inventaire des cryptoactifs déjà détenus hors application non confirmé ; 2086 non certifié",
+            ("2086 non certifié : exhaustivité des opérations et valorisations non vérifiées"
+             if aucun_avoir_crypto_externe_aux_cessions else
+             "inventaire des cryptoactifs déjà détenus hors application non confirmé ; 2086 non certifié"),
             "plafonds QF spéciaux et situations personnelles non couverts",
             "relecture/backup récents, contrôle final et accord distinct d'écriture requis",
         ] + ([] if aucun_autre_rcm else ["RCM hors portefeuille du foyer non confirmés pour 2025"])
@@ -267,15 +281,20 @@ def main() -> int:
                         help="Confirmation ponctuelle hors portefeuille, non conservée.")
     parser.add_argument("--aucune-autre-cession-titres-2025", action="store_true",
                         help="Confirmation ponctuelle hors portefeuille, non conservée.")
+    parser.add_argument("--aucun-avoir-crypto-externe-aux-cessions-2025", action="store_true",
+                        help="Confirmation ponctuelle aux dates des cessions ; ne certifie pas la 2086.")
     args = parser.parse_args()
     assert args.annee == ANNEE
     if any((args.aucun_autre_rcm_2025, args.aucune_autre_cession_crypto_2025,
-            args.aucune_autre_cession_titres_2025)) and not args.simuler_ligne:
+            args.aucune_autre_cession_titres_2025,
+            args.aucun_avoir_crypto_externe_aux_cessions_2025)) and not args.simuler_ligne:
         parser.error("Les confirmations ne s'appliquent qu'à --simuler-ligne (revenus 2025).")
     try:
         sortie = (simuler_ligne_2025(aucun_autre_rcm=args.aucun_autre_rcm_2025,
                                     aucune_autre_cession_crypto=args.aucune_autre_cession_crypto_2025,
-                                    aucune_autre_cession_titres=args.aucune_autre_cession_titres_2025)
+                                    aucune_autre_cession_titres=args.aucune_autre_cession_titres_2025,
+                                    aucun_avoir_crypto_externe_aux_cessions=(
+                                        args.aucun_avoir_crypto_externe_aux_cessions_2025))
                   if args.simuler_ligne else construire_brouillon())
     except (KeyError, RuntimeError, ValueError) as exc:
         print(f"Préparation annulée : {exc}", file=sys.stderr)

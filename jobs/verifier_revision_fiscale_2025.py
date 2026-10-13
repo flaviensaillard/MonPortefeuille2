@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jobs import preparer_revision_fiscale_2025 as prep  # noqa: E402
 
 TABLE = "pf2_fiscal_annees"
-CHAMPS = "user_id,annee_revenus,revision,parametres,origine,source_ref"
+CHAMPS = ("user_id,annee_revenus,revision,parametres,origine,source_ref,"
+          "statut_validation,perimetre_validation,actif")
 ANNEES_HISTORIQUES = (2022, 2023, 2024, 2025, 2026)
 CLES_REVISION_1 = frozenset({
     "bareme", "prelevements_sociaux", "ir_forfaitaire", "csg_deductible",
@@ -107,8 +108,13 @@ def comparer_lignes(lignes: list[dict], candidat: dict | None = None) -> dict:
         rev = ligne.get("revision")
         params = ligne.get("parametres")
         if (type(annee) is not int or type(rev) is not int or rev < 1
-                or not isinstance(params, dict)):
-            raise ValueError("Ligne fiscale invalide, comparaison arrêtée.")
+                or not isinstance(params, dict)
+                or "statut_validation" not in ligne or "perimetre_validation" not in ligne
+                or "actif" not in ligne):
+            raise ValueError("Ligne fiscale ou métadonnées 011 invalides, comparaison arrêtée.")
+        if (ligne["statut_validation"] != "historique_non_verifie"
+                or ligne["perimetre_validation"] != {} or ligne["actif"] is not False):
+            problemes.append(f"Année {annee}/révision {rev} : métadonnées de validation ou activation inattendues.")
         if (annee, rev) in clefs:
             problemes.append(f"Doublon détecté pour {annee}/révision {rev}.")
         clefs.add((annee, rev))

@@ -27,6 +27,18 @@ def test_impot_par_part_exige_un_bareme_explicitement_fourni():
         tax._impot_par_part(30000, None)
 
 
+def test_frais_km_exige_une_annee_et_ne_reutilise_pas_2025():
+    with pytest.raises(TypeError):
+        fb.frais_kilometriques(9120, 5)
+    with pytest.raises(ValueError, match="Aucun barème kilométrique"):
+        fb.frais_kilometriques(9120, 5, annee=2027)
+    with pytest.raises(ValueError, match="Aucun barème kilométrique"):
+        fb.frais_kilometriques(0, 5, annee=2027)
+    assert fb.frais_kilometriques(9120, 5, annee=2025)[0] == pytest.approx(9120 * .357 + 1395)
+    # Tables indépendantes : une rectification locale ne touche pas les autres.
+    assert fb.BAREME_KM_VOITURE_PAR_ANNEE[2024] is not fb.BAREME_KM_VOITURE_PAR_ANNEE[2025]
+
+
 def test_les_millesimes_connus_restent_independants():
     assert fb.forfait_repas_de(2025) == 5.45
     assert fb.forfait_repas_de(2026) == 5.50

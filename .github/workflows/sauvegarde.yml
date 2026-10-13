@@ -50,9 +50,9 @@ jobs:
           fichier=$(ls sauvegardes/*.pf2)
           python jobs/restauration.py "$fichier" --csv /tmp/controle-csv
           (cd sauvegardes && sha256sum -c "$(basename "$fichier").sha256")
-      # Le contrôle de restauration général accepte les tables optionnelles
-      # absentes. Avant 011, la table fiscale et ses 5 R1 doivent EXISTER dans
-      # l'archive ; sinon le run manuel échoue AVANT toute migration.
+      # Le contrôle général accepte les tables optionnelles absentes. Depuis
+      # 011, la table fiscale et ses 5 R1 inactives doivent EXISTER dans
+      # l'archive avec les métadonnées ; aucun nouveau run ne vaut insertion R2.
       - name: Vérifier les cinq révisions fiscales dans la sauvegarde restaurée
         if: github.event_name == 'workflow_dispatch'
         env:

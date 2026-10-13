@@ -43,6 +43,14 @@
     var PLAFOND_ABATTEMENT_10 = { 2022: 13522, 2023: 14171, 2024: 14426, 2025: 14555, 2026: 14555 };
     var FORFAIT_REPAS = { 2022: 5.0, 2023: 5.2, 2024: 5.35, 2025: 5.45, 2026: 5.5 };
     var BAREME_KM = { 3: [0.529, 0.316, 1065, 0.370], 4: [0.606, 0.340, 1330, 0.407], 5: [0.636, 0.357, 1395, 0.427], 6: [0.665, 0.374, 1457, 0.447], 7: [0.697, 0.394, 1515, 0.470] };
+    // Même hypothèse historique copiée pour chaque année ; seule 2025 a été
+    // recoupée. Une rectification d'un millésime ne modifie pas les autres.
+    var BAREME_KM_PAR_ANNEE = {};
+    [2022, 2023, 2024, 2025, 2026].forEach(function (annee) {
+        var copie = {};
+        Object.keys(BAREME_KM).forEach(function (cv) { copie[cv] = BAREME_KM[cv].slice(); });
+        BAREME_KM_PAR_ANNEE[annee] = copie;
+    });
 
     var URL_MAJ_BAREMES = 'https://arena.ai/agent/01a0f24c-13af-734b-9dd4-91b1ceafa74f';
 
@@ -170,7 +178,7 @@
         var salaire = U.num(r['salaireNetImposable' + n], 0);
         var abattement = abattement10(salaire, annee);
         var utilise = U.estVrai(r['utiliserFraisReels' + n]);
-        var km = fraisKilometriques(r['fraisKm' + n], r['cvFiscal' + n], U.estVrai(r['vehiculeElectrique' + n]));
+        var km = fraisKilometriques(r['fraisKm' + n], r['cvFiscal' + n], U.estVrai(r['vehiculeElectrique' + n]), annee);
         var repas = fraisRepas(r['joursRepas' + n], annee);
         var total = U.arrondi(km.montant + repas.montant, 2);
         var retenir = utilise && total > abattement;
@@ -183,11 +191,13 @@
         };
     }
 
-    function fraisKilometriques(km, cv, electrique) {
+    function fraisKilometriques(km, cv, electrique, annee) {
+        if (!BAREME_KM_PAR_ANNEE[annee])
+            throw new Error('Aucun barème kilométrique pour les revenus ' + annee + '.');
         var d = Math.max(0, U.num(km, 0));
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
-        var f = BAREME_KM[cle];
+        var f = BAREME_KM_PAR_ANNEE[annee][cle];
         var montant, formule;
         if (d <= 5000) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
         else if (d <= 20000) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
@@ -736,14 +746,14 @@
         var sal2 = couple ? Math.max(0, U.num(o.salaire2, 0)) : 0;
 
         var abatt1 = abattement10(sal1, annee);
-        var km1 = fraisKilometriques(o.km1, o.cv1, o.elec1);
+        var km1 = fraisKilometriques(o.km1, o.cv1, o.elec1, annee);
         var rep1 = fraisRepas(o.joursRepas1, annee);
         var frais1 = o.fraisReels1 ? U.arrondi(km1.montant + rep1.montant, 2) : 0;
         var retenir1 = !!(o.fraisReels1 && frais1 > abatt1);
         var ded1 = retenir1 ? frais1 : abatt1;
 
         var abatt2 = couple ? abattement10(sal2, annee) : 0;
-        var km2 = couple ? fraisKilometriques(o.km2, o.cv2, o.elec2) : { montant: 0, formule: '' };
+        var km2 = couple ? fraisKilometriques(o.km2, o.cv2, o.elec2, annee) : { montant: 0, formule: '' };
         var rep2 = couple ? fraisRepas(o.joursRepas2, annee) : { montant: 0, formule: '' };
         var frais2 = (couple && o.fraisReels2) ? U.arrondi(km2.montant + rep2.montant, 2) : 0;
         var retenir2 = !!(couple && o.fraisReels2 && frais2 > abatt2);
@@ -858,7 +868,7 @@
     function anneeEnCours() {
         if (anneeFiscale) return anneeFiscale;
         var auj = new Date().getFullYear() - 1;   // on déclare l'année précédente
-        return BAREMES[auj] ? auj : derniereAnnee();
+        return auj;  // année demandée, même absente : jamais la dernière à sa place
     }
 
     function vue(ctx) {
@@ -871,6 +881,14 @@
         out += '<div class="chips">' + annees().map(function (a) {
             return '<button class="chip' + (a === annee ? ' actif' : '') + '" data-fisc="annee" data-valeur="' + a + '">Revenus ' + a + '</button>';
         }).join('') + '</div>';
+        if (!BAREMES[annee]) {
+            return out + '<div class="info"><b>Revenus ' + UI.h(annee)
+                + ' : calcul fiscal indisponible.</b> Aucun barème validé pour ce millésime. '
+                + 'Choisissez une année disponible ou attendez une mise à jour complète ; '
+                + 'les chiffres d’une autre année ne sont pas réutilisés.'
+                + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">'
+                + 'Ouvrir l’assistant de mise à jour</button></div></div>';
+        }
 
         // --- Bandeau de mise à jour
         if (maj.disponible) {

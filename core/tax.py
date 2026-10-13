@@ -1147,7 +1147,7 @@ def simuler_foyer_complet(
 
     # --- Déclarant 1 ---
     abatt1 = fb.abattement_10_salaire(sal1, annee)
-    km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1)
+    km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1, annee=annee)
     rep1_val, rep1_txt = fb.frais_repas(jours_repas_1, annee)
     frais_reels_1 = round(km1_val + rep1_val, 2) if utiliser_frais_reels_1 else 0.0
     retenir_reels_1 = bool(utiliser_frais_reels_1 and frais_reels_1 > abatt1)
@@ -1159,7 +1159,7 @@ def simuler_foyer_complet(
 
     # --- Déclarant 2 ---
     abatt2 = fb.abattement_10_salaire(sal2, annee) if couple else 0.0
-    km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2) if couple else (0.0, "")
+    km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2, annee=annee) if couple else (0.0, "")
     rep2_val, rep2_txt = fb.frais_repas(jours_repas_2, annee) if couple else (0.0, "")
     frais_reels_2 = round(km2_val + rep2_val, 2) if (couple and utiliser_frais_reels_2) else 0.0
     retenir_reels_2 = bool(couple and utiliser_frais_reels_2 and frais_reels_2 > abatt2)
