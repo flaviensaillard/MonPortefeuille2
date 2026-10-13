@@ -12,6 +12,11 @@ const py = spawnSync(process.env.PF2_PYTHON || 'python3', ['-c',
 ], { cwd: racine, encoding: 'utf8' });
 assert.equal(py.status, 0, py.stderr);
 const { p: origine, chemins, sources } = JSON.parse(py.stdout);
+const proposition = spawnSync(process.env.PF2_PYTHON || 'python3',
+    ['jobs/ligne_r2_2025_hors_ligne.py'], { cwd: racine, encoding: 'utf8' });
+assert.equal(proposition.status, 0, proposition.stderr);
+const enveloppe = JSON.parse(proposition.stdout);
+assert.equal(enveloppe.ecriture_autorisee, false);
 assert.equal(chemins.length, 36);
 const clone = x => JSON.parse(JSON.stringify(x));
 let compte = 'utilisateur-a';
@@ -49,6 +54,8 @@ function faux() { return { annee_revenus: 2025, revision: 1, actif: false,
 const reference = json(f.snapshotConstantesCode(2025));
 assert.deepEqual(reference, origine);
 assert.deepEqual(json(r.cheminsFeuilles(reference)), chemins);
+assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user_id], 2025, chemins).parametres),
+    origine, 'la proposition figée est compatible avec le lecteur de l’APK');
 
 (async () => {
     lignes = [faux()];
