@@ -61,7 +61,7 @@
     // Les révisions lues sont propres à une session, non persistées sur l'appareil.
     // Aucun statut SQL ne remplace la validation de forme et de couverture du lecteur.
     var revisionsActives = Object.create(null), baremesPartiels = Object.create(null),
-        parametresPartiels = Object.create(null);
+        parametresPartiels = Object.create(null), fraisOfficiels = Object.create(null);
     var sequenceLecture = 0, dernierControle = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && baremesPartiels[annee] || null; }
@@ -92,6 +92,7 @@
         revisionsActives = Object.create(null);
         baremesPartiels = Object.create(null);
         parametresPartiels = Object.create(null);
+        fraisOfficiels = Object.create(null);
         dernierControle = null;
     }
     function chargerBaremesPartiels(lignes, numero, compte) {
@@ -140,6 +141,12 @@
         effacerRevisions();
         var numero = sequenceLecture;
         var compte = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+        // Frais officiels locaux et isolés par compte/millésime, R2 prioritaire.
+        if (compte && compte.id && PF.fiscalFraisSources) {
+            annees().forEach(function (an) {
+                if (an >= 2026) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+            });
+        }
         // L'or détenu en métal relève d'un régime DISTINCT non publié par R2.
         // Une transaction physique dans les données chargées interdit de présenter
         // la couverture de cette révision comme intégrale pour ce portefeuille.
@@ -296,6 +303,8 @@
        de l'année. Pas de forfait connu pour l'année = pas de montant inventé. */
     function forfaitRepas(annee) {
         if (paramsActifs(annee)) return paramsActifs(annee).forfait_repas;
+        var officiel = fraisOfficiels[annee];
+        if (officiel && typeof officiel.repas === 'number') return officiel.repas;
         if (FORFAIT_REPAS[annee] === undefined) return null;
         return FORFAIT_REPAS[annee];
     }
@@ -343,7 +352,9 @@
         var d = Math.max(0, U.num(km, 0));
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
-        var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle] : BAREME_KM_PAR_ANNEE[annee][cle];
+        var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
+        var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle]
+            : sourceKm ? sourceKm[cle] : BAREME_KM_PAR_ANNEE[annee][cle];
         var montant, formule;
         if (d <= (paramsActifs(annee) ? paramsActifs(annee).regles_km.seuils_distance_km[0] : SEUILS_KM_VOITURE[0])) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
         else if (d <= (paramsActifs(annee) ? paramsActifs(annee).regles_km.seuils_distance_km[1] : SEUILS_KM_VOITURE[1])) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
@@ -1112,6 +1123,8 @@
             var parametresUtilises = [];
             if (typeof parametrePartiel(annee, 'plafond_qf') === 'number') parametresUtilises.push('plafond QF général');
             if (typeof parametrePartiel(annee, 'crypto_franchise') === 'number') parametresUtilises.push('seuil crypto');
+            if (fraisOfficiels[annee] && typeof fraisOfficiels[annee].repas === 'number') parametresUtilises.push('forfait repas DGFiP');
+            if (fraisOfficiels[annee] && fraisOfficiels[annee].km) parametresUtilises.push('barème kilométrique DGFiP');
             out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
                 + (baremePartiel(annee)
                     ? ' : barème IR OpenFisca appliqué à une simulation indicative seulement.'
@@ -1131,7 +1144,7 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">OpenFisca fournit le barème IR et certains paramètres isolés si l’année est explicite. '
+            + '<div class="st" style="margin:6px 0">OpenFisca fournit le barème IR et certains paramètres isolés ; les pages DGFiP peuvent fournir repas et kilomètres si le millésime est explicite. '
             + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
@@ -1717,6 +1730,7 @@
             : baremePartiel(annee) ? 'Seuils et taux IR importés et utilisés dans la simulation indicative.'
             : 'Barème IR collecté, mais non appliqué (année sans calcul compatible ou relecture indisponible).';
         var p = resultat.parametres, details = '';
+        var frais = resultat.frais;
         if (p) {
             var appliques = [], observes = [], manquants = [], nonEnregistres = [];
             var noms = {
@@ -1752,9 +1766,20 @@
             if (p.erreur) details += ' Enregistrement non confirmé : ' + p.erreur
                 + '. Ne rejouez aucune migration pour un conflit de révision.';
         }
+        if (frais) {
+            details += ' Sources officielles DGFiP pour les frais : repas '
+                + (frais.etats && frais.etats.repas || frais.erreur || 'non recherché')
+                + ', barème kilométrique voitures '
+                + (frais.etats && frais.etats.km || frais.erreur || 'non recherché') + '.';
+            if (frais.enregistree && frais.valeurs && BAREMES[annee] && annee >= 2026 && !revisionActive(annee)) {
+                if (typeof frais.valeurs.repas === 'number') details += ' Repas ' + frais.valeurs.repas + ' €/jour utilisés à titre indicatif.';
+                if (frais.valeurs.km) details += ' Barème kilométrique voiture du millésime utilisé à titre indicatif.';
+            }
+            if (frais.erreur) details += ' Erreur de consultation des frais : ' + frais.erreur + '.';
+        }
         return situation + details + ' Source des valeurs collectées : OpenFisca-France (modèle, non publication officielle). Non vérifiés par ce bouton : formule de décote et plafonds d’application, '
             + 'quotient familial spécial, composition des prélèvements sociaux par catégorie/date, '
-            + 'CSG effectivement déductible et calendrier, frais de repas et kilométriques, '
+            + 'CSG effectivement déductible et calendrier, conditions personnelles des frais de repas et kilométriques, '
             + 'abattements, arrondis, méthode crypto/2086 et changements des formules. '
             + 'Les revenus personnels et le PAS officiel ne sont jamais contrôlés par cette collecte.';
     }
@@ -1773,7 +1798,7 @@
                 var etat = vue.querySelector('#etatCollecteFiscale');
                 if (!PF.fiscalSources) { if (etat) etat.textContent = 'Module de collecte absent.'; return; }
                 collecte.disabled = true;
-                if (etat) etat.textContent = 'Recherche auprès d’OpenFisca…';
+                if (etat) etat.textContent = 'Recherche auprès d’OpenFisca et des pages DGFiP…';
                 var cibleAnnee = anneeEnCours();
                 var proprietaire = PF.net.auth.utilisateur();
                 if (!proprietaire) {
@@ -1786,10 +1811,15 @@
                 PF.fiscalSources.synchroniser(cibleAnnee).catch(function (err) {
                     return { disponibles: [], erreur_ir: String(err && err.message || err) };
                 }).then(function (res) {
-                    return PF.fiscalSources.synchroniserParametres(cibleAnnee).then(function (p) {
-                        res.parametres = p; return res;
-                    }).catch(function (err) {
-                        res.parametres = { erreur: String(err && err.message || err) }; return res;
+                    return Promise.all([
+                        PF.fiscalSources.synchroniserParametres(cibleAnnee).catch(function (err) {
+                            return { erreur: String(err && err.message || err) };
+                        }),
+                        PF.fiscalFraisSources ? PF.fiscalFraisSources.chercher(cibleAnnee).catch(function (err) {
+                            return { erreur: String(err && err.message || err) };
+                        }) : Promise.resolve({ erreur: 'Module des frais absent.' })
+                    ]).then(function (resultats) {
+                        res.parametres = resultats[0]; res.frais = resultats[1]; return res;
                     });
                 }).then(function (res) {
                     var courant = PF.net.auth.utilisateur();

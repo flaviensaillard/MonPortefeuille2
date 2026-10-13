@@ -152,7 +152,7 @@ suivants d'OpenFisca-France, à partir de
 | Décote | `impot_revenu/calcul_impot_revenu/plaf_qf/decote/seuil_celib`, `seuil_couple`, `taux` | Chiffres collectés mais **non appliqués isolément** : seuils d'application, arrondis et méthode restent à auditer. |
 | CSG et PS du capital | `taxation_capital/prelevements_sociaux/csg/{taux_global,taux_deductible}/{revenus_du_patrimoine,produits_de_placement}` et `taxation_capital/prelevements_sociaux/prelevements_solidarite/{revenus_du_patrimoine,produits_de_placement}` | Collectés séparément, **jamais additionnés en un taux de PS global**. CRDS, autres composantes, date de paiement et catégories ne sont pas vérifiées. |
 | Crypto | `impot_revenu/calcul_impot_revenu/pv/actifs_numeriques/{plancher,taux}` | Seul le seuil de cessions peut alimenter la simulation indicative si explicite ; taux, méthode de calcul 2086, exhaustivité du foyer et option 3CN non certifiés. |
-| Repas, kilomètres | Aucune feuille OpenFisca structurée repérée pour ces barèmes | **Pas de mise à jour automatique** à partir de cette source. Les frais réels embarqués restent estimatifs et soumis aux justificatifs personnels. |
+| Repas, kilomètres | Aucune feuille OpenFisca structurée repérée pour ces barèmes | Les pages officielles DGFiP sont interrogées séparément par l’APK ; année et tableau complets exigés, voir ci-dessous. |
 | Changements de formules | Ce ne sont pas des paramètres scalaires | **Non appliqués automatiquement**. Mise à jour/test du moteur et nouvelle APK indispensables. L'absence de changement de code n'est pas certifiée par ce bouton. |
 
 La collecte conserve **chaque révision d'un même millésime** dans
@@ -178,3 +178,44 @@ Tests locaux sans Supabase :
 `node tests/test_fiscal_parametres_partiels.js`,
 `node tests/test_fiscal_sources.js`,
 `node tests/test_fiscal_maj_indicative.js`.
+
+
+## Frais réels salariés : pages DGFiP (extension du 13/10/2026)
+
+Le bouton cherche désormais séparément :
+
+- les repas sans cantine ni justificatifs détaillés sur
+  `https://www.impots.gouv.fr/particulier/frais-de-repas` ; la phrase
+  « Pour l’imposition des revenus **AAAA**, la valeur d’un repas pris au foyer
+  est de **X,XX €** » doit mentionner exactement l’année sélectionnée ;
+- le **barème kilométrique des automobiles**, *pas* celui du carburant seul ou
+  des deux-roues, sur la page de l’aide DGFiP
+  `https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/{ANNEE+1}/aides/frais.htm`.
+  L’année des revenus doit être écrite dans le texte. Les 5 lignes de voitures
+  (3 CV et moins à 7 CV et plus), les trois tranches 5 000/20 000 km,
+  la majoration 100 % électrique de 20 %, et la cohérence des coefficients
+  sont vérifiées. Un changement de formule ou de structure est refusé : il
+  faut alors une nouvelle version du moteur et non une extrapolation.
+
+La collecte DGFiP est conservée **sur le téléphone uniquement**, en révisions
+par compte et année, et revalidée depuis ses extraits à chaque lecture ; elle
+n’est ni dans Supabase ni dans les sauvegardes `.pf2`, et doit être refaite
+sur un autre appareil ou après effacement du stockage local. Elle est appliquée
+**seulement à la simulation indicative d’une année compatible (actuellement
+2026)**, sans toucher à la R2 2025. En cas d’absence de millésime explicite,
+le bouton dit « millésime absent ou format incompatible » et conserve uniquement
+les hypothèses embarquées *non vérifiées* ; il ne recopie jamais le barème
+2025 sous le nom 2026. Les kilomètres, le véhicule et les repas réellement
+éligibles restent à justifier par la personne.
+
+Au 13/10/2026, la page des **salariés** indique encore explicitement les
+revenus **2025**, soit 5,45 € par repas. La page d’aide du simulateur
+`/calcul_impot/2027/aides/frais.htm` n’est pas encore disponible. Un BOFiP
+professionnel BNC du 18/02/2026 indique 5,50 € pour la valeur du repas pris
+au domicile en **2026**, montant déjà hypothétique dans l’APK, mais cette
+source BNC ne suffit pas à certifier le cas des salariés sans justificatifs.
+Le bouton doit donc **refuser d’importer repas et kilomètres 2025 en 2026**
+tant que la page salariale pour l’année 2026 ne les publie pas.
+
+Test hors réseau : `node tests/test_fiscal_frais_sources.js` (année exacte,
+format complet, cohérence, rectification, isolation des comptes).

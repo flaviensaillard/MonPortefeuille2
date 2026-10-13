@@ -83,6 +83,8 @@ public class NativeBridge {
             "query2.finance.yahoo.com",
             "api.insee.fr",
             "api.fr.openfisca.org",  // hôte exact, jamais *.openfisca.org
+            "www.impots.gouv.fr", // frais repas des salariés, hôte exact
+            "simulateur-ir-ifi.impots.gouv.fr", // barème km officiel, hôte exact
             ".workers.dev"
     };
 
