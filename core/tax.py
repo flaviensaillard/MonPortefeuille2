@@ -138,7 +138,7 @@ def impot_revenu(
 
     net = impot - decote
     # Seuil de non-recouvrement : en dessous de 61 €, l'impôt n'est pas prélevé.
-    if net < 61.0:
+    if net < fb.SEUIL_NON_RECOUVREMENT_IR:
         net = 0.0
 
     return ResultatIR(impot_brut=impot, decote=decote, impot_net=net, tmi=tmi, bareme_annee=annee)

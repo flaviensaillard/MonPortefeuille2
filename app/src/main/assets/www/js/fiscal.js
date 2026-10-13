@@ -16,6 +16,10 @@
         2026: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 898, dcPlafond: 1986, dcCouple: 1486, dcPlafondCouple: 3284 }
     };
     var TAUX_DECOTE = 0.4525;
+    var SEUIL_NON_RECOUVREMENT_IR = 61;
+    var TAUX_ABATTEMENT_SALAIRES = 0.10;
+    var SEUILS_KM_VOITURE = [5000, 20000];
+    var MAJORATION_VOITURE_ELECTRIQUE = 0.20;
     var SOURCE_PAR_ANNEE = {
         2022: 'Vérifié — données historiques stables',
         2023: 'Vérifié — données historiques stables',
@@ -133,7 +137,7 @@
             decote = Math.min(decote, impot);
         }
         var net = impot - decote;
-        if (net < 61) net = 0;  // seuil de non-recouvrement
+        if (net < SEUIL_NON_RECOUVREMENT_IR) net = 0;  // seuil de non-recouvrement
         return { impot_brut: impot, decote: decote, impot_net: net, tmi: tmi, quotient: qf, annee: annee, plafonnement: gainMax || 0 };
     }
 
@@ -144,7 +148,7 @@
         if (sal <= 0) return 0;
         var plancher = PLANCHER_ABATTEMENT_10[annee];
         var plafond = PLAFOND_ABATTEMENT_10[annee];
-        return Math.min(Math.max(sal * 0.10, Math.min(sal, plancher)), plafond);
+        return Math.min(Math.max(sal * TAUX_ABATTEMENT_SALAIRES, Math.min(sal, plancher)), plafond);
     }
 
     /* Frais de repas aux frais réels : nombre de jours × forfait URSSAF/DGFiP
@@ -199,10 +203,10 @@
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
         var f = BAREME_KM_PAR_ANNEE[annee][cle];
         var montant, formule;
-        if (d <= 5000) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
-        else if (d <= 20000) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
+        if (d <= SEUILS_KM_VOITURE[0]) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
+        else if (d <= SEUILS_KM_VOITURE[1]) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
         else { montant = d * f[3]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[3], 3); }
-        if (electrique) { montant *= 1.2; formule += ' × 1,20 (électrique)'; }
+        if (electrique) { montant *= 1 + MAJORATION_VOITURE_ELECTRIQUE; formule += ' × 1,20 (électrique)'; }
         return { montant: U.arrondi(montant, 2), formule: formule + ' = ' + U.nombre(montant, 2) + ' €' };
     }
 
@@ -861,6 +865,60 @@
         if (Object.keys(patch).length) PF.store.sauverReglages(patch);
         configAppliquee = true;
         return true;
+    }
+
+    // Photographie du code seulement : utile pour détecter une divergence avec
+    // le candidat Python, pas un certificat juridique ni une source Supabase.
+    function snapshotConstantesCode(annee) {
+        if (annee !== 2025) throw new Error('Photographie locale limitée aux revenus 2025.');
+        var b = baremeDe(annee);
+        if (!BAREME_KM_PAR_ANNEE[annee] || PLANCHER_ABATTEMENT_10[annee] === undefined ||
+            PLAFOND_ABATTEMENT_10[annee] === undefined || FORFAIT_REPAS[annee] === undefined)
+            throw new Error('Paramètres fiscaux incomplets pour ' + annee + '.');
+        var km = {};
+        Object.keys(BAREME_KM_PAR_ANNEE[annee]).forEach(function (cv) {
+            km[cv] = BAREME_KM_PAR_ANNEE[annee][cv].slice();
+        });
+        return {
+            bareme: {
+                annee: annee, tranches: b.tranches.slice(), taux: b.taux.slice(),
+                decote_base_celibataire: b.dc, decote_plafond_celibataire: b.dcPlafond,
+                decote_base_couple: b.dcCouple, decote_plafond_couple: b.dcPlafondCouple,
+                decote_taux: TAUX_DECOTE
+            },
+            prelevements_sociaux: tauxPS(annee),
+            prelevements_sociaux_par_categorie: {
+                plus_values_titres: tauxPS(annee), plus_values_crypto_privees: tauxPS(annee),
+                rcm_precomptes_en_2025: tauxPSRevenuMobilier(annee, true),
+                rcm_non_precomptes: tauxPSRevenuMobilier(annee, false)
+            },
+            quotient_familial: {
+                plafond_general_par_demi_part: plafondQF(annee),
+                plafonds_particuliers_modelises: false
+            },
+            ir_forfaitaire: IR_FORFAITAIRE,
+            seuil_non_recouvrement_ir: SEUIL_NON_RECOUVREMENT_IR,
+            csg_deductible: CSG_DEDUCTIBLE,
+            calendrier_csg: {
+                deduction_selon_annee_paiement: true,
+                rcm_precomptes_deduction_possible_en_2025_si_bareme: true,
+                csg_payee_ulterieurement_non_deduite_du_revenu_2025: true
+            },
+            options_fiscales: {
+                deux_op_globale_titres_et_rcm: true,
+                trois_cn_crypto_independante: true,
+                trois_cn_disponible_pour_cessions_depuis: 2023
+            },
+            abattement_10: {
+                taux: TAUX_ABATTEMENT_SALAIRES, plancher: PLANCHER_ABATTEMENT_10[annee],
+                plafond: PLAFOND_ABATTEMENT_10[annee]
+            },
+            forfait_repas: FORFAIT_REPAS[annee],
+            bareme_km: km,
+            regles_km: { seuils_distance_km: SEUILS_KM_VOITURE.slice(),
+                majoration_electrique: MAJORATION_VOITURE_ELECTRIQUE },
+            franchise_crypto: CRYPTO_FRANCHISE_CESSIONS
+        };
     }
 
     var anneeFiscale = null;
@@ -1562,6 +1620,7 @@
         cessionsAnnee: cessionsAnnee, bilanCessions: bilanCessions,
         detail2074: detail2074, detail2086: detail2086, simulerFoyer: simulerFoyer,
         PROMPT_MAJ: PROMPT_MAJ, URL_MAJ_BAREMES: URL_MAJ_BAREMES,
+        snapshotConstantesCode: snapshotConstantesCode,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

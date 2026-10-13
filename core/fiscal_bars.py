@@ -201,6 +201,10 @@ CSG_DEDUCTIBLE = 0.068
 # d'abattement et n'imposait rien. C'est faux : le seuil est franchi, les 20 EUR
 # sont imposables.
 CRYPTO_FRANCHISE_CESSIONS = 305.0   # sur le total des prix de cession de l'année
+SEUIL_NON_RECOUVREMENT_IR = 61.0
+TAUX_ABATTEMENT_SALAIRES = 0.10
+SEUILS_KM_VOITURE = (5000, 20000)
+MAJORATION_VOITURE_ELECTRIQUE = 0.20
 
 # Ancien nom, conservé pour ne pas casser les appels existants. Même valeur,
 # mais c'est bien une franchise — voyez l'explication ci-dessus.
@@ -305,7 +309,7 @@ def abattement_10_salaire(salaire: float, annee: int) -> float:
         return 0.0
     plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE[annee]
     plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE[annee]
-    brut = sal * 0.10
+    brut = sal * TAUX_ABATTEMENT_SALAIRES
     return min(max(brut, min(sal, plancher)), plafond)
 
 
@@ -329,10 +333,10 @@ def frais_kilometriques(
         return 0.0, "0 km"
     cv_cle = min(max(int(cv), 3), 7)
     a1, a2, b2, a3 = BAREME_KM_VOITURE_PAR_ANNEE[annee][cv_cle]
-    if d <= 5_000:
+    if d <= SEUILS_KM_VOITURE[0]:
         montant = d * a1
         formule = f"{d:,.0f} km × {a1:.3f}".replace(",", " ").replace(".", ",")
-    elif d <= 20_000:
+    elif d <= SEUILS_KM_VOITURE[1]:
         montant = d * a2 + b2
         formule = (
             f"({d:,.0f} km × {a2:.3f}) + {b2:,.0f} €"
@@ -343,7 +347,7 @@ def frais_kilometriques(
         formule = f"{d:,.0f} km × {a3:.3f}".replace(",", " ").replace(".", ",")
 
     if electrique:
-        montant *= 1.20
+        montant *= 1 + MAJORATION_VOITURE_ELECTRIQUE
         formule += " × 1,20 (électrique +20 %)"
 
     s_m = f"{montant:,.2f}".replace(",", " ").replace(".", ",")

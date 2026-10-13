@@ -74,7 +74,7 @@ def parametres_2025() -> dict:
             "plafonds_particuliers_modelises": False,
         },
         "ir_forfaitaire": fb.IR_FORFAITAIRE,
-        "seuil_non_recouvrement_ir": 61.0,  # actuellement codé dans core/tax.py et fiscal.js ; à auditer
+        "seuil_non_recouvrement_ir": fb.SEUIL_NON_RECOUVREMENT_IR,
         "csg_deductible": fb.CSG_DEDUCTIBLE,
         "calendrier_csg": {
             "deduction_selon_annee_paiement": True,
@@ -87,13 +87,14 @@ def parametres_2025() -> dict:
             "trois_cn_disponible_pour_cessions_depuis": 2023,
         },
         "abattement_10": {
-            "taux": 0.10,  # actuellement codé dans core/fiscal_bars.py et fiscal.js
+            "taux": fb.TAUX_ABATTEMENT_SALAIRES,
             "plancher": fb.PLANCHER_ABATTEMENT_10_PAR_ANNEE[ANNEE],
             "plafond": fb.PLAFOND_ABATTEMENT_10_PAR_ANNEE[ANNEE],
         },
         "forfait_repas": fb.FORFAIT_REPAS_PAR_ANNEE[ANNEE],
         "bareme_km": {str(cv): list(valeurs) for cv, valeurs in fb.BAREME_KM_VOITURE_PAR_ANNEE[ANNEE].items()},
-        "regles_km": {"seuils_distance_km": [5000, 20000], "majoration_electrique": 0.20},
+        "regles_km": {"seuils_distance_km": list(fb.SEUILS_KM_VOITURE),
+                      "majoration_electrique": fb.MAJORATION_VOITURE_ELECTRIQUE},
         "franchise_crypto": fb.CRYPTO_FRANCHISE_CESSIONS,
         # IGLN.L est un ETC (classe OR, régime des titres), PAS un bien
         # meuble physique. Ne pas exporter des paramètres or_physique non
