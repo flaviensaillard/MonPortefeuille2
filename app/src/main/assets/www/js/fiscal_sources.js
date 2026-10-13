@@ -33,7 +33,7 @@
         return { tranches: seuils.slice(1), taux: taux.slice(1), periode: cle };
     }
 
-    function chercher() {
+    function chercher(anneeCible) {
         return PF.net.req('GET', SOURCE, { Accept: 'application/json' }).then(function (rep) {
             if (!rep.ok) {
                 if (typeof rep.error === 'string' && rep.error.indexOf('Hôte non autorisé') >= 0) {
@@ -49,13 +49,30 @@
             }
             var maintenant = new Date().getFullYear();
             var annees = [];
-            for (var an = 2022; an <= maintenant; an++) {
+            for (var an = anneeCible === undefined ? 2022 : anneeCible;
+                an <= (anneeCible === undefined ? maintenant : anneeCible); an++) {
                 var bareme = validerBareme(an, rep.json);
                 if (bareme) annees.push({ annee_revenus: an, source: 'openfisca_bareme_ir',
                     valeurs: bareme, source_url: SOURCE });
             }
             return annees;
         });
+    }
+
+    /* Même contrôle lors d'une relecture de la base : une ligne enregistrée
+       n'est pas, à elle seule, une source fiable pour la simulation. */
+    function validerCollecte(annee, valeurs) {
+        if (!valeurs || valeurs.periode !== annee + '-01-01' ||
+            !Array.isArray(valeurs.tranches) || valeurs.tranches.length !== 4 ||
+            !Array.isArray(valeurs.taux) || valeurs.taux.length !== 4) return null;
+        var br = { '0': 0 };
+        valeurs.tranches.forEach(function (s, i) { br[String(s)] = valeurs.taux[i]; });
+        try {
+            var donnees = { brackets: {} };
+            donnees.brackets[valeurs.periode] = br;
+            var bareme = validerBareme(annee, donnees);
+            return bareme && identiques(bareme, valeurs) ? bareme : null;
+        } catch (_) { return null; }
     }
 
     function consulter() {
@@ -69,9 +86,13 @@
             && JSON.stringify(a.taux) === JSON.stringify(b.taux);
     }
 
-    function synchroniser() {
+    function synchroniser(anneeCible) {
+        if (anneeCible !== undefined && (!entier(anneeCible) || anneeCible < 2000 ||
+            anneeCible > new Date().getFullYear())) {
+            return Promise.reject(new Error('Année de revenus invalide.'));
+        }
         return consulter().then(function (existantes) {
-            return chercher().then(function (publiees) {
+            return chercher(anneeCible).then(function (publiees) {
                 var dernier = {}, ajoutees = [], corrigees = [];
                 (existantes || []).forEach(function (r) {
                     var cle = r.annee_revenus + '|' + r.source;
@@ -98,12 +119,13 @@
                 return ajouter(0).then(function () {
                     return { ajoutees: ajoutees, corrigees: corrigees,
                         disponibles: publiees.map(function (r) { return r.annee_revenus; }),
-                        derniere: publiees.length ? publiees[publiees.length - 1].annee_revenus : null };
+                        derniere: publiees.length ? publiees[publiees.length - 1].annee_revenus : null,
+                        annee_cible: anneeCible === undefined ? null : anneeCible };
                 });
             });
         });
     }
 
-    PF.fiscalSources = { validerBareme: validerBareme, chercher: chercher,
-        consulter: consulter, synchroniser: synchroniser, SOURCE: SOURCE };
+    PF.fiscalSources = { validerBareme: validerBareme, validerCollecte: validerCollecte,
+        chercher: chercher, consulter: consulter, synchroniser: synchroniser, SOURCE: SOURCE };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

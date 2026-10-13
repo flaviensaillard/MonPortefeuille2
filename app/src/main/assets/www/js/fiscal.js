@@ -60,8 +60,10 @@
 
     // Les révisions lues sont propres à une session, non persistées sur l'appareil.
     // Aucun statut SQL ne remplace la validation de forme et de couverture du lecteur.
-    var revisionsActives = Object.create(null), sequenceLecture = 0;
+    var revisionsActives = Object.create(null), baremesPartiels = Object.create(null);
+    var sequenceLecture = 0, dernierControle = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
+    function baremePartiel(annee) { return !paramsActifs(annee) && baremesPartiels[annee] || null; }
     function tauxIrForfaitaire(annee) {
         var p = paramsActifs(annee);
         return p ? p.ir_forfaitaire : IR_FORFAITAIRE;
@@ -77,6 +79,29 @@
     function effacerRevisions() {
         ++sequenceLecture;
         revisionsActives = Object.create(null);
+        baremesPartiels = Object.create(null);
+        dernierControle = null;
+    }
+    function chargerBaremesPartiels(lignes, numero, compte) {
+        var actuel = PF.net.auth.utilisateur();
+        if (numero !== sequenceLecture || !actuel || actuel.id !== compte.id ||
+            !Array.isArray(lignes) || !PF.fiscalSources) return;
+        var derniers = Object.create(null);
+        lignes.forEach(function (ligne) {
+            var an = ligne.annee_revenus;
+            if (ligne.source !== 'openfisca_bareme_ir' || !BAREMES[an] || an < 2026 ||
+                paramsActifs(an) || !Number.isInteger(ligne.revision) || ligne.revision < 1) return;
+            var valide = ligne.source_url === PF.fiscalSources.SOURCE
+                ? PF.fiscalSources.validerCollecte(an, ligne.valeurs) : null;
+            if (!derniers[an] || ligne.revision > derniers[an].revision) {
+                derniers[an] = { revision: ligne.revision, valeurs: valide };
+            } else if (ligne.revision === derniers[an].revision) {
+                derniers[an].valeurs = null; // doublon : refuser plutôt que choisir
+            }
+        });
+        Object.keys(derniers).forEach(function (an) {
+            if (derniers[an].valeurs) baremesPartiels[an] = derniers[an].valeurs;
+        });
     }
     function actualiserRevisions(ctx) {
         effacerRevisions();
@@ -100,7 +125,15 @@
                 return selection.revision;
             }
             return null;
-        }).catch(function () { return null; }); // hors ligne : estimation embarquée, jamais ancienne R2 en cache
+        }).catch(function () { return null; }).then(function (revision) {
+            // Source IR partielle distincte : ne remplace jamais une R2 complète.
+            // Refuser le résultat d'une autre session ou d'une lecture périmée.
+            if (!PF.fiscalSources) return revision;
+            return PF.fiscalSources.consulter().then(function (lignes) {
+                chargerBaremesPartiels(lignes, numero, compte);
+                return revision;
+            }).catch(function () { return revision; });
+        }); // hors ligne : estimation embarquée, jamais ancienne règle en cache
     }
     function revisionActive(annee) { return !!paramsActifs(annee); }
 
@@ -115,6 +148,15 @@
                 dcPlafondCouple: b.decote_plafond_couple };
         }
         if (!BAREMES[annee]) throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : ' + annees().join(', ') + '.');
+        var partiel = baremePartiel(annee);
+        if (partiel) {
+            // Seulement seuils et taux de l'IR ; décote et autres règles restent
+            // provisoires. Ne pas écrire cette simulation dans pf2_fiscal_annees.
+            var embarque = BAREMES[annee];
+            return { tranches: partiel.tranches, taux: partiel.taux,
+                dc: embarque.dc, dcPlafond: embarque.dcPlafond,
+                dcCouple: embarque.dcCouple, dcPlafondCouple: embarque.dcPlafondCouple };
+        }
         return BAREMES[annee];
     }
     function tauxPS(annee) {
@@ -1016,11 +1058,14 @@
         }).join('') + '</div>';
         if (!BAREMES[annee]) {
             return out + '<div class="info"><b>Revenus ' + UI.h(annee)
-                + ' : calcul fiscal indisponible.</b> Aucun barème validé pour ce millésime. '
-                + 'Choisissez une année disponible ou attendez une mise à jour complète ; '
+                + ' : calcul fiscal indisponible.</b> Aucun ensemble de règles compatible pour ce millésime. '
+                + 'Le barème isolé d’une source externe ne suffit pas à produire un bilan ; '
                 + 'les chiffres d’une autre année ne sont pas réutilisés.'
-                + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">'
-                + 'Ouvrir l’assistant de mise à jour</button></div></div>';
+                + '<div style="margin-top:8px"><button class="btn sec" data-fisc="collecter">'
+                + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
+                + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px">'
+                + (dernierControle && dernierControle.annee === annee ? UI.h(dernierControle.texte) : '')
+                + '</div></div>';
         }
 
         // --- Bandeau de mise à jour
@@ -1029,7 +1074,10 @@
                 + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
         } else {
             out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
-                + ' : calculs indicatifs sur les constantes embarquées, non homologuées par la table.</div>';
+                + (baremePartiel(annee)
+                    ? ' : seuils et taux du barème IR OpenFisca appliqués à une simulation indicative seulement. Décote et autres paramètres restent provisoires.'
+                    : ' : calculs indicatifs sur les constantes embarquées, non homologuées par la table.')
+                + '</div>';
         }
         if (maj.disponible) {
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
@@ -1038,17 +1086,20 @@
         } else {
             out += '<div class="ok-vert">' + UI.h(maj.message) + '</div>';
         }
-        // Vérification des sources : la collecte annuelle est séparée du
-        // moteur fiscal. Un IR seul ne suffit PAS à une mise à jour des calculs.
+        // Le bouton importe uniquement l'IR connu pour l'année demandée. Une
+        // révision complète validée garde toujours la priorité sur ce barème.
         out += '<div class="card tight" style="margin:10px 0">'
-            + '<b>Sources fiscales par année</b>'
-            + '<div class="st" style="margin:6px 0">Cette collecte OpenFisca du seul barème IR est distincte des révisions complètes. Une loi rectificative crée une nouvelle révision de l’année concernée ; les autres années et les anciennes révisions restent intactes. '
-            + 'La collecte seule ne couvre ni décote, ni PS, ni frais, ni règles de déclaration : '
-            + '<b>ses chiffres isolés ne sont pas appliqués aux calculs.</b></div>'
-            + '<button class="btn sec" data-fisc="collecter">⟳ Chercher les données fiscales disponibles</button>'
-            + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px"></div></div>';
-        if (annee === 2026) {
-            out += '<div class="info">Revenus 2026 : barème et décote provisoires, à revérifier pour la déclaration 2027.</div>';
+            + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
+            + '<div class="st" style="margin:6px 0">OpenFisca fournit ici seulement les seuils et taux du barème IR. '
+            + 'Si aucune révision complète n’est publiée, ils alimentent une simulation indicative '
+            + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
+            + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
+            + '<button class="btn sec" data-fisc="collecter">⟳ Mettre à jour les données fiscales disponibles</button>'
+            + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px">'
+            + (dernierControle && dernierControle.annee === annee ? UI.h(dernierControle.texte) : '')
+            + '</div></div>';
+        if (annee === 2026 && !revisionActive(annee)) {
+            out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
         out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.</div>';
 
@@ -1615,6 +1666,19 @@
             + '<div class="dr"><div class="a">' + UI.h(valeur) + '</div><div class="b">modifier</div></div></div>';
     }
 
+    function bilanMiseAJour(annee, resultat) {
+        var ir = resultat.disponibles.indexOf(annee) >= 0;
+        var situation = !ir ? (baremePartiel(annee)
+            ? 'Aucun barème IR explicite trouvé aujourd’hui : une collecte antérieure de la même année reste utilisée à titre indicatif.'
+            : 'Aucun barème IR explicite pour cette année : aucun nouveau taux appliqué.')
+            : revisionActive(annee) ? 'Barème IR collecté ; la révision complète déjà active garde la priorité.'
+            : baremePartiel(annee) ? 'Seuils et taux IR importés et utilisés dans la simulation indicative.'
+            : 'Barème IR collecté, mais non appliqué (année sans calcul compatible ou relecture indisponible).';
+        return situation + ' Non vérifiés par ce bouton : décote, quotient familial, prélèvements sociaux par catégorie, '
+            + 'CSG, frais et barème kilométrique, abattements, arrondis, règles crypto et changements des formules. '
+            + 'Les revenus personnels et le PAS officiel ne sont jamais contrôlés par cette collecte.';
+    }
+
     // -------------------------------------------------------------- événements
 
     function attacher() {
@@ -1630,14 +1694,26 @@
                 if (!PF.fiscalSources) { if (etat) etat.textContent = 'Module de collecte absent.'; return; }
                 collecte.disabled = true;
                 if (etat) etat.textContent = 'Recherche auprès d’OpenFisca…';
-                PF.fiscalSources.synchroniser().then(function (res) {
-                    if (etat) etat.textContent = (res.ajoutees.length
-                        ? 'Années enregistrées : ' + res.ajoutees.join(', ') + '. '
-                        : 'Aucune nouvelle année enregistrée. Dernière trouvée : '
-                            + (res.derniere || 'aucune') + '. ')
-                        + (res.corrigees.length ? 'Révision(s) mise(s) à jour pour '
-                            + res.corrigees.join(', ') + ' ; anciennes versions conservées. ' : '')
-                        + 'Source partielle : calculs inchangés.';
+                var cibleAnnee = anneeEnCours();
+                var proprietaire = PF.net.auth.utilisateur();
+                if (!proprietaire) {
+                    if (etat) etat.textContent = 'Connectez-vous à votre compte avant de rechercher une mise à jour.';
+                    collecte.disabled = false;
+                    return;
+                }
+                PF.fiscalSources.synchroniser(cibleAnnee).then(function (res) {
+                    var courant = PF.net.auth.utilisateur();
+                    if (!proprietaire || !courant || courant.id !== proprietaire.id) {
+                        throw new Error('Session changée pendant la recherche ; actualisez après reconnexion.');
+                    }
+                    // Relecture sous la session courante : seule une collecte
+                    // valide et appartenant au compte peut servir de simulation.
+                    return actualiserRevisions(PF.app.etat.ctx).then(function () {
+                        courant = PF.net.auth.utilisateur();
+                        if (!courant || courant.id !== proprietaire.id) return;
+                        dernierControle = { annee: cibleAnnee, texte: bilanMiseAJour(cibleAnnee, res) };
+                        PF.app.rendre();
+                    });
                 }).catch(function (err) {
                     var message = String(err && err.message || err);
                     if (etat) etat.textContent = 'Actualisation interrompue : ' + message
@@ -1710,7 +1786,7 @@
         PROMPT_MAJ: PROMPT_MAJ, URL_MAJ_BAREMES: URL_MAJ_BAREMES,
         snapshotConstantesCode: snapshotConstantesCode,
         actualiserRevisions: actualiserRevisions, effacerRevisions: effacerRevisions,
-        revisionActive: revisionActive,
+        revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -23,10 +23,13 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
   comprendre ce qui a changé. Une année différente ne change pas. La collecte
   Android fait déjà cela pour le barème IR ; la publication serveur d'un
   millésime complet rectifié nécessitera son propre contrôle de complétude.
-- Le moteur fiscal Python/Android utilise **encore les constantes intégrées** :
-  ni une collecte IR ni la reprise du code ne basculent silencieusement les
-  calculs vers la base. Il faut d'abord couvrir et valider tous les paramètres
-  et les changements de règles et tester le lecteur des deux plateformes.
+- Le moteur Python conserve les constantes intégrées. L'APK applique une R2
+  complète lorsqu'elle existe et passe son contrat ; sinon, pour les années
+  compatibles **à partir de 2026**, le seul barème IR collecté peut alimenter
+  une simulation explicitement indicative. Tous les autres paramètres non
+  contrôlés sont signalés après l'appui sur le bouton. Cette collecte ne
+  transforme jamais une R1 historique en règle validée et n'est pas une
+  publication des règles complètes.
 
 ## Mettre la base en place (l'ordre compte)
 
@@ -99,7 +102,7 @@ de paramètres fiscaux n'a été effectuée pendant cette préparation : seule l
 
 ## Collecte sur le téléphone (APK de branche, distincte de la release publique 2.2.1)
 
-Le bouton « Chercher les données fiscales disponibles » lit le barème IR sur
+Le bouton « Mettre à jour les données fiscales disponibles » lit le barème IR de **l'année sélectionnée** sur
 `https://api.fr.openfisca.org/latest/parameter/impot_revenu/bareme_ir_depuis_1945/bareme`.
 Le pont réseau de l'APK de branche doit autoriser l'hôte HTTPS **exact**
 `api.fr.openfisca.org` : son omission a causé le message « source injoignable »
@@ -109,9 +112,14 @@ pour corriger un refus de cet hôte. Le serveur et son format restent des
 dépendances externes : un accès à l'hôte ne garantit pas une réponse valide.
 Une entrée explicite pour l'année des revenus est exigée ; aucun barème de l'année
 précédente n'est supposé valable. Si la source rectifie une année déjà collectée,
-le bouton ajoute une révision, conserve la précédente et laisse les calculs
-inchangés. OpenFisca est une modélisation ouverte, **pas le texte officiel de la
-loi**. Tester uniquement l'artefact de branche construit avec la signature
+le bouton ajoute une révision, conserve la précédente. Pour une année avec un
+moteur embarqué compatible (actuellement 2026), les nouveaux seuils et taux IR
+modifient **seulement la simulation indicative**, jamais une R2 complète ;
+la décote, les PS, frais, crypto, règles de calcul et montants personnels restent
+non vérifiés. Si aucune année compatible n'existe dans l'APK (par exemple 2027),
+le bouton peut collecter un barème mais refuse de calculer en recopiant l'année
+précédente. Le rapport du bouton liste les manques. OpenFisca est une modélisation
+ouverte, **pas le texte officiel de la loi**. Tester uniquement l'artefact de branche construit avec la signature
 habituelle ; la release publique `apk-2.2.1` correspond à un ancien commit et
 ne contient pas le lecteur R2 ni le correctif d'accès OpenFisca. Ne pas
 installer un APK signé avec une clé de développement par-dessus l'application.
