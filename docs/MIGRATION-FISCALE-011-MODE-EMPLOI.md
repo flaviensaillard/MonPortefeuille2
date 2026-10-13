@@ -1,5 +1,7 @@
 # Migration 011 — exécution contrôlée (schéma seulement)
 
+**État rapporté par le propriétaire le 13/10/2026 : migration effectuée dans Supabase SQL Editor et contrôle des cinq R1 `historique_non_verifie` / `actif=false` réussi.** Le sandbox ne possède pas de connexion SQL pour une relecture indépendante post-migration. Le [run préalable 38369577641](https://github.com/flaviensaillard/MonPortefeuille2/actions/runs/38369577641) est vérifié par l'agent : conclusion `success` sur le commit `9f1e784`, export, restauration, présence des cinq R1 dans l'archive, lecture distante et comparaison archive/base réussis. Cette sauvegarde précède la migration et n'est **pas** un cliché post-migration.
+
 **Portée autorisée : uniquement la structure de `pf2_fiscal_annees`.** La R2
 2025 n'est ni insérée, ni validée, ni activée. Aucune PR n'est fusionnée.
 Le dépôt est public : ne publier ni archive, ni clé de sauvegarde, ni identifiant,

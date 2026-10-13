@@ -88,10 +88,14 @@ reprise.
 **Préparation locale ultérieure (13/10/2026) :** voir
 [`REVISION-FISCALE-2025-PREPARATION.md`](REVISION-FISCALE-2025-PREPARATION.md)
 pour le brouillon d'une éventuelle révision 2 de **2025 uniquement**.
+La [migration de structure 011](MIGRATION-FISCALE-011-MODE-EMPLOI.md) est déclarée
+appliquée par le propriétaire après sauvegarde/restauration du run 38369577641 ;
+les cinq R1 restent non vérifiées et inactives. Cette migration n'insère ni
+n'active de R2 et ne change pas le moteur des calculs.
 `python jobs/preparer_revision_fiscale_2025.py` génère un inventaire hors ligne
 avec différences attendues et règles non auditées ; ce n'est ni une simulation
 de lecture Supabase, ni une ligne publiable, ni une sauvegarde. Aucune écriture
-Supabase n'a été effectuée pendant cette préparation.
+de paramètres fiscaux n'a été effectuée pendant cette préparation : seule la structure de la table a été étendue par 011.
 
 ## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
 
