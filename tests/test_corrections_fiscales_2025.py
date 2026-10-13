@@ -14,11 +14,12 @@ def test_decote_millesime_2025_et_2026_non_confondus():
     assert (b.decote_base_celibataire, b.decote_plafond_celibataire) == (897, 1982)
     assert (b.decote_base_couple, b.decote_plafond_couple) == (1483, 3277)
     assert b.decote_taux == 0.4525
-    # Impôt brut 1 000 € : réduction 897 - (1 000 × 45,25 %) = 444,50 €.
+    # Impôt brut 1 000 € : réduction 897 - (1 000 × 45,25 %) = 444,50 €,
+    # arrondie à 445 € (BOI-IR-LIQ-20-20-40, IV § 50).
     revenu = 11_600 + 1000 / .11
     r = tax.impot_revenu(revenu, 1, 2025)
     assert r.impot_brut == pytest.approx(1000)
-    assert r.decote == pytest.approx(444.50)
+    assert r.decote == pytest.approx(445)
     # Les 2026 repris dans le code sont provisoires ; ne pas les appeler « validés ».
     assert "provisoires" in fb.source_de(2026).lower()
 

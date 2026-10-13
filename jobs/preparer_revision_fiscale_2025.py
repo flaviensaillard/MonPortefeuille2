@@ -33,10 +33,10 @@ SOURCES = {
     "option_2op": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
     "option_3cn_debut": "https://bofip.impots.gouv.fr/bofip/14201-PGP.html/ACTU-2024-00078",
     "csg": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
-    "abattement_10": "https://bofip.impots.gouv.fr/bofip/10855-PGP.html/identifiant=BOI-BAREME-000035-20260217",
+    "abattement_10": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
     "frais": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
     "repas": "https://www.impots.gouv.fr/particulier/frais-de-repas",
-    "seuil_ir": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/21-calcul_impot_369a382.pdf",
+    "seuil_ir": "https://bofip.impots.gouv.fr/bofip/2496-PGP.html/identifiant=BOI-IR-LIQ-20-20-40-20180704",
     "titres_etc": "https://www.impots.gouv.fr/particulier/les-cessions-mobilieres",
     "pas_couple": "https://bofip.impots.gouv.fr/bofip/11256-PGP.html/identifiant=BOI-IR-PAS-20-20-20-20250507",
 }
@@ -164,7 +164,7 @@ def construire_brouillon() -> dict:
             "Recouper frais kilométriques, conditions des frais de repas et champ des revenus éligibles à 2OP avant une activation générale.",
             "Figer le code candidat dans un commit traçable ; la révision 1 ne décrit pas les valeurs corrigées.",
             "Avant écriture : sauvegarde chiffrée récente avec tables fiscales, restauration de contrôle, simulation de la ligne 2025 et autorisation explicite.",
-            "Après éventuelle écriture : relire et comparer exactement la nouvelle ligne, vérifier 2022–2024/2026 inchangées ; activer les calculs séparément.",
+            "Après éventuelle écriture autorisée : relire et comparer exactement la nouvelle ligne, vérifier 2022–2024/2026 inchangées ; une ligne active compatible sera appliquée automatiquement par l'APK mise à jour.",
         ],
     }
 
@@ -266,7 +266,7 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
         },
         "bloquants": [
             "source_ref et commit candidat final manquants ; user_id volontairement absent",
-            "colonnes de validation présentes après 011, mais aucun lecteur fiscal sûr dans l'APK",
+            "lecteur APK testé avec R2 synthétique, mais audit des règles et vérification réelle non terminés",
             "paramètres or physique exclus ; une publication générale serait trompeuse",
             "PAS couple = estimation sur salaires, non un taux officiel activable",
             ("2OP non certifiée : vérification des opérations et revenus déclarés encore requise"

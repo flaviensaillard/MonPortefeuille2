@@ -205,7 +205,7 @@ test('PFU titres 2025 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2025), 0.314, 1e
 test('décote 2025 DGFiP : célibataire 897/1982, couple 1483/3277', () => {
     const b = PF.fiscal.BAREMES[2025];
     return b.dc === 897 && b.dcPlafond === 1982 && b.dcCouple === 1483 && b.dcPlafondCouple === 3277
-        && proche(PF.fiscal.impotRevenu(11600 + 1000 / .11, 1, 2025, 'Célibataire').decote, 444.5);
+        && proche(PF.fiscal.impotRevenu(11600 + 1000 / .11, 1, 2025, 'Célibataire').decote, 445);
 });
 test('quotient familial général 2025 = 1807 € par demi-part', () => {
     const c = 'Marié(e) / Pacsé(e)';
@@ -257,7 +257,7 @@ test('couple marié : la somme de deux choix indépendants n’est pas le meille
     return cn.impot_total_foyer < defaut.impot_total_foyer
         && op.impot_total_foyer < defaut.impot_total_foyer
         && ensemble.impot_total_foyer > cn.impot_total_foyer
-        && o.retenu === cn && proche(cn.impot_total_foyer, 4952.62);
+        && o.retenu === cn && proche(cn.impot_total_foyer, 4952.6);
 });
 test('2022 : la case 3CN n’était pas encore ouverte', () => {
     const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2022, 'Marié(e) / Pacsé(e)', 100, 0, null, 15000);

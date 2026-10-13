@@ -320,10 +320,10 @@ class TestQuotientFamilialCoupleEnfants:
         2 enfants (3 parts) vaut `_impot_par_part(R / 3) * 3` et non `* 2`."""
         res = tax.impot_revenu(50_545.0, parts=3.0, annee=2025, statut="Marié(e) / Pacsé(e)")
         # QF = 50 545 / 3 = 16 848,33 € ; impôt par part = (16 848,33 - 11 600) * 11 % = 577,3167 €
-        # Impôt brut sur 3 parts = 577,3167 * 3 = 1 731,95 €
-        assert res.impot_brut == pytest.approx(1_731.95, abs=0.01)
+        # Impôt brut sur 3 parts = 577,3167 * 3 = 1 731,95 €, arrondi 1 732 €.
+        assert res.impot_brut == pytest.approx(1_732, abs=0.01)
         b25 = fb.bareme_de(2025)
-        decote_attendue = b25.decote_base_couple - 0.4525 * res.impot_brut
+        decote_attendue = int(b25.decote_base_couple - 0.4525 * res.impot_brut + .5)
         assert res.decote == pytest.approx(decote_attendue, abs=0.01)
         assert res.impot_net == pytest.approx(res.impot_brut - res.decote, abs=0.01)
 

@@ -46,7 +46,7 @@ def test_les_marges_separees_donnent_le_mauvais_choix_en_presence_de_crypto():
     # Ensemble, l'IR progressif franchit une limite : mieux vaut 3CN seule.
     assert ensemble["impot_total_foyer"] > cn_seule["impot_total_foyer"]
     assert r["retenu"] is cn_seule
-    assert r["retenu"]["impot_total_foyer"] == pytest.approx(4952.62)
+    assert r["retenu"]["impot_total_foyer"] == pytest.approx(4952.6)  # cotisation IR arrondie à l'euro
 
 
 def test_ps_precomptes_comptes_une_fois_et_total_annuel_distinct_du_restant():

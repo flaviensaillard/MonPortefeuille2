@@ -100,9 +100,9 @@ BAREMES: dict[int, Bareme] = {
 }
 
 SOURCE_PAR_ANNEE: dict[int, str] = {
-    2022: "Vérifié — données historiques stables",
-    2023: "Vérifié — données historiques stables",
-    2024: "Vérifié — données historiques stables",
+    2022: "Constantes embarquées historiques non vérifiées",
+    2023: "Constantes embarquées historiques non vérifiées",
+    2024: "Constantes embarquées historiques non vérifiées",
     2025: "Tranches et décote recoupées BOFiP — autres règles encore à valider",
     2026: "Hypothèses provisoires — revenus 2026 non vérifiés",
 }

@@ -14,6 +14,11 @@ class ControleCouverture(unittest.TestCase):
         self.assertFalse(rapport["pret_a_ecrire"])
         self.assertNotIn("or_physique", rapport["parametres_inventories"])
         self.assertNotIn("pas", rapport["parametres_inventories"])
+        # BOI-BAREME-000035 concerne les allocations employeur, pas la
+        # déduction salariale de 10 % : vérifier le sens de la référence.
+        aide = "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm"
+        for champ in ("abattement_10.taux", "abattement_10.plancher", "abattement_10.plafond"):
+            self.assertEqual(rapport["sources_par_parametre"][champ], aide)
 
     def test_ajout_suppression_ou_source_dupliquee_bloquent(self):
         params = prep.parametres_2025()

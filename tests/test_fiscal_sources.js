@@ -74,6 +74,6 @@ const collecteur = contexte.PF.fiscalSources;
     const fiscal = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/js/fiscal.js'), 'utf8');
     assert.match(html, /js\/fiscal_sources\.js/);
     assert.match(fiscal, /data-fisc="collecter"/);
-    assert.match(fiscal, /les nouveaux chiffres ne sont pas appliqués aux calculs/);
+    assert.match(fiscal, /ses chiffres isolés ne sont pas appliqués aux calculs/);
     console.log('Révisions fiscales annuelles : tests réussis');
 })().catch(e => { console.error(e); process.exitCode = 1; });

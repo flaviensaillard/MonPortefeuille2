@@ -403,6 +403,7 @@
                         // Jeton de rafraîchissement révoqué ou expiré : la
                         // session est morte, on la retire sans effacer les réglages.
                         if (PF.store && PF.store.effacerSession) PF.store.effacerSession();
+                        if (PF.fiscal && PF.fiscal.effacerRevisions) PF.fiscal.effacerRevisions();
                         // 2.1.1 : les jetons gardés pour l'empreinte sont morts
                         // eux aussi — jamais une copie morte n'ouvrira la suite.
                         if (PF.biometrie && PF.biometrie.nettoyer) { try { PF.biometrie.nettoyer(); } catch (e) { /* sans empreinte */ } }
@@ -423,6 +424,7 @@
             var h = auth.entetes();
             if (s && s.access_token) h.Authorization = 'Bearer ' + s.access_token;
             if (PF.store && PF.store.effacerSession) PF.store.effacerSession();
+            if (PF.fiscal && PF.fiscal.effacerRevisions) PF.fiscal.effacerRevisions();
             // 2.1.1 : la copie chiffrée des jetons (empreinte) ne survit pas à
             // la déconnexion.
             if (PF.biometrie && PF.biometrie.nettoyer) { try { PF.biometrie.nettoyer(); } catch (e) { /* sans empreinte */ } }

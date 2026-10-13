@@ -344,8 +344,15 @@
         var bouton = UI.$('#btnRefresh');
         bouton.classList.add('spin');
         if (viderCours) PF.net.viderCache();
-
+        // Réauthentification, échec réseau ou mode démo : jamais de révision
+        // conservée du compte précédent ou d'une lecture antérieure.
+        PF.fiscal.effacerRevisions();
         var promesse = etat.demo ? Promise.resolve(demoContexte()) : PF.portefeuille.charger();
+        if (!etat.demo) {
+            promesse = promesse.then(function (ctx) {
+                return PF.fiscal.actualiserRevisions(ctx).then(function () { return ctx; });
+            });
+        }
 
         promesse.then(function (ctx) {
             etat.ctx = ctx;

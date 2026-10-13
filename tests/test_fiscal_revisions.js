@@ -74,6 +74,10 @@ invalide(r => { r.parametres.quotient_familial.plafonds_particuliers_modelises =
 invalide(r => { r.parametres.regles_km.seuils_distance_km = [5000, 21000]; },
     'changer une formule non dynamique exige du nouveau code');
 invalide(r => { r.parametres.bareme_km['5'] = [1, 2]; }, 'barème km mal formé');
+invalide(r => { r.parametres.bareme.decote_taux = .46; }, 'une rectification du coefficient nécessite un nouveau contrat moteur');
+invalide(r => { r.parametres.ir_forfaitaire = .13; }, 'une modification du taux IR fixe nécessite une revue du contrat');
+invalide(r => { r.parametres.seuil_non_recouvrement_ir = 62; }, 'le seuil juridique n’est pas modifiable sans revue');
+invalide(r => { r.parametres.abattement_10.taux = .11; }, 'le taux 10 % ne peut pas être détourné silencieusement');
 invalide(r => { r.source_ref = ''; }, 'provenance manquante');
 invalide(r => { r.origine = 'reprise_code_non_verifiee'; }, 'R1 ne peut être homologuée par un drapeau');
 assert.equal(lecteur.examiner([r2(), { ...r2(), revision: 3 }], 2025, utilises), null,

@@ -31,6 +31,7 @@ une estimation, pas une déclaration fiscale.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -79,6 +80,11 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme) -> float:
     return impot
 
 
+def _euro_2025(valeur: float, annee: int) -> float:
+    """Arrondi fiscal de 2025 : 0,50 € va à l'euro supérieur (pas round Python)."""
+    return float(math.floor(valeur + 0.5)) if annee == 2025 else valeur
+
+
 def _est_couple(statut: str) -> bool:
     s = statut.lower()
     return "mari" in s or "pacs" in s
@@ -98,7 +104,7 @@ def impot_revenu(
     par enfant à partir du troisième).
     """
     bareme = fb.bareme_de(annee)
-    revenu = max(0.0, float(revenu))
+    revenu = _euro_2025(max(0.0, float(revenu)), annee)
     parts = max(0.5, float(parts))
     couple = _est_couple(statut)
     parts_base = 2.0 if couple else 1.0
@@ -117,6 +123,7 @@ def impot_revenu(
     else:
         impot = impot_non_plafonne
 
+    impot = _euro_2025(impot, annee)
     tmi = 0.0
     for i, plafond in enumerate(bareme.tranches):
         if qf > plafond:
@@ -136,6 +143,7 @@ def impot_revenu(
         if impot <= plafond:
             decote = max(0.0, base - impot * bareme.decote_taux)
             decote = min(decote, impot)
+            decote = _euro_2025(decote, annee)
 
     net = impot - decote
     # Seuil de non-recouvrement : en dessous de 61 €, l'impôt n'est pas prélevé.
@@ -435,7 +443,7 @@ def comparer_pfu_bareme(
     ps = ps_pv + ps_interets  # dette totale, déjà versée en partie si précomptée
     ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
     ir_sans_brut = impot_revenu(autres_revenus, parts, annee, statut, appliquer_seuil=False).impot_net
-    pfu_ir_brut = (pv + interets) * fb.IR_FORFAITAIRE
+    pfu_ir_brut = _euro_2025((pv + interets) * fb.IR_FORFAITAIRE, annee)
     # 61 € s'apprécie sur la cotisation globale (barème + taux proportionnel),
     # pas sur la composante au barème prise isolément.
     pfu_global = ir_sans_brut + pfu_ir_brut
@@ -502,8 +510,8 @@ def comparer_options_foyer(
                                 + (crypto if cn else 0.0) - csg_payee_annee)
             ir_bareme = impot_revenu(revenu_au_bareme, parts, annee, statut,
                                      appliquer_seuil=False).impot_net
-            ir_forfaitaire = fb.IR_FORFAITAIRE * ((0.0 if op else pv + rcm)
-                                                 + (0.0 if cn else crypto))
+            ir_forfaitaire = _euro_2025(fb.IR_FORFAITAIRE * ((0.0 if op else pv + rcm)
+                                                 + (0.0 if cn else crypto)), annee)
             if ir_bareme + ir_forfaitaire < fb.SEUIL_NON_RECOUVREMENT_IR:
                 ir_bareme = ir_forfaitaire = 0.0
             total = ir_bareme + ir_forfaitaire + ps_total
@@ -1157,24 +1165,24 @@ def simuler_foyer_complet(
     sal2 = max(0.0, float(salaire_2)) if couple else 0.0
 
     # --- Déclarant 1 ---
-    abatt1 = fb.abattement_10_salaire(sal1, annee)
+    abatt1 = _euro_2025(fb.abattement_10_salaire(sal1, annee), annee)
     km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1, annee=annee)
     rep1_val, rep1_txt = fb.frais_repas(jours_repas_1, annee)
     frais_reels_1 = round(km1_val + rep1_val, 2) if utiliser_frais_reels_1 else 0.0
     retenir_reels_1 = bool(utiliser_frais_reels_1 and frais_reels_1 > abatt1)
-    deduction_1 = frais_reels_1 if retenir_reels_1 else abatt1
+    deduction_1 = _euro_2025(frais_reels_1, annee) if retenir_reels_1 else abatt1
     note_1ak = (
         f"Déclarant 1 ({annee}) — {km1_txt} ; {rep1_txt} ; Total frais réels (case 1AK) = " + f"{round(frais_reels_1):,} €".replace(",", " ")
         if utiliser_frais_reels_1 else ""
     )
 
     # --- Déclarant 2 ---
-    abatt2 = fb.abattement_10_salaire(sal2, annee) if couple else 0.0
+    abatt2 = _euro_2025(fb.abattement_10_salaire(sal2, annee), annee) if couple else 0.0
     km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2, annee=annee) if couple else (0.0, "")
     rep2_val, rep2_txt = fb.frais_repas(jours_repas_2, annee) if couple else (0.0, "")
     frais_reels_2 = round(km2_val + rep2_val, 2) if (couple and utiliser_frais_reels_2) else 0.0
     retenir_reels_2 = bool(couple and utiliser_frais_reels_2 and frais_reels_2 > abatt2)
-    deduction_2 = frais_reels_2 if retenir_reels_2 else abatt2
+    deduction_2 = _euro_2025(frais_reels_2, annee) if retenir_reels_2 else abatt2
     note_1bk = (
         f"Déclarant 2 ({annee}) — {km2_txt} ; {rep2_txt} ; Total frais réels (case 1BK) = " + f"{round(frais_reels_2):,} €".replace(",", " ")
         if (couple and utiliser_frais_reels_2) else ""

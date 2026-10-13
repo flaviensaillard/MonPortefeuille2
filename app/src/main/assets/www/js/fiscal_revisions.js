@@ -1,7 +1,8 @@
-/* Prototype de lecteur de révisions fiscales : lecture Supabase seulement.
-   NON chargé par index.html et NON branché aux calculs : le contrat d'audit
-   par paramètre et le moteur multi-années doivent être finalisés avant cela.
-   Une sélection structurelle n'homologue jamais une règle fiscale. */
+/* Lecteur des révisions fiscales 2025 : lecture Supabase seulement.
+   Chargé par l'APK, branché aux calculs uniquement lorsqu'une unique révision
+   active passe l'inventaire et le contrat de compatibilité du moteur 2025.
+   Les autres années restent inchangées. Une sélection structurelle n'homologue
+   jamais à elle seule une règle fiscale : publication après revue humaine. */
 (function (root) {
     'use strict';
     var PF = root.PF = root.PF || {};
@@ -163,5 +164,5 @@
         return PF.net.supabase.select(TABLE, 'annee_revenus=eq.' + annee + '&select=' + CHAMPS)
             .then(function (lignes) { return examiner(lignes, annee, cheminsConsommes); });
     }
-    PF.fiscalRevisions = { examiner: examiner, consulter: consulter };
+    PF.fiscalRevisions = { examiner: examiner, consulter: consulter, cheminsFeuilles: cheminsFeuilles };
 })(typeof window !== 'undefined' ? window : globalThis);

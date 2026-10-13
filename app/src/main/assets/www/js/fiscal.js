@@ -21,9 +21,9 @@
     var SEUILS_KM_VOITURE = [5000, 20000];
     var MAJORATION_VOITURE_ELECTRIQUE = 0.20;
     var SOURCE_PAR_ANNEE = {
-        2022: 'Vérifié — données historiques stables',
-        2023: 'Vérifié — données historiques stables',
-        2024: 'Vérifié — données historiques stables',
+        2022: 'Constantes embarquées historiques non vérifiées',
+        2023: 'Constantes embarquées historiques non vérifiées',
+        2024: 'Constantes embarquées historiques non vérifiées',
         2025: 'Tranches et décote recoupées BOFiP — autres règles à valider',
         2026: 'Hypothèses provisoires — revenus 2026 non vérifiés'
     };
@@ -58,25 +58,85 @@
 
     var URL_MAJ_BAREMES = 'https://arena.ai/agent/01a0f24c-13af-734b-9dd4-91b1ceafa74f';
 
+    // Les révisions lues sont propres à une session, non persistées sur l'appareil.
+    // Aucun statut SQL ne remplace la validation de forme et de couverture du lecteur.
+    var revisionsActives = Object.create(null), sequenceLecture = 0;
+    function paramsActifs(annee) { return revisionsActives[annee] || null; }
+    function tauxIrForfaitaire(annee) {
+        var p = paramsActifs(annee);
+        return p ? p.ir_forfaitaire : IR_FORFAITAIRE;
+    }
+    function seuilIr(annee) {
+        var p = paramsActifs(annee);
+        return p ? p.seuil_non_recouvrement_ir : SEUIL_NON_RECOUVREMENT_IR;
+    }
+    function tauxCsg(annee) {
+        var p = paramsActifs(annee);
+        return p ? p.csg_deductible : CSG_DEDUCTIBLE;
+    }
+    function effacerRevisions() {
+        ++sequenceLecture;
+        revisionsActives = Object.create(null);
+    }
+    function actualiserRevisions(ctx) {
+        effacerRevisions();
+        var numero = sequenceLecture;
+        var compte = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+        // L'or détenu en métal relève d'un régime DISTINCT non publié par R2.
+        // Une transaction physique dans les données chargées interdit de présenter
+        // la couverture de cette révision comme intégrale pour ce portefeuille.
+        if (!ctx || !Array.isArray(ctx.transactions) || !PF.modele ||
+            typeof PF.modele.classeDe !== 'function' || ctx.transactions.some(function (t) {
+                return PF.modele.classeDe(t.ticker) === 'or_physique';
+            })) return Promise.resolve(null);
+        if (!compte || !compte.id || !PF.fiscalRevisions) return Promise.resolve(null);
+        var chemins = PF.fiscalRevisions.cheminsFeuilles(snapshotConstantesCode(2025));
+        return PF.fiscalRevisions.consulter(2025, chemins).then(function (selection) {
+            var compteActuel = PF.net.auth.utilisateur();
+            if (numero !== sequenceLecture || !compteActuel || compteActuel.id !== compte.id) return null;
+            if (selection && selection.statut === 'candidat_structurel_non_homologue') {
+                // L'objet réseau n'est pas conservé : copie non partagée pour la session.
+                revisionsActives[2025] = JSON.parse(JSON.stringify(selection.parametres));
+                return selection.revision;
+            }
+            return null;
+        }).catch(function () { return null; }); // hors ligne : estimation embarquée, jamais ancienne R2 en cache
+    }
+    function revisionActive(annee) { return !!paramsActifs(annee); }
+
     function annees() { return Object.keys(BAREMES).map(Number).sort(function (a, b) { return a - b; }); }
     function derniereAnnee() { var a = annees(); return a[a.length - 1]; }
     function baremeDe(annee) {
+        var p = paramsActifs(annee);
+        if (p) {
+            var b = p.bareme;
+            return { tranches: b.tranches, taux: b.taux, dc: b.decote_base_celibataire,
+                dcPlafond: b.decote_plafond_celibataire, dcCouple: b.decote_base_couple,
+                dcPlafondCouple: b.decote_plafond_couple };
+        }
         if (!BAREMES[annee]) throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : ' + annees().join(', ') + '.');
         return BAREMES[annee];
     }
     function tauxPS(annee) {
+        var p = paramsActifs(annee);
+        if (p) return p.prelevements_sociaux_par_categorie.plus_values_titres;
         if (PS_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de prélèvements sociaux pour ' + annee + '.');
         return PS_PAR_ANNEE[annee];
     }
-    function tauxPFU(annee) { return IR_FORFAITAIRE + tauxPS(annee); }
+    function tauxPFU(annee) { return tauxIrForfaitaire(annee) + tauxPS(annee); }
     function tauxPSRevenuMobilier(annee, precompte) {
         if (typeof precompte !== 'boolean') throw new Error('Préciser si les PS des intérêts ont déjà été précomptés.');
+        var p = paramsActifs(annee);
+        if (p) return precompte ? p.prelevements_sociaux_par_categorie.rcm_precomptes_en_2025
+            : p.prelevements_sociaux_par_categorie.rcm_non_precomptes;
         if (!precompte) return tauxPS(annee);
         if (PS_PRECOMPTES_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de PS précomptés pour ' + annee + '.');
         return PS_PRECOMPTES_PAR_ANNEE[annee];
     }
     var PLAFOND_QF_GENERAL = { 2022: 1759, 2023: 1759, 2024: 1759, 2025: 1807, 2026: 1807 }; // 2026 provisoire
     function plafondQF(annee) {
+        var p = paramsActifs(annee);
+        if (p) return p.quotient_familial.plafond_general_par_demi_part;
         if (PLAFOND_QF_GENERAL[annee] === undefined) throw new Error('Aucun plafond QF pour ' + annee + '.');
         return PLAFOND_QF_GENERAL[annee];
     }
@@ -101,9 +161,11 @@
         return s.indexOf('mari') >= 0 || s.indexOf('pacs') >= 0;
     }
 
+    function euro2025(valeur, annee) { return annee === 2025 ? Math.floor(valeur + .5) : valeur; }
+
     function impotRevenu(revenu, parts, annee, statut, appliquerSeuil) {
         var b = baremeDe(annee);
-        revenu = Math.max(0, U.num(revenu, 0));
+        revenu = euro2025(Math.max(0, U.num(revenu, 0)), annee);
         parts = Math.max(0.5, U.num(parts, 1));
         var couple = estCouple(statut);
         var partsBase = couple ? 2 : 1;
@@ -120,6 +182,7 @@
             } else impot = impotNonPlafonne;
         } else impot = impotNonPlafonne;
 
+        impot = euro2025(impot, annee);
         // TMI : taux de la tranche dans laquelle tombe le quotient familial.
         var tmi = b.taux[b.taux.length - 1];
         for (var i = 0; i < b.tranches.length; i++) {
@@ -133,27 +196,28 @@
         var base = couple ? b.dcCouple : b.dc;
         var plafond = couple ? b.dcPlafondCouple : b.dcPlafond;
         if (impot <= plafond) {
-            decote = Math.max(0, base - impot * TAUX_DECOTE);
-            decote = Math.min(decote, impot);
+            decote = Math.max(0, base - impot * (paramsActifs(annee) ? paramsActifs(annee).bareme.decote_taux : TAUX_DECOTE));
+            decote = euro2025(Math.min(decote, impot), annee);
         }
         var net = impot - decote;
-        if (appliquerSeuil !== false && net < SEUIL_NON_RECOUVREMENT_IR) net = 0;  // seul si IR global = barème
+        if (appliquerSeuil !== false && net < seuilIr(annee)) net = 0;  // seul si IR global = barème
         return { impot_brut: impot, decote: decote, impot_net: net, tmi: tmi, quotient: qf, annee: annee, plafonnement: gainMax || 0 };
     }
 
     function abattement10(salaire, annee) {
-        if (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined)
+        if (!paramsActifs(annee) && (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined))
             throw new Error('Aucun abattement 10 % pour les revenus ' + annee + '.');
         var sal = Math.max(0, U.num(salaire, 0));
         if (sal <= 0) return 0;
-        var plancher = PLANCHER_ABATTEMENT_10[annee];
-        var plafond = PLAFOND_ABATTEMENT_10[annee];
-        return Math.min(Math.max(sal * TAUX_ABATTEMENT_SALAIRES, Math.min(sal, plancher)), plafond);
+        var plancher = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plancher : PLANCHER_ABATTEMENT_10[annee];
+        var plafond = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plafond : PLAFOND_ABATTEMENT_10[annee];
+        return euro2025(Math.min(Math.max(sal * (paramsActifs(annee) ? paramsActifs(annee).abattement_10.taux : TAUX_ABATTEMENT_SALAIRES), Math.min(sal, plancher)), plafond), annee);
     }
 
     /* Frais de repas aux frais réels : nombre de jours × forfait URSSAF/DGFiP
        de l'année. Pas de forfait connu pour l'année = pas de montant inventé. */
     function forfaitRepas(annee) {
+        if (paramsActifs(annee)) return paramsActifs(annee).forfait_repas;
         if (FORFAIT_REPAS[annee] === undefined) return null;
         return FORFAIT_REPAS[annee];
     }
@@ -189,24 +253,24 @@
         return {
             salaire: salaire, abattement: abattement, km: km, repas: repas,
             total: total, utilise: utilise, retenir: retenir,
-            deduction: retenir ? total : abattement,
+            deduction: retenir ? euro2025(total, annee) : abattement,
             caseValeur: retenir ? Math.round(total) : null,
             gain: U.arrondi(Math.max(0, total - abattement), 2)
         };
     }
 
     function fraisKilometriques(km, cv, electrique, annee) {
-        if (!BAREME_KM_PAR_ANNEE[annee])
+        if (!paramsActifs(annee) && !BAREME_KM_PAR_ANNEE[annee])
             throw new Error('Aucun barème kilométrique pour les revenus ' + annee + '.');
         var d = Math.max(0, U.num(km, 0));
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
-        var f = BAREME_KM_PAR_ANNEE[annee][cle];
+        var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle] : BAREME_KM_PAR_ANNEE[annee][cle];
         var montant, formule;
-        if (d <= SEUILS_KM_VOITURE[0]) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
-        else if (d <= SEUILS_KM_VOITURE[1]) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
+        if (d <= (paramsActifs(annee) ? paramsActifs(annee).regles_km.seuils_distance_km[0] : SEUILS_KM_VOITURE[0])) { montant = d * f[0]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[0], 3); }
+        else if (d <= (paramsActifs(annee) ? paramsActifs(annee).regles_km.seuils_distance_km[1] : SEUILS_KM_VOITURE[1])) { montant = d * f[1] + f[2]; formule = '(' + U.nombre(d, 0) + ' km × ' + U.nombre(f[1], 3) + ') + ' + U.nombre(f[2], 0) + ' €'; }
         else { montant = d * f[3]; formule = U.nombre(d, 0) + ' km × ' + U.nombre(f[3], 3); }
-        if (electrique) { montant *= 1 + MAJORATION_VOITURE_ELECTRIQUE; formule += ' × 1,20 (électrique)'; }
+        if (electrique) { var maj = paramsActifs(annee) ? paramsActifs(annee).regles_km.majoration_electrique : MAJORATION_VOITURE_ELECTRIQUE; montant *= 1 + maj; formule += ' × ' + U.nombre(1 + maj, 2) + ' (électrique)'; }
         return { montant: U.arrondi(montant, 2), formule: formule + ' = ' + U.nombre(montant, 2) + ' €' };
     }
 
@@ -222,15 +286,16 @@
         var ps = pv * tauxPS(annee) + psInterets;
         var irSans = impotRevenu(autresRevenus, parts, annee, statut);
         var irSansBrut = impotRevenu(autresRevenus, parts, annee, statut, false).impot_net;
-        var pfuGlobal = irSansBrut + (pv + interets) * IR_FORFAITAIRE;
-        var pfuIr = pfuGlobal >= SEUIL_NON_RECOUVREMENT_IR ? (pv + interets) * IR_FORFAITAIRE : 0;
+        var irForfaitBrut = euro2025((pv + interets) * tauxIrForfaitaire(annee), annee);
+        var pfuGlobal = irSansBrut + irForfaitBrut;
+        var pfuIr = pfuGlobal >= seuilIr(annee) ? irForfaitBrut : 0;
         var irBaremeDebloque = pfuIr ? irSansBrut - irSans.impot_net : 0;
         var pfuTotal = pfuIr + irBaremeDebloque + ps;
 
-        var csgCetteAnnee = interetsPrecomptes ? interets * CSG_DEDUCTIBLE : 0;
-        var csgApresPaiement = (pv + (interetsPrecomptes ? 0 : interets)) * CSG_DEDUCTIBLE;
+        var csgCetteAnnee = interetsPrecomptes ? interets * tauxCsg(annee) : 0;
+        var csgApresPaiement = (pv + (interetsPrecomptes ? 0 : interets)) * tauxCsg(annee);
         var irAvec = impotRevenu(autresRevenus + pv + interets - csgCetteAnnee, parts, annee, statut, false);
-        var irMarginal = Math.max(0, (irAvec.impot_net >= SEUIL_NON_RECOUVREMENT_IR ? irAvec.impot_net : 0) - irSans.impot_net);
+        var irMarginal = Math.max(0, (irAvec.impot_net >= seuilIr(annee) ? irAvec.impot_net : 0) - irSans.impot_net);
         var baremeTotal = irMarginal + ps;
         var avantage = pfuTotal - baremeTotal;
 
@@ -265,11 +330,11 @@
         var cnChoix = crypto > 0 && annee >= 2023 ? [false, true] : [false];
         opChoix.forEach(function (op) {
             cnChoix.forEach(function (cn) {
-                var csgPayee = op && precomptes ? rcm * CSG_DEDUCTIBLE : 0;
+                var csgPayee = op && precomptes ? rcm * tauxCsg(annee) : 0;
                 var revenuBareme = revenuSalaires + (op ? pv + rcm : 0) + (cn ? crypto : 0) - csgPayee;
                 var irBareme = impotRevenu(revenuBareme, parts, annee, statut, false).impot_net;
-                var irForfait = IR_FORFAITAIRE * ((op ? 0 : pv + rcm) + (cn ? 0 : crypto));
-                if (irBareme + irForfait < SEUIL_NON_RECOUVREMENT_IR) {
+                var irForfait = euro2025(tauxIrForfaitaire(annee) * ((op ? 0 : pv + rcm) + (cn ? 0 : crypto)), annee);
+                if (irBareme + irForfait < seuilIr(annee)) {
                     irBareme = 0; irForfait = 0;
                 }
                 var total = irBareme + irForfait + psTotal;
@@ -326,6 +391,10 @@
                 message: 'Revenus ' + Math.max(an, cible) + ' absents (dernier millésime : ' + derniere
                     + '). Vérifiez leur publication officielle avant tout ajout.'
             };
+        }
+        if (revisionActive(cible)) {
+            return { disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
+                message: 'Paramètres publiés pour les revenus ' + cible + ' appliqués ; les situations personnelles restent à vérifier.' };
         }
         var src = SOURCE_PAR_ANNEE[cible] || '';
         if ((/recouper|provisoire/i).test(src) && auj >= new Date(cible + 1, 3, 1)) {
@@ -689,7 +758,7 @@
 
         var total213 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_213; }, 0), 2);
         var total224 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_224; }, 0), 2);
-        var exonere = cessions.length > 0 && total213 <= CRYPTO_FRANCHISE_CESSIONS;
+        var exonere = cessions.length > 0 && total213 <= (paramsActifs(annee) ? paramsActifs(annee).franchise_crypto : CRYPTO_FRANCHISE_CESSIONS);
         var case3an = 0, case3bn = 0;
         if (!exonere && cessions.length) {
             if (total224 > 0) case3an = total224; else case3bn = Math.abs(total224);
@@ -760,14 +829,14 @@
         var rep1 = fraisRepas(o.joursRepas1, annee);
         var frais1 = o.fraisReels1 ? U.arrondi(km1.montant + rep1.montant, 2) : 0;
         var retenir1 = !!(o.fraisReels1 && frais1 > abatt1);
-        var ded1 = retenir1 ? frais1 : abatt1;
+        var ded1 = retenir1 ? euro2025(frais1, annee) : abatt1;
 
         var abatt2 = couple ? abattement10(sal2, annee) : 0;
         var km2 = couple ? fraisKilometriques(o.km2, o.cv2, o.elec2, annee) : { montant: 0, formule: '' };
         var rep2 = couple ? fraisRepas(o.joursRepas2, annee) : { montant: 0, formule: '' };
         var frais2 = (couple && o.fraisReels2) ? U.arrondi(km2.montant + rep2.montant, 2) : 0;
         var retenir2 = !!(couple && o.fraisReels2 && frais2 > abatt2);
-        var ded2 = retenir2 ? frais2 : abatt2;
+        var ded2 = retenir2 ? euro2025(frais2, annee) : abatt2;
 
         var revNet1 = Math.max(0, sal1 - ded1), revNet2 = Math.max(0, sal2 - ded2);
         var revNetSalaires = revNet1 + revNet2;
@@ -877,7 +946,7 @@
     // le candidat Python, pas un certificat juridique ni une source Supabase.
     function snapshotConstantesCode(annee) {
         if (annee !== 2025) throw new Error('Photographie locale limitée aux revenus 2025.');
-        var b = baremeDe(annee);
+        var b = BAREMES[annee];
         if (!BAREME_KM_PAR_ANNEE[annee] || PLANCHER_ABATTEMENT_10[annee] === undefined ||
             PLAFOND_ABATTEMENT_10[annee] === undefined || FORFAIT_REPAS[annee] === undefined)
             throw new Error('Paramètres fiscaux incomplets pour ' + annee + '.');
@@ -892,14 +961,14 @@
                 decote_base_couple: b.dcCouple, decote_plafond_couple: b.dcPlafondCouple,
                 decote_taux: TAUX_DECOTE
             },
-            prelevements_sociaux: tauxPS(annee),
+            prelevements_sociaux: PS_PAR_ANNEE[annee],
             prelevements_sociaux_par_categorie: {
-                plus_values_titres: tauxPS(annee), plus_values_crypto_privees: tauxPS(annee),
-                rcm_precomptes_en_2025: tauxPSRevenuMobilier(annee, true),
-                rcm_non_precomptes: tauxPSRevenuMobilier(annee, false)
+                plus_values_titres: PS_PAR_ANNEE[annee], plus_values_crypto_privees: PS_PAR_ANNEE[annee],
+                rcm_precomptes_en_2025: PS_PRECOMPTES_PAR_ANNEE[annee],
+                rcm_non_precomptes: PS_PAR_ANNEE[annee]
             },
             quotient_familial: {
-                plafond_general_par_demi_part: plafondQF(annee),
+                plafond_general_par_demi_part: PLAFOND_QF_GENERAL[annee],
                 plafonds_particuliers_modelises: false
             },
             ir_forfaitaire: IR_FORFAITAIRE,
@@ -955,6 +1024,13 @@
         }
 
         // --- Bandeau de mise à jour
+        if (revisionActive(annee)) {
+            out += '<div class="ok-vert">Révision publiée des paramètres ' + UI.h(annee)
+                + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
+        } else {
+            out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
+                + ' : calculs indicatifs sur les constantes embarquées, non homologuées par la table.</div>';
+        }
         if (maj.disponible) {
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">Ouvrir l’assistant de mise à jour</button></div>'
@@ -966,9 +1042,9 @@
         // moteur fiscal. Un IR seul ne suffit PAS à une mise à jour des calculs.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Sources fiscales par année</b>'
-            + '<div class="st" style="margin:6px 0">Le barème IR est recherché dans une source structurée. Une loi rectificative crée une nouvelle révision de l’année concernée ; les autres années et les anciennes révisions restent intactes. '
-            + 'Décote, prélèvements sociaux, frais et règles de déclaration ne sont pas encore couverts : '
-            + '<b>les nouveaux chiffres ne sont pas appliqués aux calculs.</b></div>'
+            + '<div class="st" style="margin:6px 0">Cette collecte OpenFisca du seul barème IR est distincte des révisions complètes. Une loi rectificative crée une nouvelle révision de l’année concernée ; les autres années et les anciennes révisions restent intactes. '
+            + 'La collecte seule ne couvre ni décote, ni PS, ni frais, ni règles de déclaration : '
+            + '<b>ses chiffres isolés ne sont pas appliqués aux calculs.</b></div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Chercher les données fiscales disponibles</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px"></div></div>';
         if (annee === 2026) {
@@ -1436,7 +1512,7 @@
                 + '<div style="display:flex;gap:10px;margin-top:6px">'
                 + '<div style="flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:10px">'
                 + '<div style="font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.06em">Flat tax</div>'
-                + ligneResultat('IR ' + U.nombre(IR_FORFAITAIRE * 100, 1) + ' %', U.eur(a.pfu.ir, { dec: 0 }))
+                + ligneResultat('IR ' + U.nombre(tauxIrForfaitaire(annee) * 100, 1) + ' %', U.eur(a.pfu.ir, { dec: 0 }))
                 + (a.pfu.ir_bareme_debloque ? ligneResultat('IR au barème rétabli (seuil global)', U.eur(a.pfu.ir_bareme_debloque, { dec: 0 })) : '')
                 + ligneResultat('PS (titres ' + U.nombre(tauxPS(annee) * 100, 1) + ' %, intérêts selon précompte)', U.eur(a.pfu.ps, { dec: 0 }))
                 + ligneResultat('Total', U.eur(a.pfu.total, { dec: 0 }), true)
@@ -1631,6 +1707,8 @@
         detail2074: detail2074, detail2086: detail2086, simulerFoyer: simulerFoyer,
         PROMPT_MAJ: PROMPT_MAJ, URL_MAJ_BAREMES: URL_MAJ_BAREMES,
         snapshotConstantesCode: snapshotConstantesCode,
+        actualiserRevisions: actualiserRevisions, effacerRevisions: effacerRevisions,
+        revisionActive: revisionActive,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
