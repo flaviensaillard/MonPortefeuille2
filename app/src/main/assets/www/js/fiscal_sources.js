@@ -197,24 +197,58 @@
     }
 
     function synchroniserParametres(annee) {
-        return consulter().then(function (lignes) {
-            return chercherParametres(annee).then(function (resultat) {
-                var valides = validerParametres(annee, resultat.valeurs);
-                if (!valides) return { etats: resultat.etats, enregistree: false };
-                var dernier = null;
-                (lignes || []).forEach(function (r) {
-                    if (r.annee_revenus === annee && r.source === 'openfisca_parametres' &&
-                        (!dernier || Number(r.revision) > Number(dernier.revision))) dernier = r;
+        var compte = PF.net.auth.utilisateur();
+        if (!compte || !compte.id) return Promise.reject(new Error('Connectez-vous avant la collecte.'));
+        function memeCompte() {
+            var actuel = PF.net.auth.utilisateur();
+            if (!actuel || actuel.id !== compte.id)
+                throw new Error('Session changée pendant la collecte : aucune écriture des paramètres.');
+        }
+        return chercherParametres(annee).then(function (resultat) {
+            memeCompte();
+            var valides = validerParametres(annee, resultat.valeurs);
+            if (!valides) return { etats: resultat.etats, enregistree: false };
+            var base = { etats: resultat.etats, valeurs: valides.parametres };
+            // Lecture ciblée : une liste générale tronquée par PostgREST ne doit
+            // jamais nous faire réutiliser le numéro de révision 1.
+            function derniereRevision() {
+                memeCompte();
+                return PF.net.supabase.select(TABLE,
+                    'select=annee_revenus,source,revision,valeurs,source_url'
+                    + '&annee_revenus=eq.' + annee
+                    + '&source=eq.openfisca_parametres&order=revision.desc&limit=1')
+                    .then(function (lignes) { return lignes && lignes[0] || null; });
+            }
+            function enregistrer(reessais) {
+                return derniereRevision().then(function (dernier) {
+                    memeCompte();
+                    if (dernier && dernier.source_url === RACINE &&
+                        validerParametres(annee, dernier.valeurs) &&
+                        memesParametres(dernier.valeurs, valides)) {
+                        return { etats: base.etats, valeurs: base.valeurs, enregistree: true };
+                    }
+                    var revision = dernier ? Number(dernier.revision) + 1 : 1;
+                    if (!entier(revision) || revision < 1)
+                        throw new Error('Historique des paramètres invalide.');
+                    return PF.net.supabase.insert(TABLE, [{ annee_revenus: annee, source: 'openfisca_parametres',
+                        source_url: RACINE, revision: revision, valeurs: valides }]).then(function () {
+                        return { etats: base.etats, valeurs: base.valeurs, enregistree: true };
+                    }).catch(function (err) {
+                        // Deux clics/appareils peuvent partir du même état :
+                        // relire la ligne gagnante. Ne jamais UPDATE/DELETE/UPSERT.
+                        if (reessais > 0 && /23505/.test(String(err && err.message || err)))
+                            return enregistrer(reessais - 1);
+                        throw err;
+                    });
                 });
-                if (dernier && dernier.source_url === RACINE &&
-                    validerParametres(annee, dernier.valeurs) && memesParametres(dernier.valeurs, valides))
-                    return { etats: resultat.etats, enregistree: true, valeurs: valides.parametres };
-                var revision = dernier ? Number(dernier.revision) + 1 : 1;
-                if (!entier(revision) || revision < 1) throw new Error('Historique des paramètres invalide.');
-                return PF.net.supabase.insert(TABLE, [{ annee_revenus: annee, source: 'openfisca_parametres',
-                    source_url: RACINE, revision: revision, valeurs: valides }]).then(function () {
-                    return { etats: resultat.etats, enregistree: true, valeurs: valides.parametres };
-                });
+            }
+            return enregistrer(2).catch(function (err) {
+                // Conserver le diagnostic de chaque feuille même si la base
+                // refuse l'écriture. Aucune valeur non enregistrée n'est appliquée.
+                return { etats: base.etats, enregistree: false,
+                    erreur: /23505/.test(String(err && err.message || err))
+                        ? 'Conflit de révision persistant après relecture ; réessayez plus tard.'
+                        : String(err && err.message || err).replace(/\([^)]*\)/g, '(détails masqués)').slice(0, 180) };
             });
         });
     }

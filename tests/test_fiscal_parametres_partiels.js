@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const racine = path.join(__dirname, '..');
 const clone = x => JSON.parse(JSON.stringify(x));
 const lignes = { a: [], b: [] };
-let compte = 'a', ecritures = 0;
+let compte = 'a', ecritures = 0, masquerLecture = false, refuserEcriture = false;
 const valeurs = {};
 class DateFuture extends Date {
     constructor(...a) { super(...(a.length ? a : ['2028-01-01T00:00:00Z'])); }
@@ -24,11 +24,19 @@ const contexte = vm.createContext({ Date: DateFuture, PF: {
             return { ok: true, json: { id: chemin.replaceAll('/', '.'), values: valeurs[chemin] } };
         },
         supabase: {
-            select: async t => t === 'pf2_fiscal_annees' ? [] : clone(lignes[compte]),
+            select: async (t, query) => {
+                if (t === 'pf2_fiscal_annees') return [];
+                if (!query || !query.includes('source=eq.openfisca_parametres')) return clone(lignes[compte]);
+                if (masquerLecture) { masquerLecture = false; return []; }
+                return clone(lignes[compte].filter(r => r.annee_revenus === 2026 &&
+                    r.source === 'openfisca_parametres').sort((a, b) => b.revision - a.revision).slice(0, 1));
+            },
             insert: async (t, items) => {
                 assert.equal(t, 'pf2_fiscal_collectes');
-                assert(!lignes[compte].some(r => r.annee_revenus === items[0].annee_revenus &&
-                    r.source === items[0].source && r.revision === items[0].revision));
+                if (refuserEcriture) throw new Error('Écriture refusée (403)');
+                if (lignes[compte].some(r => r.annee_revenus === items[0].annee_revenus &&
+                    r.source === items[0].source && r.revision === items[0].revision))
+                    throw new Error('23505 Key (user_id, annee_revenus, source, revision)=(privé, 2026, openfisca_parametres, 1) already exists');
                 ecritures++;
                 lignes[compte].push(clone(items[0]));
             }
@@ -65,9 +73,26 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.throws(() => f.plafondQF(2027), /Aucun plafond QF/);
     await src.synchroniserParametres(2026);
     assert.equal(ecritures, 1, 'répétition sans changement');
+    masquerLecture = true; // concurrence ou liste initiale tronquée : la révision 1 existe
+    resultat = await src.synchroniserParametres(2026);
+    assert.equal(resultat.enregistree, true, '23505 relu et résolu, sans écraser la ligne');
+    assert.equal(ecritures, 1);
+    assert.equal(resultat.etats.plafond_qf, 'valeur explicite collectée');
+    refuserEcriture = true;
     valeurs[chemin('plafond_qf')] = { '2026-01-01': 1950 };
-    await src.synchroniserParametres(2026);
+    resultat = await src.synchroniserParametres(2026);
+    assert.equal(resultat.enregistree, false);
+    assert.equal(resultat.etats.plafond_qf, 'valeur explicite collectée', 'la recherche ne disparaît pas');
+    assert.doesNotMatch(resultat.erreur, /privé|23505/);
+    const rapportErreur = f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat });
+    assert.doesNotMatch(rapportErreur, /non recherché|vérifier la migration 012/);
+    assert.match(rapportErreur, /Valeurs repérées mais non enregistrées et non utilisées : plafond général QF/);
+    refuserEcriture = false;
+    masquerLecture = true; // même collision, nouveau contenu => révision 2
+    resultat = await src.synchroniserParametres(2026);
+    assert.equal(resultat.enregistree, true);
     assert.equal(ecritures, 2);
+    assert.equal(lignes.a[1].revision, 2);
     assert.equal(lignes.a[0].valeurs.parametres.plafond_qf, 1900, 'révision initiale intacte');
     await f.actualiserRevisions({ transactions: [] });
     assert.equal(f.plafondQF(2026), 1950, 'révision suivante appliquée');

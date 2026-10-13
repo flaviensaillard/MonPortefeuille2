@@ -1718,7 +1718,7 @@
             : 'Barème IR collecté, mais non appliqué (année sans calcul compatible ou relecture indisponible).';
         var p = resultat.parametres, details = '';
         if (p) {
-            var appliques = [], observes = [], manquants = [];
+            var appliques = [], observes = [], manquants = [], nonEnregistres = [];
             var noms = {
                 plafond_qf: 'plafond général QF', decote_base_celibataire: 'décote (personne seule)',
                 decote_base_couple: 'décote (couple)', decote_taux: 'taux de décote',
@@ -1738,6 +1738,7 @@
             Object.keys(PF.fiscalSources.PARAMETRES).forEach(function (nom) {
                 var etat = p.etats && p.etats[nom] || 'non recherché';
                 if (etat !== 'valeur explicite collectée') manquants.push(noms[nom] + ' (' + etat + ')');
+                else if (!p.enregistree) nonEnregistres.push(affiche(nom));
                 else if (p.enregistree && BAREMES[annee] && annee >= 2026 && !revisionActive(annee) &&
                     typeof parametrePartiel(annee, nom) === 'number' &&
                     (nom === 'plafond_qf' || nom === 'crypto_franchise')) appliques.push(affiche(nom));
@@ -1745,9 +1746,11 @@
             });
             details = ' Paramètres explicitement sourcés et appliqués à la simulation indicative : '
                 + (appliques.join(', ') || 'aucun') + '. Valeurs collectées mais non applicables isolément : '
-                + (observes.join(', ') || 'aucune') + '. Aucune valeur explicite : '
+                + (observes.join(', ') || 'aucune') + '. Valeurs repérées mais non enregistrées et non utilisées : '
+                + (nonEnregistres.join(', ') || 'aucune') + '. Aucune valeur explicite : '
                 + (manquants.join(', ') || 'aucune') + '.';
-            if (p.erreur) details += ' Enregistrement des paramètres impossible (vérifier la migration 012 après sauvegarde) : ' + p.erreur + '.';
+            if (p.erreur) details += ' Enregistrement non confirmé : ' + p.erreur
+                + '. Ne rejouez aucune migration pour un conflit de révision.';
         }
         return situation + details + ' Source des valeurs collectées : OpenFisca-France (modèle, non publication officielle). Non vérifiés par ce bouton : formule de décote et plafonds d’application, '
             + 'quotient familial spécial, composition des prélèvements sociaux par catégorie/date, '

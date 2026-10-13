@@ -129,15 +129,18 @@ Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 
 ## Extension des paramètres isolés (branche, 13/10/2026)
 
-**Préparation uniquement : migration 012 non exécutée.** La table 009/010 limite
+**Migration 012 exécutée par le propriétaire le 13/10/2026 (succès communiqué), après le run de sauvegarde/restauration 38396580535 réussi. Ne pas la rejouer.** Avant cela, la table 009/010 limitait
 `source` et `source_url` au barème IR. Le script
 [`migrations/012_collecte_parametres_fiscaux.sql`](../migrations/012_collecte_parametres_fiscaux.sql)
 élargit ces deux contraintes à `openfisca_parametres` sans modifier une seule
-révision existante. Il doit être appliqué **une seule fois** par le propriétaire,
-après sauvegarde vérifiée et avec son accord, avant d'installer/utiliser le nouveau
-bouton. Ne pas rejouer 009, 010, 011 ni le SQL R2 2025. Sans 012, la recherche
-peut retrouver des valeurs mais ne peut pas les enregistrer : l'écran affiche
-l'erreur ; aucun chiffre non enregistré n'est utilisé.
+révision existante. Il a été appliqué **une seule fois** par le propriétaire après la sauvegarde vérifiée.
+Ne pas rejouer 009, 010, 011, 012 ni le SQL R2 2025. L'APK et le SQL sont
+deux opérations distinctes : une erreur d'unicité `23505` signifie qu'une
+révision existe déjà, **pas** que la migration a échoué. La collecte relit
+désormais la dernière révision de cette année/source puis réessaie au plus deux
+fois en cas de conflit, sans modifier ni supprimer une ligne existante. Même
+si l'enregistrement échoue, le bilan montre les feuilles recherchées et distingue
+les valeurs repérées mais non enregistrées (donc non utilisées).
 
 Le clic interroge, pour l'année de revenus choisie, les paramètres scalaires
 suivants d'OpenFisca-France, à partir de
