@@ -347,3 +347,16 @@ def test_calculer_rente_mensuelle_reelle():
     assert abs(res["impot_usd"] - impot_attendu) < 1e-6
     assert abs(res["rente_nette_usd"] - nette_attendue) < 1e-6
     assert abs(res["rente_nette_eur"] - nette_attendue / 1.15) < 1e-6
+
+
+def test_or_physique_option_2092_non_automatique_et_aucun_montant_a_recopier():
+    """Le minimum simulé ne prouve pas que l'option 2092 a été exercée."""
+    etapes = _guide(annee=2025, resultats={"pv_or_physique": {
+        "total_du": 0.0, "regime_retenu": "Plus-value dégressive",
+    }})
+    or_etapes = [e for e in etapes if "2091" in e.formulaire]
+    assert len(or_etapes) == 1
+    assert all(case.montant is None and "2092" in case.comment
+               for case in or_etapes[0].cases)
+    assert not any(case.numero in ("3VP", "3VQ", "3VP / 3VQ")
+                   for e in etapes for case in e.cases)

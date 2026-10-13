@@ -447,32 +447,34 @@ def construire_guide(
         ))
 
     # -----------------------------------------------------------------------
-    # Or physique — 150 VI. Vous n'en détenez pas, mais le régime est piégeux.
+    # Or physique : l'option 2092 n'est JAMAIS automatique, même si le calcul
+    # théorique est inférieur à la taxe de plein droit 2091. Ne pas reporter
+    # le minimum simulé comme un montant ou une case à remplir.
     # -----------------------------------------------------------------------
     or_physique = resultats.get("pv_or_physique")
     if or_physique:
         ordre += 1
         etapes.append(Etape(
             ordre=ordre,
-            formulaire="2042-C",
-            titre="Cessions de métaux précieux — article 150 VI",
+            formulaire="2091-SD / 2092-SD",
+            titre="Cessions de métaux précieux — régime à vérifier",
             obligatoire=True,
-            raison="Vous avez cédé de l'or ou des métaux précieux sous forme physique.",
-            ou="impots.gouv.fr → étape 3 → « Plus-values et gains assimilés ».",
+            raison="Cession d'or physique : l'impôt calculé automatiquement n'est pas un montant déclaratif certifié.",
+            ou="impots.gouv.fr → formulaires 2091-SD (taxe de plein droit) ou 2092-SD (option explicite sous conditions) ; vérifier le dépôt lié à la cession.",
             cases=[Case(
-                formulaire="2042-C",
-                numero="3VP / 3VQ",
-                libelle="Cessions de métaux précieux et d'objets d'art",
-                montant=or_physique.get("total_du"),
+                formulaire="2091-SD / 2092-SD", numero="—",
+                libelle="Déterminer le régime applicable avec justificatifs",
+                montant=None,
                 comment=(
-                    "Régime distinct des valeurs mobilières : taxe forfaitaire "
-                    "de 11,5 % sur le prix de cession, OU impôt sur la "
-                    "plus-value réelle avec abattement de 5 % par année de "
-                    "détention au-delà de la deuxième, exonération totale à "
-                    "22 ans. Le choix se fait case par case."
+                    "La taxe sur métaux précieux est due par défaut. Le régime des "
+                    "plus-values nécessite l'option 2092 et la preuve de la date et "
+                    "du prix d'acquisition, ou de la détention de plus de 22 ans. "
+                    "Ne recopiez PAS le minimum théorique calculé par l'application ; "
+                    "vérifiez le taux PS 2025 et les éventuelles mentions sur 2042-C."
                 ),
+                obligatoire=False,
             )],
-            reference="CGI art. 150 VI et 150 VK",
+            reference="CGI art. 150 VI et 150 VL ; BOI-RPPM-PVBMC-20-20",
         ))
 
     return etapes
