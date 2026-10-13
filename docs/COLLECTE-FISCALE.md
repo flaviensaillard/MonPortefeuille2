@@ -39,6 +39,18 @@ reconnue peut alimenter la simulation. Le code des formules ne se met pas à
 jour tout seul : en cas de changement de régime ou de formule, une nouvelle
 APK et ses tests sont indispensables.
 
+**Retour d'essai de l'APK du 13/10/2026 :** BOFiP 2025 et repas 5,45 € lus,
+mais l'ancienne lecture de l'aide du simulateur déclarait à tort « format
+incompatible » pour l'abattement et la voiture. La [page DGFiP de la
+déclaration 2026](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm)
+mentionne bien les **revenus 2025**, l'abattement salarié **509 / 14 555 €**
+et les cinq lignes du tarif automobile (3 à 7 CV). Le lecteur accepte
+maintenant aussi les espaces, accents et euros encodés en entités HTML et le
+pont natif répare le jeu de caractères absent ou mal déclaré, sans alléger
+la vérification de l'année ni celle des cinq coefficients. Cette correction
+est à confirmer par un nouveau clic sur la prochaine APK ; la R2 2025
+reste prioritaire même si les frais sont collectés.
+
 Les pages du simulateur sont consultées avec `année de déclaration = revenus + 1`.
 Le lecteur exige l'année des revenus et cinq lignes de barème automobile avec
 coefficients cohérents ; les repas sans justificatifs détaillés et les bornes

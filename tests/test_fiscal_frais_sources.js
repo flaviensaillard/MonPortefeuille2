@@ -47,6 +47,17 @@ const src = ctx.PF.fiscalFraisSources, fiscal = ctx.PF.fiscal;
     assert.equal(src.lireRepas(historique, 2023), null);
     assert.equal(src.lireAbatt(historique, 2024).max, 14426);
     assert.equal(src.lireAbatt(historique, 2023), null);
+    // Régression remontée par l'APK : l'aide du simulateur 2026 mentionne
+    // les revenus 2025, avec espaces/euros parfois encodés en entités HTML.
+    const page2025 = htmlKm(2025).replace('Pour les revenus perçus en 2025',
+        'Pour les revenus per&#xE7;us en 2025')
+        .replaceAll('5 000 km', '5&#xA0;000 km')
+        + '<p>Pour les revenus per&#xE7;us en 2025, le minimum de d&#xE9;duction est de 509&#xA0;&#x20AC;,<br> le maximum de 14&#xA0;555&#xA0;&#x20AC;.</p>';
+    assert.deepEqual(Array.from(src.lireKm(page2025, 2025)[5]), [0.636, 0.357, 1395, 0.427]);
+    assert.equal(src.lireAbatt(page2025, 2025).min, 509);
+    assert.equal(src.lireAbatt(page2025, 2025).max, 14555);
+    assert.equal(src.lireKm(page2025, 2026), null, 'déclaration 2026 ≠ revenus 2026');
+    assert.equal(src.lireAbatt(page2025, 2026), null);
     const r = await src.chercher(2025);
     assert.equal(r.valeurs.repas, 5.45);
     assert.equal(r.valeurs.km[7][3], 0.470);

@@ -9,13 +9,25 @@
     var CLE = 'pf2.frais.officiels.v1.';
 
     function nettoyer(html) {
+        // Les aides historiques servent parfois des espaces/euros en entités
+        // hexadécimales (&#xA0;, &#x20AC;), pas seulement en &nbsp;.
+        var entites = { nbsp: ' ', euro: '€', rsquo: '’', eacute: 'é',
+            egrave: 'è', agrave: 'à', ccedil: 'ç', ecirc: 'ê', times: '×', amp: '&' };
         return String(html || '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
             .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ')
-            .replace(/&[a-z]+;|&#\d+;/gi, function (entite) {
-                return ({ '&eacute;': 'é', '&egrave;': 'è', '&agrave;': 'à', '&rsquo;': '’',
-                    '&times;': '×', '&euro;': '€', '&amp;': '&' })[entite.toLowerCase()] || ' ';
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&(?:#x[0-9a-f]+|#\d+|[a-z]+);/gi, function (e) {
+                var key = e.slice(1, -1).toLowerCase();
+                if (key[0] !== '#') return entites[key] || ' ';
+                var cp = key[1] === 'x' ? parseInt(key.slice(2), 16) : parseInt(key.slice(1), 10);
+                return cp > 0 && cp < 0x110000 ? String.fromCodePoint(cp) : ' ';
             }).replace(/\s+/g, ' ').trim();
+    }
+    function preuveAnnee(texte, annee) {
+        // Une conversion de charset ratée ne doit pas faire passer les revenus
+        // 2025 pour « non publiés » : accepter ç, c ou un caractère illisible,
+        // mais exiger la phrase et l'année exacte (pas la déclaration 2025).
+        return new RegExp('Pour les revenus per.{1,3}us en\\s+' + annee + '\\b', 'i').test(texte);
     }
     var PREUVE_REPAS = /Pour l.imposition des revenus\s+\d{4},?\s+la valeur d.un repas pris au foyer est de\s+\d{1,2}[,.]\d{2}\s*€/i;
     function euros(s) { return Number(String(s).replace(/\s/g, '').replace(',', '.')); }
@@ -24,7 +36,7 @@
         var re = new RegExp('Pour l.imposition des revenus\\s+' + annee
             + ',?\\s+la valeur d.un repas pris au foyer est de\\s+(\\d{1,2}[,.]\\d{2})\\s*€', 'i');
         var m = t.match(re);
-        if (!m && annee <= 2024 && new RegExp('Pour les revenus perçus en\\s+' + annee + '\\b', 'i').test(t)) {
+        if (!m && annee <= 2024 && preuveAnnee(t, annee)) {
             m = t.match(/si vous n.avez pas de justifications détaillées, les frais supplémentaires sont évalués à\s+(\d{1,2}[,.]\d{2})\s*€\s+par repas/i);
         }
         var v = m && euros(m[1]);
@@ -32,8 +44,9 @@
     }
     function lireAbatt(html, annee) {
         var t = nettoyer(html);
-        var m = t.match(new RegExp('Pour les revenus perçus en\\s+' + annee
-            + ',\\s+le minimum de déduction est de\\s+([\\d\\s]+)\\s*€,\\s+le maximum de\\s+([\\d\\s]+)\\s*€', 'i'));
+        if (!preuveAnnee(t, annee)) return null;
+        var m = t.match(new RegExp('Pour les revenus per.{1,3}us en\\s+' + annee
+            + ',\\s+le minimum de d.{1,3}duction est de\\s+([\\d\\s]+)\\s*[€¤\uFFFD],\\s+le maximum de\\s+([\\d\\s]+)\\s*[€¤\uFFFD]', 'i'));
         if (!m) return null;
         var min = euros(m[1]), max = euros(m[2]);
         return min >= 100 && min < 1000 && max > 10000 && max < 30000 ? { min: min, max: max } : null;
@@ -42,10 +55,10 @@
         var t = nettoyer(html);
         // Le répertoire /2027 concerne la déclaration 2027, PAS les revenus
         // 2027. Refuser une page 2027 qui contiendrait encore les revenus 2025.
-        if (!new RegExp('Pour les revenus perçus en\\s+' + annee + '\\b', 'i').test(t) ||
+        if (!preuveAnnee(t, annee) ||
             !/Tarif\s*:\s*automobiles/i.test(t) ||
             !/5\s*000\s*km/i.test(t) || !/20\s*000\s*km/i.test(t) ||
-            !/100\s*%\s*électriques[^.]{0,180}20\s*%/i.test(t)) return null;
+            !/100\s*%\s*.{1,4}lectriques[^.]{0,180}20\s*%/i.test(t)) return null;
         var rows = String(html).match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
         var bareme = {};
         rows.forEach(function (row) {
@@ -100,14 +113,20 @@
                 if (!rep.ok || !rep.body) { etats[type] = 'source officielle inaccessible'; return; }
                 var v = type === 'repas' ? lireRepas(rep.body, annee)
                     : type === 'abatt' ? lireAbatt(rep.body, annee) : lireKm(rep.body, annee);
-                if (v === null) { etats[type] = 'millésime absent ou format incompatible'; return; }
+                if (v === null) {
+                    etats[type] = preuveAnnee(nettoyer(rep.body), annee)
+                        ? 'année trouvée, ' + (type === 'km' ? 'table automobile' : 'montants salariés') + ' non reconnus'
+                        : 'année des revenus ' + annee + ' absente ou texte illisible';
+                    return;
+                }
                 etats[type] = 'valeur explicite trouvée';
                 // Ne pas stocker tout le HTML officiel : seuls les extraits ayant
                 // passé le contrôle sont conservés pour revalidation à la lecture.
                 var t = type === 'repas' ? nettoyer(rep.body).match(annee <= 2024
                     ? /si vous n.avez pas de justifications détaillées, les frais supplémentaires sont évalués à\s+\d{1,2}[,.]\d{2}\s*€\s+par repas/i : PREUVE_REPAS)
-                    : type === 'abatt' ? nettoyer(rep.body).match(new RegExp('Pour les revenus perçus en\\s+' + annee
-                        + ',\\s+le minimum de déduction est de\\s+[\\d\\s]+\\s*€,\\s+le maximum de\\s+[\\d\\s]+\\s*€', 'i'))
+                    : type === 'abatt' ? [ 'Pour les revenus perçus en ' + annee
+                        + ', le minimum de déduction est de ' + v.min
+                        + ' €, le maximum de ' + v.max + ' €' ]
                     : String(rep.body).match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi);
                 resultats[type] = { url: urls[type], extrait: type === 'repas'
                     ? (annee <= 2024 ? 'Pour les revenus perçus en ' + annee + '. ' : '') + (t && t[0])

@@ -240,16 +240,20 @@ public class NativeBridge {
                 }
             }
             InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            // Les anciennes aides DGFiP peuvent encore déclarer ISO-8859-1
-            // ou Windows-1252 ; ne pas déformer les accents des preuves.
-            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+            // Les aides du simulateur sont des pages historiques : leur jeu de
+            // caractères peut ne pas correspondre à l'UTF-8 par défaut. Ne
+            // changer le décodage QUE sur cet hôte public (pas sur Supabase).
             String contentType = conn.getContentType();
-            if (u.getHost().endsWith(".impots.gouv.fr") && contentType != null) {
+            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+            boolean aideDgfip = "simulateur-ir-ifi.impots.gouv.fr".equalsIgnoreCase(u.getHost());
+            if (aideDgfip && contentType != null) {
                 String ct = contentType.toLowerCase(Locale.US);
-                if (ct.contains("charset=iso-8859-1")) charset = StandardCharsets.ISO_8859_1;
-                else if (ct.contains("charset=windows-1252")) charset = java.nio.charset.Charset.forName("windows-1252");
+                if (ct.contains("iso-8859-15"))
+                    charset = java.nio.charset.Charset.forName("ISO-8859-15");
+                else if (ct.contains("iso-8859-1") || ct.contains("latin1") || ct.contains("windows-1252"))
+                    charset = java.nio.charset.Charset.forName("windows-1252");
             }
-            String payload = is == null ? "" : readAll(is, charset);
+            String payload = is == null ? "" : readAll(is, charset, aideDgfip);
             JSONObject res = new JSONObject();
             res.put("ok", status >= 200 && status < 300);
             res.put("status", status);
@@ -536,15 +540,30 @@ public class NativeBridge {
         return -1;
     }
 
-    private static String readAll(InputStream is, java.nio.charset.Charset charset) throws Exception {
-        BufferedReader r = new BufferedReader(new InputStreamReader(is, charset));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = r.readLine()) != null) {
-            sb.append(line).append('\n');
+    private static String readAll(InputStream is, java.nio.charset.Charset charset,
+                                  boolean aideDgfip) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] bloc = new byte[8192];
+        int n;
+        try {
+            while ((n = is.read(bloc)) != -1) bytes.write(bloc, 0, n);
+        } finally {
+            is.close();
         }
-        r.close();
-        return sb.toString();
+        byte[] brut = bytes.toByteArray();
+        String texte = new String(brut, charset);
+        // Un serveur historique peut omettre son charset. L'UTF-8 invalide
+        // remplace alors les accents/€ par U+FFFD et détruit les preuves de
+        // millésime : relecture Windows-1252, seulement sur l'aide DGFiP.
+        if (aideDgfip && charset.equals(StandardCharsets.UTF_8) && texte.indexOf('\uFFFD') >= 0)
+            texte = new String(brut, java.nio.charset.Charset.forName("windows-1252"));
+        else if (aideDgfip && !charset.equals(StandardCharsets.UTF_8) && texte.contains("Ã")) {
+            // En cas d'en-tête latin erroné sur du vrai UTF-8, ne pas
+            // conserver le mojibake « perÃ§us / â‚¬ ».
+            String utf8 = new String(brut, StandardCharsets.UTF_8);
+            if (utf8.indexOf('\uFFFD') < 0) texte = utf8;
+        }
+        return texte;
     }
 
     @JavascriptInterface
