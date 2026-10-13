@@ -25,7 +25,8 @@ let erreurReseau = false;
 let enAttente = null;
 let requetes = [];
 const contexte = vm.createContext({ PF: {
-    util: {}, ui: {}, modele: { classeDe: ticker => ticker === 'LINGOT' ? 'or_physique' : 'or' },
+    util: {}, ui: {}, modele: { classeDe: ticker => ticker === 'LINGOT' ? 'or_physique' :
+        (ticker === 'BTC-USD' ? 'crypto' : 'or') },
     net: { auth: { utilisateur: () => ({ id: compte }) },
         supabase: { select: (table, query) => {
             requetes.push({ table, query });
@@ -75,8 +76,13 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     p.abattement_10.plafond += 10;
     p.forfait_repas += 1;
     p.bareme_km['5'][0] += .1;
-    p.quotient_familial.plafond_general_par_demi_part += 1;
+    p.csg_deductible = .07;
     p.franchise_crypto = 310;
+    const txsCrypto = [
+        {ticker: 'BTC-USD', type: 'achat', date: '2025-01-01', quantite: 1, cours: 200, frais: 0, devise: 'EUR'},
+        {ticker: 'BTC-USD', type: 'vente', date: '2025-09-01', quantite: 1, cours: 307, frais: 0, devise: 'EUR'}
+    ];
+    assert.equal(f.detail2086(txsCrypto, 2025, {}, {}).exonere_305, false);
     lignes = [faux(), active(p)];
     assert.equal(await f.actualiserRevisions({transactions: []}), 2);
     assert.equal(f.revisionActive(2025), true);
@@ -99,6 +105,13 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     assert.equal(pf.ps_titres, 190);
     assert.equal(pf.ps_interets, 180);
     assert.equal(pf.pfu.ir, 256);
+    assert.equal(pf.bareme.csg_deductible, 70);
+    assert.equal(f.detail2086(txsCrypto, 2025, {}, {}).exonere_305, true);
+    assert.equal(f.impotRevenu(20000, 1, 2025, 'Célibataire').decote,
+        Math.floor(p.bareme.decote_base_celibataire - f.impotRevenu(20000, 1, 2025, 'Célibataire').impot_brut * .4525 + .5));
+    const plafond = f.impotRevenu(180000, 2, 2025, 'Marié(e) / Pacsé(e)').impot_brut
+        - f.impotRevenu(180000, 3, 2025, 'Marié(e) / Pacsé(e)').impot_brut;
+    assert.equal(plafond, 2 * p.quotient_familial.plafond_general_par_demi_part);
     assert.equal(f.comparerOptionsFoyer(60000, 1, 2025, 'Célibataire', 1000, 1000, true, 1000)
         .scenarios[0].ps_total, 560);
     assert.deepEqual(json(f.snapshotConstantesCode(2025)), reference,
