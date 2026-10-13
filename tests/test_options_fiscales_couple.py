@@ -106,6 +106,7 @@ def test_guide_declaration_ne_separe_pas_les_choix_quand_crypto_presente():
 def test_parite_python_javascript_couple_maries_avec_precompte_et_quatre_options():
     racine = Path(__file__).resolve().parents[1]
     donnees = [
+        [2025, 18_000, 2, 100, 0, None, 100],  # IR global sous 61 €
         [2025, 18_000, 2, 15_000, 0, None, 100],
         [2025, 20_000, 2, 100, 0, None, 20_000],
         [2025, 50_000, 3, 1000, 1000, True, 1000],
