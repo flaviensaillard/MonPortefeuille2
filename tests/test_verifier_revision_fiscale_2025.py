@@ -100,6 +100,19 @@ def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
     assert ponctuel["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
     assert "rcm_hors_portefeuille_non_confirmes" not in ponctuel[
         "proposition_metadonnees_apres_migration_011_non_appliquee"]["perimetre_validation"]["regles_exclues"]
+    tous_flux_absents = prep.simuler_ligne_2025(
+        aucun_autre_rcm=True, aucune_autre_cession_crypto=True,
+        aucune_autre_cession_titres=True,
+    )
+    p = tous_flux_absents["portee_calcul_2025"]
+    assert tous_flux_absents["perimetre_personnel_hors_parametres_fiscaux"]["cessions_titres_hors_portefeuille_2025"] == "absence_confirmee_pour_cette_simulation"
+    assert p["assiette_2op_hors_portefeuille_sans_autres_flux_confirmes"] is True
+    assert p["assiette_2op_foyer_complete_confirmee"] is False  # revenus du portefeuille non inventoriés
+    assert p["plus_value_2086_complete_confirmee"] is False  # avoirs historiques ailleurs possibles
+    assert tous_flux_absents["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
+    assert tous_flux_absents["proposition_metadonnees_apres_migration_011_non_appliquee"]["actif"] is False
+    assert "cessions_titres_hors_portefeuille_non_confirmees" not in tous_flux_absents[
+        "proposition_metadonnees_apres_migration_011_non_appliquee"]["perimetre_validation"]["regles_exclues"]
     assert prep.simuler_ligne_2025()["perimetre_personnel_hors_parametres_fiscaux"]["rcm_hors_portefeuille_2025"] == "inconnu"
     with pytest.raises(ValueError, match="booléennes"):
         prep.simuler_ligne_2025(aucun_autre_rcm="non")
