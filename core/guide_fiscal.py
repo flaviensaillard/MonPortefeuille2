@@ -279,13 +279,16 @@ def construire_guide(
             cases.append(Case(
                 formulaire="2042-C",
                 numero="3AN",
-                libelle="Plus-value — mais le seuil de 305 € n'est pas franchi",
+                libelle="Plus-value — seuil de 305 € à vérifier sur tout le foyer",
                 montant=None,
                 comment=(
                     f"Vous avez cédé {total_cessions:,.2f} € et dégagé "
                     f"{crypto.plus_value_brute:,.2f} € de gain, mais le total "
                     f"cédé ne dépasse pas {fb.CRYPTO_FRANCHISE_CESSIONS:.0f} € : "
-                    "la plus-value est exonérée. La 2086 se dépose quand même."
+                    "exonération POSSIBLE seulement si le total des cessions "
+                    "du foyer reste sous ce seuil. Vérifiez aussi les cessions "
+                    "éventuelles du conjoint hors de ce portefeuille avant de "
+                    "laisser 3AN vide ; la 2086 reste à vérifier."
                     .replace(",", " ")
                 ),
                 obligatoire=False,
@@ -294,14 +297,15 @@ def construire_guide(
             cases.append(Case(
                 formulaire="2042-C",
                 numero="3AN / 3BN",
-                libelle="Rien à reporter — seuil de 305 € non franchi",
+                libelle="Report conditionnel — vérifier le seuil de 305 € du foyer",
                 montant=None,
                 comment=(
                     f"Le total de vos prix de cession ({total_cessions:,.2f} €) "
                     f"ne dépasse pas {fb.CRYPTO_FRANCHISE_CESSIONS:.0f} € : la "
-                    "plus-value est exonérée et les cases 3AN/3BN restent vides. "
-                    "La 2086 se dépose quand même — c'est elle qui prouve que "
-                    "vous êtes sous le seuil.".replace(",", " ")
+                    "les cases 3AN/3BN restent vides seulement si toutes les "
+                    "cessions du foyer, y compris éventuelles hors de ce "
+                    "portefeuille, restent sous ce seuil. Vérifier la 2086."
+                    .replace(",", " ")
                 ),
                 obligatoire=False,
             ))

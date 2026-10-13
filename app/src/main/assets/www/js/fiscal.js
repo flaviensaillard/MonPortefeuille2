@@ -894,6 +894,9 @@
 
         // --- 1. Paramètres fiscaux
         var couple = estCouple(r.statutFiscal);
+        out += '<div class="info">Titres et cessions : ce portefeuille appartient uniquement à son propriétaire. '
+            + (couple ? 'Le mariage ne rend pas le conjoint codétenteur ; l’IR utilise cependant les revenus saisis pour les deux déclarants. ' : '')
+            + 'Les options 2OP/3CN et le seuil de cessions crypto concernent tout le foyer : vérifier tout autre revenu ou cession éventuel hors de ce portefeuille, sans en présumer l’existence.</div>';
         var f1 = fraisReelsDeclarant(r, 1, annee);
         var f2 = couple ? fraisReelsDeclarant(r, 2, annee) : null;
 
@@ -1121,8 +1124,9 @@
             U.eur(t2074.case_3vh, { dec: 0 }), 'Inscrire en POSITIF, sans signe moins.']);
         if (t2086.cessions.length) {
             if (t2086.exonere_305) cases2042.push(['3AN / 3BN', 'Plus ou moins-value sur actifs numériques',
-                'LAISSER VIDE (exonéré ≤ 305 €)',
-                'Total des cessions : ' + U.eur(t2086.total_cessions_213, { dec: 0 }) + '.']);
+                'À VÉRIFIER (seuil du foyer ≤ 305 €)',
+                'Cessions de ce portefeuille : ' + U.eur(t2086.total_cessions_213, { dec: 0 })
+                + ' ; vérifier aussi toute autre cession du foyer avant de laisser les cases vides.']);
             else if (t2086.case_3an > 0) cases2042.push(['3AN', 'Plus-value imposable sur actifs numériques',
                 U.eur(t2086.case_3an, { dec: 0 }),
                 'Total des cessions > 305 € — case 3AN après le formulaire 2086.']);
@@ -1284,10 +1288,11 @@
             + U.eur(t.plus_value_globale_224, { dec: 0 }) + '</b>.</div>';
 
         if (t.exonere_305) {
-            out += '<div class="ok-vert">Franchise de 305 € (CGI art. 150 VH bis) : le total de vos prix de '
-                + 'cession (' + U.eur(t.total_cessions_213, { dec: 0 }) + ') ne dépasse pas le seuil. Vous êtes '
-                + '<b>exonéré</b> — laissez les cases 3AN et 3BN vides, mais déposez quand même l’annexe 2086 : '
-                + 'c’est elle qui prouve l’exonération.</div>';
+            out += '<div class="info">Franchise de 305 € à confirmer sur tout le foyer : les cessions de '
+                + 'ce portefeuille (' + U.eur(t.total_cessions_213, { dec: 0 }) + ') restent sous le seuil. '
+                + 'Ce total ne suffit pas à prouver l’exonération du foyer fiscal : vérifiez aussi les cessions '
+                + 'éventuelles du conjoint hors de ce portefeuille. Laissez 3AN/3BN vides seulement si le '
+                + 'seuil du foyer est respecté ; vérifiez également l’annexe 2086.</div>';
         } else {
             out += '<div class="info">Seuil de 305 € franchi : la plus-value est imposable dès le premier euro. '
                 + 'Ce seuil porte sur le <b>total des prix de cession</b> de l’année, ce n’est pas un abattement.<br>'

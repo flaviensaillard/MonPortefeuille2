@@ -73,6 +73,13 @@ def test_simulation_2025_exclut_or_physique_et_ne_peut_pas_etre_inseree():
     assert simulation["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
     assert (ligne["annee_revenus"], ligne["revision"]) == (2025, 2)
     assert ligne["source_ref"] is None and "user_id" not in ligne
+    scope = simulation["perimetre_personnel_hors_parametres_fiscaux"]
+    assert scope["titulaire_des_titres_de_ce_portefeuille"] == "proprietaire_du_compte_seul"
+    assert scope["foyer_pour_la_declaration_ir"] == "marie_declaration_commune"
+    assert scope["autres_revenus_mobiliers_ou_cessions_du_conjoint"] == "inconnus_non_presumes_nuls"
+    assert "titulaire_des_titres_de_ce_portefeuille" not in ligne["parametres"]
+    meta = simulation["proposition_metadonnees_apres_migration_011_non_appliquee"]
+    assert meta["statut_validation"] == "brouillon" and meta["actif"] is False
     assert "or_physique" not in ligne["parametres"]
     assert "pas" not in ligne["parametres"]
     assert ligne["parametres"]["prelevements_sociaux_par_categorie"]["plus_values_titres"] == .186

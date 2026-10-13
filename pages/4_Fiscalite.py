@@ -137,6 +137,14 @@ with st.expander("🤖 Prompt à copier-coller dans l'IA pour générer le nouve
 if annee == 2026:
     st.warning("Les barèmes et la décote pour les revenus 2026 sont provisoires : déclaration 2027 à revérifier.")
 st.warning("Le quotient familial ne couvre que le plafonnement général. Si vous êtes parent isolé ou bénéficiez d'une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP de ce simulateur.")
+st.info(
+    "**Périmètres distincts :** les titres et cessions chargés ici sont ceux de votre "
+    "portefeuille personnel, dont vous êtes le seul propriétaire. Votre mariage ne rend "
+    "pas votre épouse codétentrice de ces titres. Le calcul de l'IR utilise en revanche "
+    "les salaires saisis pour les deux déclarants du foyer. Les options 2OP/3CN et le "
+    "seuil de cessions crypto s'apprécient à l'échelle du foyer : vérifiez séparément "
+    "tout autre revenu ou toute autre cession éventuels du conjoint, sans en présumer l'existence."
+)
 
 # ---------------------------------------------------------------------------
 # 1. Paramètres du foyer : Situation familiale & Déclaration de base (repliables)
@@ -596,8 +604,8 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             cases_2042.append({
                 "Case": "3AN / 3BN",
                 "Rubrique": "Plus ou moins-value sur actifs numériques",
-                "À inscrire": "LAISSER VIDE (Exonéré ≤ 305 €)",
-                "Indication": f"Total des cessions = {ui.eur(d2086['total_cessions_213'])} ≤ 305 €.",
+                "À inscrire": "À vérifier : vide seulement si toutes les cessions du foyer ≤ 305 €",
+                "Indication": f"Cessions de ce portefeuille = {ui.eur(d2086['total_cessions_213'])} ; autres cessions éventuelles du foyer inconnues du simulateur.",
             })
         elif d2086["case_3an"] > 0:
             cases_2042.append({
@@ -751,10 +759,13 @@ with st.expander(f"📁 Formulaire 2086 (Cryptomonnaies — Art. 150 VH bis — 
             f"Résultat net global (cumul lignes `224`) = **`{ui.eur(d2086['plus_value_globale_224'])}`**."
         )
         if d2086["exonere_305"]:
-            st.success(
-                f"✅ **Franchise de 305 € (CGI art. 150 VH bis) :** Le total de vos prix de cession en {annee} "
-                f"(`{ui.eur(d2086['total_cessions_213'])}`) ne dépasse pas **305 €**. Vous êtes **exonéré** : "
-                "laissez les cases `3AN` et `3BN` vides, mais remplissez quand même l'annexe **2086** ci-dessous."
+            st.warning(
+                f"**Franchise de 305 € à confirmer sur tout le foyer :** les cessions de ce "
+                f"portefeuille en {annee} (`{ui.eur(d2086['total_cessions_213'])}`) ne dépassent "
+                "pas 305 €. Ce seul total ne prouve pas l'exonération du foyer fiscal : "
+                "vérifiez d'éventuelles cessions extérieures au portefeuille, y compris du "
+                "conjoint. Ne laissez 3AN/3BN vides que si le seuil du foyer est bien respecté ; "
+                "vérifiez également l'annexe 2086."
             )
         elif d2086["case_3an"] > 0:
             st.info(

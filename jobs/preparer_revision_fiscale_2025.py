@@ -147,7 +147,7 @@ def construire_brouillon() -> dict:
             "bareme_km": "coefficients_recoupes_conditions_et_portee_non_exhaustives",
             "regles_km": "tranches_et_maj_electrique_recoupees_BOFiP_conditions_personnelles_non_exhaustives",
             "franchise_crypto": "seuil_confirme_DGFiP_conditions_a_verifier_selon_foyer",
-            "options_2op_3cn": "testees_pour_foyer_marie_sur_seules_assiettes_saisies",
+            "options_2op_3cn": "testees_pour_foyer_marie_sur_titres_du_seul_proprietaire_et_revenus_saisis_autres_revenus_du_foyer_inconnus",
             "etc_or_igln": "classe_or_du_code_routage_titres_2074_verifie_localement_sous_reserve_de_la_qualification_du_produit",
             "or_physique": "hors_portefeuille_et_exclu_des_parametres_candidats_non_verifie_pour_d_autres_utilisateurs",
             "pas": "estimation_sur_salaires_non_equivalente_au_taux_DGFiP_non_exportee_ni_activable",
@@ -178,6 +178,20 @@ def simuler_ligne_2025() -> dict:
     return {
         "simulation_uniquement": True,
         "statut_validation": "incomplet_ne_pas_inserer_ni_activer",
+        "perimetre_personnel_hors_parametres_fiscaux": {
+            "titulaire_des_titres_de_ce_portefeuille": "proprietaire_du_compte_seul",
+            "foyer_pour_la_declaration_ir": "marie_declaration_commune",
+            "autres_revenus_mobiliers_ou_cessions_du_conjoint": "inconnus_non_presumes_nuls",
+        },
+        "proposition_metadonnees_apres_migration_011_non_appliquee": {
+            "statut_validation": "brouillon",
+            "perimetre_validation": {
+                "couverture": "aucune_pour_activation",
+                "annee_revenus": ANNEE,
+                "regles_exclues": ["or_physique", "pas_officiel", "autres_revenus_du_foyer_non_renseignes"],
+            },
+            "actif": False,
+        },
         "champs_ligne_envisagee": {
             "annee_revenus": ANNEE,
             "revision": 2,  # sous réserve de relecture immédiatement avant écriture
@@ -191,6 +205,7 @@ def simuler_ligne_2025() -> dict:
             "aucun statut validation/activation dans la table ni lecteur sûr dans l'APK",
             "paramètres or physique exclus ; une publication générale serait trompeuse",
             "PAS couple = estimation sur salaires, non un taux officiel activable",
+            "autres revenus ou cessions du foyer inconnus : le fait d'être seul propriétaire de ce portefeuille ne les rend pas nuls",
             "dividendes, plafonds QF spéciaux et situations personnelles non couverts",
             "relecture/backup récents, contrôle final et accord distinct d'écriture requis",
         ],

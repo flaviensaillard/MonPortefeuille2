@@ -152,11 +152,13 @@ class TestCrypto:
                           exonere_par_franchise=True)
         etapes = _guide(resultats={"pv_crypto": r})
         assert any(e.formulaire == "2086" for e in etapes), "la 2086 a disparu"
-        # Le gain existe mais reste exonere : la case 3AN est citee pour dire
-        # qu'il n'y a RIEN a y mettre, et elle n'est pas obligatoire.
+        # Sur ce portefeuille le seuil n'est pas franchi, mais le foyer peut
+        # avoir d'autres cessions : aucune exonération globale n'est affirmée.
         case = next(c for c in _cases(etapes, "2042-C") if c.numero == "3AN")
         assert case.montant is None
         assert case.obligatoire is False
+        assert "foyer" in case.comment and "conjoint" in case.comment
+        assert "seulement si" in case.comment
 
     def test_moins_value_va_en_3bn_en_positif(self):
         r = _FauxResultat(-300.0, 0.0, total_cessions=900.0,
