@@ -85,6 +85,14 @@ de certains gains 2025. L'import reste **non vérifié** ; aucune révision impo
 ne doit être activée automatiquement pour les calculs sur la seule foi de cette
 reprise.
 
+**Préparation locale ultérieure (13/10/2026) :** voir
+[`REVISION-FISCALE-2025-PREPARATION.md`](REVISION-FISCALE-2025-PREPARATION.md)
+pour le brouillon d'une éventuelle révision 2 de **2025 uniquement**.
+`python jobs/preparer_revision_fiscale_2025.py` génère un inventaire hors ligne
+avec différences attendues et règles non auditées ; ce n'est ni une simulation
+de lecture Supabase, ni une ligne publiable, ni une sauvegarde. Aucune écriture
+Supabase n'a été effectuée pendant cette préparation.
+
 ## Collecte sur le téléphone (version future, pas APK 2.2.1 installée)
 
 Le bouton « Chercher les données fiscales disponibles » lit le barème IR sur

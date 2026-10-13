@@ -211,8 +211,8 @@ class TestOrPhysique:
         assert tax.abattement_or_physique(22) == pytest.approx(1.0)
         assert tax.abattement_or_physique(30) == pytest.approx(1.0)
 
-    def test_deux_regimes_et_le_plus_favorable(self):
-        """La v1 ne connaissait que le régime des valeurs mobilières (47,2 %)."""
+    def test_deux_regimes_comparaison_theorique_non_automatique(self):
+        """2092 et justificatifs requis : le minimum numérique n'est pas dû de plein droit."""
         lignes = [{
             "actif": "OR_PHYS", "date": dt.date(2025, 6, 1), "quantite": 1,
             "prix_cession_eur": 20_000.0, "cout_acquisition_eur": 10_000.0,
@@ -226,9 +226,10 @@ class TestOrPhysique:
         # Régime PV : 36,2 % de (10 000 × 0,60) = 2 172
         assert r["abattement_duree"] == pytest.approx(0.40)
         assert r["regime_plus_value"] == pytest.approx(2_172.0)
-        # Le régime PV est retenu : 2 172 < 2 300.
+        # Le minimum numérique NE vaut pas exercice de l'option 2092.
         assert r["regime_retenu"] == "Plus-value dégressive"
         assert r["total_du"] == pytest.approx(2_172.0)
+        assert "non automatique" in r["avertissement"] and "2092" in r["avertissement"]
 
     def test_exoneration_a_22_ans(self):
         lignes = [{
@@ -237,7 +238,8 @@ class TestOrPhysique:
             "date_acquisition": dt.date(2000, 1, 1), "sens": "vente",
         }]
         r = tax.pv_or_physique(lignes, 2025)
-        assert r["total_du"] == pytest.approx(0.0)
+        assert r["total_du"] == pytest.approx(0.0)  # théorique, preuves de détention nécessaires
+        assert "2092" in r["avertissement"]
 
     def test_or_etc_reste_au_regime_titres(self):
         """Un ETC n'est PAS de l'or physique : il reste en 150-0 A."""

@@ -227,6 +227,51 @@
         };
     }
 
+    /* 2OP (titres + RCM) et 3CN (crypto) : options indépendantes, mais IR
+       progressif calculé conjointement sur les assiettes sélectionnées. */
+    function comparerOptionsFoyer(revenuSalaires, parts, annee, statut, pvTitres, interets, precomptes, pvCrypto) {
+        var pv = Math.max(0, U.num(pvTitres, 0));
+        var rcm = Math.max(0, U.num(interets, 0));
+        var crypto = Math.max(0, U.num(pvCrypto, 0));
+        if (rcm > 0 && typeof precomptes !== 'boolean')
+            throw new Error('Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays du courtier ne suffit pas.');
+        var irSalaires = impotRevenu(revenuSalaires, parts, annee, statut).impot_net;
+        var psTitres = pv * tauxPS(annee);
+        var psInterets = rcm ? rcm * tauxPSRevenuMobilier(annee, precomptes) : 0;
+        var psCrypto = crypto * tauxPS(annee);
+        var psTotal = psTitres + psInterets + psCrypto;
+        var psDeja = precomptes ? psInterets : 0;
+        var scenarios = [];
+        var opChoix = pv + rcm > 0 ? [false, true] : [false];
+        var cnChoix = crypto > 0 && annee >= 2023 ? [false, true] : [false];
+        opChoix.forEach(function (op) {
+            cnChoix.forEach(function (cn) {
+                var csgPayee = op && precomptes ? rcm * CSG_DEDUCTIBLE : 0;
+                var revenuBareme = revenuSalaires + (op ? pv + rcm : 0) + (cn ? crypto : 0) - csgPayee;
+                var irBareme = impotRevenu(revenuBareme, parts, annee, statut).impot_net;
+                var irForfait = IR_FORFAITAIRE * ((op ? 0 : pv + rcm) + (cn ? 0 : crypto));
+                var total = irBareme + irForfait + psTotal;
+                scenarios.push({
+                    cocher_2op: op, cocher_3cn: cn,
+                    ir_bareme: irBareme, ir_forfaitaire: irForfait,
+                    ps_titres: psTitres, ps_interets: psInterets, ps_crypto: psCrypto,
+                    ps_total: psTotal, ps_deja_precomptes: psDeja,
+                    ps_restants: psTotal - psDeja, csg_deductible_annee: csgPayee,
+                    impot_total_foyer: total, cout_capital: total - irSalaires
+                });
+            });
+        });
+        var retenu = scenarios.reduce(function (best, s) {
+            return s.impot_total_foyer < best.impot_total_foyer ? s : best;
+        }, scenarios[0]);
+        return {
+            scenarios: scenarios, retenu: retenu,
+            economie_vs_pfu: scenarios[0].impot_total_foyer - retenu.impot_total_foyer,
+            assiette_2op: pv + rcm, assiette_3cn: annee >= 2023 ? crypto : 0,
+            limite: 'Estimation sur les seuls revenus saisis ; 2OP est globale pour tous les RCM et gains mobiliers du foyer. Vérifiez les autres revenus et la déclaration officielle.'
+        };
+    }
+
     /* Taux de prélèvement à la source (CGI art. 204 H & 204 M). */
     function tauxPAS(revenuNet, parts, annee, statut, declarant) {
         var foyer = impotRevenu(revenuNet, parts, annee, statut);
@@ -679,11 +724,9 @@
     }
 
     /* Simulation complète du foyer. Portage de tax.simuler_foyer_complet :
-       mêmes agrégats, mêmes arrondis, mêmes taux de prélèvement à la source
-       individualisés (CGI art. 204 M) — le conjoint aux revenus les plus
-       faibles est calculé en célibataire sur la moitié des parts, l'autre
-       supporte le solde, de sorte que la somme des deux égale l'impôt du
-       foyer. */
+       mêmes agrégats et arrondis. Les taux de PAS affichés sont des estimations
+       simplifiées sur salaires, pas les taux individualisés transmis par la DGFiP
+       (CGI art. 204 M : revenus communs, crédits et arrondis non reconstruits). */
     function simulerFoyer(o) {
         var annee = o.annee;
         var couple = estCouple(o.statut);
@@ -717,9 +760,11 @@
             : null;
 
         var pvCryptoPos = Math.max(0, U.num(o.pvCryptoImposable, 0));
-        var impotCrypto = pvCryptoPos * tauxPFU(annee);
-        var impotCapital = (arbitrage ? Math.min(arbitrage.pfu.total, arbitrage.bareme.total) : 0) + impotCrypto;
-        var impotTotal = irSalaires.impot_net + impotCapital;
+        var impotCrypto = pvCryptoPos * tauxPFU(annee); // PFU de référence, pas retenu si 3CN
+        var options = comparerOptionsFoyer(revNetSalaires, o.parts, annee, o.statut,
+            pvActionsPos, interetsPos, o.interetsPrecomptes, pvCryptoPos);
+        var impotCapital = options.retenu.cout_capital;
+        var impotTotal = options.retenu.impot_total_foyer;
         var tauxMoyenSalaires = (sal1 + sal2) > 0 ? irSalaires.impot_net / (sal1 + sal2) : 0;
 
         var tauxPas1 = tauxMoyenSalaires, tauxPas2 = 0;
@@ -763,8 +808,8 @@
             interets_etrangers: interetsPos, pays: o.pays || '—',
             case_2tr: interetsPos > 0 ? Math.round(interetsPos) : null,
             revenu_net_imposable_salaires: U.arrondi(revNetSalaires, 2),
-            ir_salaires: irSalaires, arbitrage: arbitrage,
-            cocher_2op: !!(arbitrage && arbitrage.choix === 'Barème progressif'),
+            ir_salaires: irSalaires, arbitrage: arbitrage, options_fiscales: options,
+            cocher_2op: options.retenu.cocher_2op, cocher_3cn: options.retenu.cocher_3cn,
             impot_crypto: impotCrypto, impot_capital_retenu: impotCapital,
             impot_total_foyer: impotTotal, taux_moyen_salaires: tauxMoyenSalaires,
             taux_pas_foyer: tauxMoyenSalaires, taux_pas_1: tauxPas1, taux_pas_2: tauxPas2
@@ -1063,9 +1108,12 @@
         }
         if (sim.case_2tr) cases2042.push(['2TR', 'Intérêts et produits de placement à revenu fixe',
             U.eur(sim.case_2tr, { dec: 0 }), 'Reporté depuis la ligne 252 du formulaire 2047.']);
-        if (sim.arbitrage) cases2042.push(['2OP', 'Option globale pour le barème progressif',
-            sim.cocher_2op ? '☑ À COCHER' : '☐ LAISSER DÉCOCHÉE',
-            sim.arbitrage.choix + ' plus avantageux (écart : ' + U.eur(sim.arbitrage.gain, { dec: 0 }) + ').']);
+        if (sim.options_fiscales.assiette_2op > 0) cases2042.push(['2OP', 'Option globale titres et revenus mobiliers (indépendante de 3CN)',
+            sim.cocher_2op ? '☑ À ENVISAGER' : '☐ NON RETENUE selon simulation',
+            'Estimation sur les seules assiettes saisies : vérifier tous les revenus mobiliers du foyer.']);
+        if (sim.options_fiscales.assiette_3cn > 0) cases2042.push(['3CN', 'Option barème des gains crypto privés (indépendante de 2OP)',
+            sim.cocher_3cn ? '☑ À ENVISAGER' : '☐ NON RETENUE selon simulation',
+            'Option sur tous les gains crypto privés du foyer ; vérifier la déclaration 2086.']);
         if (t2074.case_3vg > 0) cases2042.push(['3VG', 'Plus-value nette imposable de cession de valeurs mobilières',
             U.eur(t2074.case_3vg, { dec: 0 }),
             'Calcul : ' + U.eur(t2074.ligne_905, { dec: 0 }) + ' − ' + U.eur(t2074.ligne_913, { dec: 0 }) + '.']);
@@ -1272,7 +1320,27 @@
         var out = '';
 
         // --- Arbitrage PFU / barème
-        if (sim.arbitrage) {
+        if (sim.options_fiscales.assiette_3cn > 0) {
+            var options = sim.options_fiscales;
+            out += '<div class="card"><div class="lbl">Options distinctes : 2OP (titres/intérêts) et 3CN (crypto)</div>'
+                + '<div class="st">La 3CN est expresse et irrévocable pour tous les gains crypto privés du foyer, indépendante de 2OP ; chaque combinaison recalcule l’impôt progressif commun.</div>'
+                + '<div style="overflow-x:auto"><table class="tableau compact" style="min-width:520px"><tr><th>2OP</th><th>3CN</th><th>IR barème</th><th>IR forfait</th><th>PS annuels</th><th>Total annuel</th></tr>'
+                + options.scenarios.map(function (s) {
+                    return '<tr><td>' + (s.cocher_2op ? '☑' : '☐') + '</td><td>' + (s.cocher_3cn ? '☑' : '☐')
+                        + '</td><td>' + U.eur(s.ir_bareme, { dec: 0 })
+                        + '</td><td>' + U.eur(s.ir_forfaitaire, { dec: 0 })
+                        + '</td><td>' + U.eur(s.ps_total, { dec: 0 })
+                        + '</td><td>' + U.eur(s.impot_total_foyer, { dec: 0 }) + '</td></tr>';
+                }).join('') + '</table></div>'
+                + '<div class="info">Sur les revenus saisis : 2OP ' + (sim.cocher_2op ? 'à envisager' : 'non retenue')
+                + ', 3CN ' + (sim.cocher_3cn ? 'à envisager' : 'non retenue')
+                + ' ; écart contre les deux forfaits : ' + U.eur(options.economie_vs_pfu, { dec: 0 }) + '. '
+                + UI.h(options.limite) + '</div>'
+                + '<div class="st">PS déjà précomptés sur intérêts : '
+                + U.eur(options.retenu.ps_deja_precomptes, { dec: 0 })
+                + ' ; PS restant à acquitter : ' + U.eur(options.retenu.ps_restants, { dec: 0 })
+                + '. Aucun acompte d’IR déjà retenu ni déduction future de CSG n’est reconstitué.</div></div>';
+        } else if (sim.arbitrage) {
             var a = sim.arbitrage;
             out += '<div class="card">'
                 + '<div class="lbl">Flat tax (PFU) ou barème progressif ?</div>'
@@ -1292,8 +1360,8 @@
                 + '<div class="' + (sim.cocher_2op ? 'info' : 'ok-vert') + '" style="margin-top:10px">'
                 + 'Le plus favorable : <b>' + UI.h(a.choix) + '</b> — écart ' + U.eur(a.gain, { dec: 0 }) + '. '
                 + (sim.cocher_2op
-                    ? 'Cochez la case <b>2OP</b> : l’option est globale et court jusqu’à révocation.'
-                    : 'Laissez la case <b>2OP</b> vide.')
+                    ? 'Case <b>2OP</b> à envisager sur les seuls revenus saisis : vérifier les autres revenus mobiliers du foyer.'
+                    : 'Case <b>2OP</b> non retenue sur les seuls revenus saisis.')
                 + (a.bareme.csg_deductible > 0
                     ? ' CSG déductible cette année sur intérêts précomptés : '
                       + U.eur(a.bareme.csg_deductible, { dec: 0 }) + '.' : '')
@@ -1303,18 +1371,23 @@
                 + (a.ps_deja_precomptes > 0
                     ? ' Dont PS déjà précomptés sur intérêts : ' + U.eur(a.ps_deja_precomptes, { dec: 0 }) + '.' : '')
                 + '</div>'
+                + (annee < 2023 && sim.impot_crypto > 0
+                    ? '<div class="st">Cessions 2022 : 3CN n’existait pas encore ; les gains crypto restent au PFU.</div>' : '')
                 + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Assiette soumise à l’option : '
                 + U.eur(a.plus_value_nette, { dec: 0 }) + ' — plus-values mobilières et intérêts étrangers réunis.</div>'
                 + '</div>';
         } else {
             out += '<div class="card"><div class="lbl">Flat tax (PFU) ou barème progressif ?</div>'
-                + '<div class="info" style="margin-top:6px">Aucune plus-value ni intérêt imposable cette année : '
-                + 'l’arbitrage ne se pose pas.</div></div>';
+                + '<div class="info" style="margin-top:6px">'
+                + (annee < 2023 && sim.impot_crypto > 0
+                    ? 'Cessions 2022 : 3CN n’existait pas encore ; les gains crypto restent au PFU.'
+                    : 'Aucune plus-value ni intérêt imposable cette année : l’arbitrage ne se pose pas.')
+                + '</div></div>';
         }
 
         // --- Bilan de l'impôt du foyer
         out += '<div class="card"><div class="lbl">Bilan de votre impôt sur le revenu ' + annee + '</div>'
-            + (sim.arbitrage && sim.arbitrage.ps_deja_precomptes > 0
+            + (sim.options_fiscales.retenu.ps_deja_precomptes > 0
                 ? '<div class="st">Coût annuel incluant les PS déjà précomptés : ils ne sont pas à payer deux fois.</div>' : '')
             + ligneResultat('Impôt sur vos salaires', U.eur(sim.ir_salaires.impot_net, { dec: 0 }))
             + ligneResultat('Impôt + PS sur vos revenus du capital', U.eur(sim.impot_capital_retenu, { dec: 0 }))
@@ -1324,19 +1397,13 @@
             + '</div>';
 
         // --- Prélèvement à la source
-        var pas = '<div class="card"><div class="lbl">Taux de prélèvement à la source</div>'
-            + ligneResultat('Taux du foyer (non personnalisé)', U.pct(sim.taux_pas_foyer, 2), true);
-        if (sim.couple && sim.taux_pas_2 > 0) {
-            pas += ligneResultat('Taux individualisé — déclarant 1', U.pct(sim.taux_pas_1, 2))
-                + ligneResultat('Taux individualisé — déclarant 2', U.pct(sim.taux_pas_2, 2))
-                + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Individualisation (CGI art. 204 M) '
-                + 'calculée comme l’administration : le conjoint aux revenus les plus faibles est imposé en '
-                + 'célibataire sur la moitié des parts, l’autre supporte le solde. La somme des deux égale '
-                + 'exactement l’impôt du foyer.</div>';
-        } else {
-            pas += '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Taux appliqué à vos revenus '
-                + 'salariaux. Il ne tient pas compte des revenus du capital, soumis au prélèvement forfaitaire.</div>';
+        var pas = '<div class="card"><div class="lbl">Prélèvement à la source — estimation simplifiée</div>'
+            + ligneResultat('Taux du foyer estimé sur salaires', U.pct(sim.taux_pas_foyer, 2), true);
+        if (sim.couple) {
+            pas += ligneResultat('Taux individualisé estimé — déclarant 1', U.pct(sim.taux_pas_1, 2))
+                + ligneResultat('Taux individualisé estimé — déclarant 2', U.pct(sim.taux_pas_2, 2));
         }
+        pas += '<div class="st">Calcul indicatif sur les seuls salaires saisis. Il ne reproduit pas tous les revenus communs, crédits et arrondis des articles 204 H et 204 M. Pour un couple, l’individualisation est le régime par défaut depuis septembre 2025, sauf choix du taux foyer. Vérifiez vos taux réels sur impots.gouv.fr.</div>';
         pas += '</div>';
 
         return out + pas;
@@ -1465,7 +1532,8 @@
         impotRevenu: impotRevenu, abattement10: abattement10, fraisKilometriques: fraisKilometriques,
         fraisRepas: fraisRepas, forfaitRepas: forfaitRepas, fraisReelsDeclarant: fraisReelsDeclarant,
         appliquerConfig: appliquerConfig,
-        comparerPfuBareme: comparerPfuBareme, tauxPAS: tauxPAS, verifierMaj: verifierMaj,
+        comparerPfuBareme: comparerPfuBareme, comparerOptionsFoyer: comparerOptionsFoyer,
+        tauxPAS: tauxPAS, verifierMaj: verifierMaj,
         cessionsAnnee: cessionsAnnee, bilanCessions: bilanCessions,
         detail2074: detail2074, detail2086: detail2086, simulerFoyer: simulerFoyer,
         PROMPT_MAJ: PROMPT_MAJ, URL_MAJ_BAREMES: URL_MAJ_BAREMES,

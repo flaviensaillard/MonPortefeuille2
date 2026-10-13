@@ -1,0 +1,58 @@
+# Préparation locale — éventuelle révision 2 des revenus 2025
+
+**13 octobre 2026 — brouillon, pas une publication.** À la demande du propriétaire, ce travail est limité à la préparation **hors ligne**. Aucun appel à Supabase, aucune sauvegarde distante, aucune insertion, aucune activation dans les calculs et aucune fusion de PR n'ont été effectués. Pour reproduire l'inventaire JSON sans clé ni connexion :
+
+```bash
+python jobs/preparer_revision_fiscale_2025.py
+```
+
+Ce script ne possède **pas** d'option `--appliquer`, n'importe pas le client Supabase, refuse toute année autre que 2025 et ne produit **pas** une ligne directement insérable. Les empreintes SHA-256 des fichiers locaux figurent dans sa sortie pour identifier le brouillon même si l'arbre de travail est modifié avant un futur commit. **Révision 2** est seulement le numéro *envisagé* : il faut d'abord relire les révisions réelles en base. Le point de comparaison ci-dessous est le code du [commit ayant servi à l'import initial](https://github.com/flaviensaillard/MonPortefeuille2/blob/a583e55b98a94ecc86a7cf75615ad4a32ae327ff/core/fiscal_bars.py), **pas** une nouvelle vérification de la ligne Supabase révision 1.
+
+## Différences connues, à confirmer en lecture seule contre la vraie révision 1
+
+| Paramètre 2025 | Code importé (rév. 1 présumée) | Candidat local | Référence / portée |
+| --- | ---: | ---: | --- |
+| Décote isolé : montant de base / seuil | 898 € / 1 986 € | **897 € / 1 982 €** | [BOFiP](https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407) |
+| Décote couple marié : montant de base / seuil | 1 486 € / 3 284 € | **1 483 € / 3 277 €** | [BOFiP](https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407) |
+| PS sur gains de titres / crypto privés déclarés pour 2025 | 17,2 % (une seule clé) | **18,6 %** | [Aide DGFiP, titres](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm) ; [DGFiP, crypto](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques) |
+| PS sur intérêts effectivement précomptés en 2025 | Aucune clé distincte | **17,2 %**, déjà payés : non dus une seconde fois | [DGFiP, revenus mobiliers](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers) |
+| PS sur intérêts non précomptés | Aucune clé distincte | **18,6 %** à l'avis 2026 | [DGFiP, revenus mobiliers](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers) |
+| Plafond général de quotient familial, par demi-part | **Absent de la révision 1** (codé ailleurs dans le moteur) | **1 807 €** | [BOFiP](https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407) ; *plafonds particuliers non modélisés* |
+
+Les quatre tranches 2025 (11 600 / 29 579 / 84 577 / 181 917 €) et les taux associés restent identiques à la révision 1 du **code** ; ils ont été recoupés [au BOFiP](https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407). Le brouillon inventorie en outre la CSG déductible et son **calendrier de paiement**, la franchise des cessions crypto, les options **2OP / 3CN indépendantes**, l'abattement de 10 %, les frais kilométriques, le forfait repas, le seuil de non-recouvrement et l'or physique. L'inventaire indique **une qualification distincte par règle** : certains montants sont recoupés, d'autres sont seulement copiés du code ou **non audités**. Le pays du courtier ne détermine pas le précompte.
+
+## Pourquoi ce brouillon ne peut pas encore être écrit comme « vérifié »
+
+- La table `pf2_fiscal_annees` a bien une clé `(user_id, annee_revenus, revision)` qui permettrait de conserver la révision 1 et les autres années. Mais elle n'a **aucun champ d'activation ou de validation** : une ligne avec `origine = nouvelle_publication` pourrait être prise à tort pour une révision complète et validée par un futur lecteur prenant la plus récente. Le moteur de l'APK et Python n'utilise **pas encore** les révisions Supabase pour ses calculs.
+- Une vérification complémentaire confirme le **seuil IR de 61 €** dans la [brochure DGFiP sur les revenus 2025](https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/21-calcul_impot_369a382.pdf). Les coefficients et tranches kilométriques, ainsi que la majoration électrique de 20 %, sont documentés par [l'aide au simulateur 2026](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm) et le [BOFiP](https://bofip.impots.gouv.fr/bofip/2185-PGP.html/identifiant=BOI-BAREME-000001-20230720). **Les conditions personnelles** (trajets, repas, frais réellement supportés) ne sont pas validées par ces seuls montants.
+- **Or physique : obstacle confirmé**, pas seulement un taux restant à auditer. La [taxe par défaut](https://bofip.impots.gouv.fr/bofip/4151-PGP.html/identifiant=BOI-RPPM-PVBMC-20-10-20181231) est de 11 % + 0,5 % de CRDS sur la cession de métaux précieux. Le [régime des plus-values](https://bofip.impots.gouv.fr/bofip/4161-PGP.html/identifiant=BOI-RPPM-PVBMC-20-20-20140401), avec abattement de 5 % par an au-delà de deux ans et exonération après 22 ans, n'est possible **que sur option 2092 et sur justificatifs**. Le moteur choisit actuellement le minimum des deux de façon automatique : **ce minimum n'est pas un impôt exigible certifié**. Le taux PS applicable à chaque cession 2025 reste à recouper selon le régime. Le candidat reprend ces constantes mais signale cette règle comme non publiable.
+- **PAS du couple : calcul actuel simplifié, non équivalent à la formule officielle.** Le [BOFiP, art. 204 M](https://bofip.impots.gouv.fr/bofip/11256-PGP.html/identifiant=BOI-IR-PAS-20-20-20-20250507) tient compte notamment des revenus communs, de ceux hors PAS et d'éventuels crédits ; l'individualisation devient la règle par défaut au **1er septembre 2025**, sauf option pour le taux foyer. Les écrans Python/Android indiquent désormais explicitement « estimation sur salaires », sans prétendre reproduire le taux transmis par la DGFiP. Le PAS n'est **pas prêt à être activé** comme paramètre complet.
+- Les revenus éligibles à 2OP absents de l'application (notamment dividendes) peuvent changer le choix ; les plafonds de quotient familial particuliers restent hors calcul. Même pour un foyer marié, les [abattements éventuels liés à l'âge ou l'invalidité](https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/21-calcul_impot_369a382.pdf) ne sont pas représentés. Le cas parent isolé n'est pas requis ici, mais une publication générale ne doit pas faire croire qu'il est couvert.
+- Aucune lecture réelle de la révision 1 2025 n'a été faite pendant cette préparation : ses valeurs et l'absence éventuelle d'une révision supplémentaire doivent être confirmées en **lecture seule**. Une empreinte de fichiers locaux ne remplace pas une référence de commit immuable pour `source_ref`.
+- **2026 demeure provisoire** ; le brouillon ne prépare ni n'altère 2022–2024 ou 2026. L'importateur historique reste verrouillé en simulation comme en application : il ne doit pas servir à écrire la révision 2.
+
+## Contrôle réel de la base et sauvegarde : préparés, **non exécutés**
+
+Un vérificateur dédié est prêt dans `jobs/verifier_revision_fiscale_2025.py`. Il n'a qu'une option de connexion explicite (`--lire-supabase`) : **une requête `SELECT` filtrée par propriétaire**, contrôle de la révision 1 2025 et des autres années, comparaison de *tous* les champs JSON du brouillon, et empreintes anonymisées des lignes pour une future vérification après insertion. Il refuse une réponse contenant une ligne d'un autre propriétaire, des révisions inattendues et les valeurs 2025 qui ne correspondent pas à la source de l'import. Même si tout concorde, il rend `ecriture_autorisee: false`. Il n'a aucune méthode d'insertion. Tests locaux avec faux client lecture seule : réussis.
+
+```bash
+# À utiliser plus tard UNIQUEMENT dans un environnement GitHub Actions autorisé,
+# dont les secrets service_role et SUPABASE_USER_ID sont déjà configurés.
+python jobs/verifier_revision_fiscale_2025.py --lire-supabase
+```
+
+Le workflow existant **« Sauvegarde chiffrée »** possède maintenant une option manuelle « vérifier révision 2025 ». Une fois les modifications présentes sur la branche choisie dans l'interface GitHub Actions, cette option lance **d'abord la sauvegarde chiffrée, sa restauration de contrôle et l'upload de l'archive**, puis la lecture fiscale et un rapport anonymisé en artefact séparé (7 jours). L'exécution hebdomadaire reste une simple sauvegarde, sans cette lecture. Ce workflow n'insère ni ne modifie de ligne fiscale ; il ne doit **pas** être confondu avec l'ancien importateur.
+
+**Cette commande ni le nouveau parcours manuel n'ont été lancés contre la vraie base ici** : le sandbox ne dispose pas d'un accès sortant autorisé au domaine Supabase, et le déclenchement distant par CLI avait déjà échoué pour ces workflows. Il serait trompeur de présenter le comparatif simulé avec le code ancien comme une lecture de vos lignes. Aucun jeton ou mot de passe ne doit être communiqué dans le chat.
+
+La [sauvegarde chiffrée de l'import historique](https://github.com/flaviensaillard/MonPortefeuille2/actions/runs/38258384611) a été produite et restaurée pour contrôle le 12/10/2026 ; son artefact `sauvegarde-fiscale-38258384611` existe encore d'après l'API GitHub au 13/10/2026 (expiration annoncée au 10/01/2027). **Ce n'est pas une nouvelle sauvegarde avant révision 2.** La [sauvegarde hebdomadaire réussie](https://github.com/flaviensaillard/MonPortefeuille2/actions/runs/38254476762) est antérieure à l'import fiscal. Avant toute insertion, il faudra exécuter une **nouvelle** sauvegarde sur le code incluant les tables fiscales, confirmer que `pf2_fiscal_annees` n'est pas signalée absente et restaurer l'archive pour contrôle. Ne pas utiliser une sauvegarde ne contenant que `Config` comme preuve de couverture des révisions fiscales.
+
+## Avant de redemander l'autorisation d'écrire
+
+1. Terminer l'audit des règles encore ouvertes et choisir explicitement le périmètre validé ; si une publication partielle est voulue, définir **d'abord** un statut de validation explicite et un lecteur à sécurité fermée, sans présenter la dernière révision comme automatiquement fiable. Ne pas promettre que tous les paramètres fiscaux sont prêts.
+2. Figer le code source en commit traçable, puis effectuer une **lecture seule** des lignes fiscales 2025 du propriétaire : confirmer la révision actuelle, comparer son contenu à la référence ancienne, calculer le nouveau numéro sans écraser l'historique. Vérifier que les autres années ne sont pas ciblées.
+3. Faire une simulation explicite de la **ligne qui serait insérée** : schéma, provenance officielle par règle, différence exacte avec la ligne 2025 existante et contrôle de complétude. Ne jamais réutiliser `reprise_code_non_verifiee` ou la référence au commit `a583e55…` pour des chiffres corrigés.
+4. Juste avant une éventuelle insertion, obtenir une **sauvegarde chiffrée récente** contenant les tables fiscales et tester sa restauration. Redemander l'accord du propriétaire sur les différences et le périmètre 2025.
+5. Après autorisation et écriture seulement : relire et comparer intégralement la nouvelle ligne, vérifier que les révisions 1 et les années 2022–2024/2026 sont inchangées. L'**activation automatique dans l'APK est une étape séparée**, soumise à ses propres contrôles.
+
+**État actuel : étapes 1–5 inachevées ; aucune écriture Supabase autorisée par la présente préparation.**

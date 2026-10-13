@@ -16,8 +16,9 @@ CORRECTIONS PAR RAPPORT À LA V1
    sans abattement sur la plus-value.
 
 4. La comparaison PFU / barème distingue les PS des titres et les intérêts
-   précomptés ; la CSG n'est déduite que l'année de son paiement. Les cas
-   particuliers et l'option crypto 3CN restent hors de cette comparaison.
+   précomptés ; la CSG n'est déduite que l'année de son paiement. Le bilan du
+   foyer compare conjointement 2OP et 3CN à partir des revenus saisis ; les
+   revenus absents et les cas particuliers restent hors de cette estimation.
 
 AVERTISSEMENT
 -------------
@@ -341,10 +342,12 @@ def pv_or_physique(lignes: list[dict], annee: int) -> dict:
     plus-value, avec abattement de 5 %/an dès la 3ᵉ année, exonération totale à
     22 ans.
 
-    L'administration applique le régime le plus avantageux, sauf option
-    contraire du contribuable. On calcule les deux et on retient le moindre.
-
-    À VÉRIFIER auprès du BOFiP : le traitement de l'abattement sur la TFMP.
+    ATTENTION : le régime des plus-values n'est PAS appliqué automatiquement
+    parce qu'il coûte moins cher. Il exige une option expresse (2092) et une
+    preuve de la date et du prix d'acquisition, ou de la détention > 22 ans.
+    Le minimum calculé ci-dessous est uniquement illustratif et ne doit pas
+    être considéré comme l'impôt réellement dû. Modalités et taux PS 2025 à
+    valider pour chaque vente avant toute publication fiscale.
     """
     total_brut = 0.0
     total_pv = 0.0
@@ -388,8 +391,9 @@ def pv_or_physique(lignes: list[dict], annee: int) -> dict:
         "abattement_duree": abatt,
         "tfmp": tfmp,
         "regime_plus_value": regime_b,
-        "regime_retenu": retenu,
-        "total_du": min(tfmp, regime_b),
+        "regime_retenu": retenu,  # comparaison illustrative, PAS option exercée
+        "total_du": min(tfmp, regime_b),  # minimum théorique, PAS solde dû certifié
+        "avertissement": "Or physique : option 2092 non automatique, justificatifs requis ; montant indicatif non validé pour une déclaration.",
         "detail": f"{nb} cession(s) d'or physique.",
     }
 
@@ -450,6 +454,64 @@ def comparer_pfu_bareme(
         "choix": "Barème progressif" if bareme_total < pfu_total else "PFU",
         "gain": abs(avantage),
         "tmi": ir_avec.tmi,
+    }
+
+
+def comparer_options_foyer(
+    revenu_salaires: float, parts: float, annee: int, statut: str,
+    pv_titres: float = 0.0, interets: float = 0.0,
+    interets_ps_precomptes: bool | None = None, pv_crypto: float = 0.0,
+) -> dict:
+    """Compare conjointement les options *indépendantes* 2OP et 3CN.
+
+    L'option 2OP concerne globalement les titres et revenus mobiliers saisis ;
+    3CN concerne tous les gains crypto privés du foyer. Tester les quatre
+    combinaisons évite de comparer deux marges IR séparées à tort : le barème,
+    la décote et le QF portent sur l'assiette totale. Résultat indicatif sur
+    les seules assiettes connues, sans déduction future de CSG ni crédit d'impôt.
+    3CN n'est ouverte qu'à partir des cessions réalisées en 2023.
+    Sources : DGFiP, notice 2086 revenus 2025 et page « revenus mobiliers ».
+    """
+    pv = max(0.0, float(pv_titres))
+    rcm = max(0.0, float(interets))
+    crypto = max(0.0, float(pv_crypto))
+    if rcm > 0 and not isinstance(interets_ps_precomptes, bool):
+        raise ValueError("Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays du courtier ne suffit pas.")
+    ir_salaires = impot_revenu(revenu_salaires, parts, annee, statut).impot_net
+    ps_titres = pv * fb.taux_ps(annee)
+    ps_interets = (rcm * fb.taux_ps_revenu_mobilier(annee, precompte=interets_ps_precomptes)
+                   if rcm else 0.0)
+    ps_crypto = crypto * fb.taux_ps(annee)
+    ps_total = ps_titres + ps_interets + ps_crypto
+    ps_deja_precomptes = ps_interets if interets_ps_precomptes else 0.0
+    scenarios = []
+    for op in (False, True) if pv + rcm > 0 else (False,):
+        for cn in (False, True) if crypto > 0 and annee >= 2023 else (False,):
+            csg_payee_annee = rcm * fb.CSG_DEDUCTIBLE if op and interets_ps_precomptes else 0.0
+            revenu_au_bareme = (revenu_salaires + (pv + rcm if op else 0.0)
+                                + (crypto if cn else 0.0) - csg_payee_annee)
+            ir_bareme = impot_revenu(revenu_au_bareme, parts, annee, statut).impot_net
+            ir_forfaitaire = fb.IR_FORFAITAIRE * ((0.0 if op else pv + rcm)
+                                                 + (0.0 if cn else crypto))
+            total = ir_bareme + ir_forfaitaire + ps_total
+            scenarios.append({
+                "cocher_2op": op, "cocher_3cn": cn,
+                "ir_bareme": ir_bareme, "ir_forfaitaire": ir_forfaitaire,
+                "ps_titres": ps_titres, "ps_interets": ps_interets,
+                "ps_crypto": ps_crypto, "ps_total": ps_total,
+                "ps_deja_precomptes": ps_deja_precomptes,
+                "ps_restants": ps_total - ps_deja_precomptes,
+                "csg_deductible_annee": csg_payee_annee,
+                "impot_total_foyer": total,
+                "cout_capital": total - ir_salaires,
+            })
+    retenu = min(scenarios, key=lambda s: s["impot_total_foyer"])
+    defaut = scenarios[0]  # pas d'option 2OP ni 3CN
+    return {
+        "scenarios": scenarios, "retenu": retenu,
+        "economie_vs_pfu": defaut["impot_total_foyer"] - retenu["impot_total_foyer"],
+        "assiette_2op": pv + rcm, "assiette_3cn": crypto if annee >= 2023 else 0.0,
+        "limite": "Estimation sur les seuls revenus saisis ; 2OP est globale pour tous les RCM et gains mobiliers du foyer. Vérifier les autres revenus et la déclaration officielle.",
     }
 
 
@@ -1126,28 +1188,28 @@ def simuler_foyer_complet(
     else:
         arbitrage = None
 
-    # Plus-value crypto imposable (> 305 € de cessions) : PFU 30 % / 31,4 %
+    # 3CN est indépendante de 2OP : tester aussi les combinaisons croisées.
     pv_crypto_pos = max(0.0, float(bilan_pv_crypto_imposable_eur))
-    impot_crypto = pv_crypto_pos * fb.taux_pfu(annee)
-
-    impot_capital_retenu = (
-        min(arbitrage["pfu"]["total"], arbitrage["bareme"]["total"])
-        if arbitrage else 0.0
-    ) + impot_crypto
-
-    impot_total_foyer = ir_salaires.impot_net + impot_capital_retenu
+    options = comparer_options_foyer(
+        revenu_net_salaires, parts, annee, statut,
+        pv_titres=pv_actions_pos, interets=interets_pos,
+        interets_ps_precomptes=interets_ps_precomptes, pv_crypto=pv_crypto_pos,
+    )
+    retenu = options["retenu"]
+    impot_crypto = pv_crypto_pos * fb.taux_pfu(annee)  # référence PFU, pas coût retenu si 3CN
+    impot_capital_retenu = retenu["cout_capital"]
+    impot_total_foyer = retenu["impot_total_foyer"]
     revenu_brut_global = sal1 + sal2 + interets_pos + pv_actions_pos + pv_crypto_pos
     taux_moyen_salaires = (
         ir_salaires.impot_net / (sal1 + sal2) if (sal1 + sal2) > 0 else 0.0
     )
 
-    # Taux de prélèvement à la source (PAS) individualisés (CGI art. 204 M) :
-    # - Le conjoint au revenu le plus faible se voit appliquer les règles d'un
-    #   célibataire avec la moitié des parts du foyer (`parts / 2`, incluant la
-    #   moitié des parts des personnes à charge) et la décote d'un célibataire.
-    # - Le conjoint au revenu le plus élevé supporte le solde de l'impôt du foyer
-    #   (`ir_foyer - ir_faible`), garantissant que la somme des prélèvements
-    #   égale exactement l'impôt du foyer.
+    # PAS : approximation sur les seuls salaires saisis, PAS le taux transmis
+    # par la DGFiP. Les formules de l'art. 204 M prennent également en compte
+    # les revenus communs, revenus hors PAS, crédits étrangers et arrondis ;
+    # l'individualisation de droit commun s'applique depuis septembre 2025.
+    # Ici, on répartit seulement l'IR simulé sur les salaires entre conjoints :
+    # la somme correspond à cet IR, pas nécessairement au PAS officiel.
     if couple and sal1 > 0 and sal2 > 0:
         demi_parts_foyer = max(1.0, parts / 2.0)
         if rev_net_1 <= rev_net_2:
@@ -1200,9 +1262,11 @@ def simuler_foyer_complet(
         "revenu_net_imposable_salaires": round(revenu_net_salaires, 2),
         "revenu_brut_global": round(revenu_brut_global, 2),
         "ir_salaires": ir_salaires,
-        "arbitrage": arbitrage,
-        "cocher_2op": bool(arbitrage and arbitrage["choix"] == "Barème progressif"),
-        "impot_crypto": round(impot_crypto, 2),
+        "arbitrage": arbitrage,  # comparaison 2OP isolée, affichée uniquement sans crypto
+        "options_fiscales": options,
+        "cocher_2op": retenu["cocher_2op"],
+        "cocher_3cn": retenu["cocher_3cn"],
+        "impot_crypto": round(impot_crypto, 2),  # scénario PFU de référence
         "impot_capital_retenu": round(impot_capital_retenu, 2),
         "impot_total_foyer": round(impot_total_foyer, 2),
         "taux_moyen_salaires": taux_moyen_salaires,

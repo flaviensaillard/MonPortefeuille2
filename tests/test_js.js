@@ -193,6 +193,46 @@ test('statut de précompte Android local et distinct par année', () => {
     PF.store.sauverReglages({ interetsPs2025: null });
     return ok;
 });
+test('couple marié : 2OP et 3CN sont indépendantes', () => {
+    const cases = [[15000, 100, true, false], [100, 15000, false, true], [100, 100, true, true]];
+    return cases.every(([titres, crypto, op, cn]) => {
+        const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2025, 'Marié(e) / Pacsé(e)', titres, 0, null, crypto);
+        return o.scenarios.length === 4 && o.retenu.cocher_2op === op && o.retenu.cocher_3cn === cn;
+    });
+});
+test('couple marié : la somme de deux choix indépendants n’est pas le meilleur régime', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(20000, 2, 2025, 'Marié(e) / Pacsé(e)', 100, 0, null, 20000);
+    const [defaut, cn, op, ensemble] = o.scenarios;
+    return cn.impot_total_foyer < defaut.impot_total_foyer
+        && op.impot_total_foyer < defaut.impot_total_foyer
+        && ensemble.impot_total_foyer > cn.impot_total_foyer
+        && o.retenu === cn && proche(cn.impot_total_foyer, 4952.62);
+});
+test('2022 : la case 3CN n’était pas encore ouverte', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2022, 'Marié(e) / Pacsé(e)', 100, 0, null, 15000);
+    return o.scenarios.length === 2 && o.assiette_3cn === 0 &&
+        o.scenarios.every(s => !s.cocher_3cn && proche(s.ps_crypto, 15000 * .172));
+});
+test('couple marié : les PS des intérêts précomptés ne sont pas dus deux fois', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(50000, 3, 2025, 'Marié(e) / Pacsé(e)', 1000, 1000, true, 1000);
+    return o.scenarios.length === 4 && o.scenarios.every(s =>
+        proche(s.ps_titres, 186) && proche(s.ps_interets, 172) && proche(s.ps_crypto, 186)
+        && proche(s.ps_total, 544) && proche(s.ps_deja_precomptes, 172)
+        && proche(s.ps_restants, 372) && proche(s.csg_deductible_annee, s.cocher_2op ? 68 : 0));
+});
+test('bilan du couple : 3CN et 2OP des cases suivent le scénario retenu', () => {
+    const sim = PF.fiscal.simulerFoyer({
+        annee: 2025, statut: 'Marié(e) / Pacsé(e)', parts: 2,
+        salaire1: 12000, salaire2: 8000,
+        bilanPvActions: 100, pvCryptoImposable: 15000,
+        interetsEtrangers: 500, interetsPrecomptes: true
+    });
+    const best = sim.options_fiscales.retenu;
+    return sim.options_fiscales.scenarios.length === 4
+        && sim.cocher_2op === best.cocher_2op && sim.cocher_3cn === best.cocher_3cn
+        && proche(sim.impot_total_foyer, best.impot_total_foyer)
+        && proche(best.ps_deja_precomptes, 86);
+});
 test('comparaison PFU / barème renvoie un choix', () => {
     const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2026, 'Marié(e) / Pacsé(e)');
     return (c.choix === 'PFU' || c.choix === 'Barème progressif') && c.pfu.total > 0;

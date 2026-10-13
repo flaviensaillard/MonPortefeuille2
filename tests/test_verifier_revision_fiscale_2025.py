@@ -1,0 +1,119 @@
+"""Vérificateur fiscal : lecture seule, identifiant filtré, dérive détectée."""
+from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
+
+from jobs import preparer_revision_fiscale_2025 as prep
+from jobs import verifier_revision_fiscale_2025 as verification
+
+
+class ClientLectureSeule:
+    """Le faux client ne possède volontairement AUCUNE méthode d'écriture."""
+
+    def __init__(self, lignes):
+        self.lignes = lignes
+        self.appels = []
+        self.uid = None
+
+    def table(self, nom):
+        self.appels.append(("table", nom))
+        return self
+
+    def select(self, champs):
+        self.appels.append(("select", champs))
+        return self
+
+    def eq(self, champ, valeur):
+        self.appels.append(("eq", champ, valeur))
+        self.uid = valeur
+        return self
+
+    def execute(self):
+        self.appels.append(("execute",))
+        return SimpleNamespace(data=self.lignes)
+
+
+def _lignes(uid=None):
+    params = {
+        "bareme": {"decote_base_celibataire": 898.0, "decote_plafond_celibataire": 1986.0,
+                   "decote_base_couple": 1486.0, "decote_plafond_couple": 3284.0},
+        "prelevements_sociaux": .172,
+        "mention_source_code_non_verifiee": "ancienne",
+    }
+    base = [{"user_id": uid, "annee_revenus": a, "revision": 1, "origine": "reprise_code_non_verifiee",
+             "source_ref": prep.SOURCE_REVISION_1, "parametres": deepcopy(params)}
+            for a in (2022, 2023, 2024, 2025, 2026)]
+    return base
+
+
+def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
+    uid = str(uuid4())
+    client = ClientLectureSeule(_lignes(uid))
+    lignes = verification.lire_revisions(client, uid)
+    assert lignes == client.lignes
+    assert client.appels == [("table", "pf2_fiscal_annees"),
+                            ("select", "user_id,annee_revenus,revision,parametres,origine,source_ref"),
+                            ("eq", "user_id", uid), ("execute",)]
+    with pytest.raises(ValueError, match="autre propriétaire"):
+        verification.lire_revisions(ClientLectureSeule(_lignes(str(uuid4()))), uid)
+    with pytest.raises(ValueError):
+        verification.lire_revisions(ClientLectureSeule([]), "identifiant invalide")
+
+
+def test_diff_distinguant_ajouts_et_modifications_ne_produit_pas_de_ligne_a_inserer():
+    r = verification.comparer_lignes(_lignes())
+    assert r["revision_2_confirmable_sous_reserve"] is True
+    assert r["ecriture_autorisee"] is False
+    assert len(r["empreintes_lignes_pour_controle_apres_ecriture"]) == 5
+    assert r["annees_autres_revisions_lues"] == {"2022": [1], "2023": [1],
+                                                "2024": [1], "2026": [1]}
+    ecarts = {e["champ"]: e for e in r["ecarts_code_2025_brouillon_vs_base"]}
+    assert ecarts["bareme.decote_base_couple"] == {
+        "champ": "bareme.decote_base_couple", "operation": "changement", "avant": 1486.0, "apres": 1483.0}
+    assert ecarts["prelevements_sociaux"]["apres"] == .186
+    assert ecarts["quotient_familial"]["operation"] == "ajout"
+    assert ecarts["mention_source_code_non_verifiee"]["operation"] == "retrait_du_brouillon"
+    assert "avant" not in ecarts["mention_source_code_non_verifiee"]
+    assert not {"user_id", "revision", "parametres", "origine", "source_ref"} & r.keys()
+
+
+@pytest.mark.parametrize("mutation,attendu", [
+    (lambda lignes: lignes[3].update(revision=2), "Révisions 2025"),
+    (lambda lignes: lignes[3]["parametres"].update(prelevements_sociaux=.186), "prelevements_sociaux"),
+    (lambda lignes: lignes[3].update(source_ref="inconnu"), "Origine ou source"),
+    (lambda lignes: lignes.pop(0), "2022"),
+    (lambda lignes: lignes[3]["parametres"].update(champ_imprevu="sensible"), "champs inconnus"),
+    (lambda lignes: lignes[0].update(revision=2), "2022"),
+])
+def test_derives_bloquent_numero_suppose(mutation, attendu):
+    lignes = _lignes()
+    mutation(lignes)
+    r = verification.comparer_lignes(lignes)
+    assert r["revision_2_confirmable_sous_reserve"] is False
+    assert r["ecriture_autorisee"] is False
+    assert attendu in " ".join(r["problemes"])
+
+
+def test_workflow_manuel_sauvegarde_avant_lecture_et_aucune_ecriture():
+    contenu = (Path(__file__).resolve().parents[1] / ".github/workflows/sauvegarde.yml").read_text()
+    assert "type: boolean" in contenu and "verifier_revision_2025:" in contenu
+    assert contenu.index("- name: Restauration de contrôle") < contenu.index(
+        "name: sauvegarde-pf2-") < contenu.index("- name: Comparer la révision 2025 en lecture seule")
+    assert "if: github.event_name == 'workflow_dispatch' && inputs.verifier_revision_2025" in contenu
+    assert "python jobs/verifier_revision_fiscale_2025.py --lire-supabase" in contenu
+    assert "--appliquer" not in contenu
+
+
+def test_reponse_invalide_refusee_et_pas_de_connexion_implicite():
+    client = ClientLectureSeule(None)
+    with pytest.raises(ValueError, match="Lecture fiscale incomplète"):
+        verification.lire_revisions(client, str(uuid4()))
+    with patch("sys.argv", ["verifier_revision_fiscale_2025.py"]):
+        with pytest.raises(SystemExit, match="2"):
+            verification.main()  # sans --lire-supabase, aucune connexion

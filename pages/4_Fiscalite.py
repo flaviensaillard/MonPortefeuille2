@@ -562,12 +562,20 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             "À inscrire": f"{sim['case_2tr']:,} €".replace(",", " "),
             "Indication": "Reporté depuis la ligne 252 du formulaire 2047.",
         })
-    if sim["arbitrage"] is not None:
+    options_calc = sim["options_fiscales"]
+    if options_calc["assiette_2op"] > 0:
         cases_2042.append({
             "Case": "2OP",
-            "Rubrique": "Option globale pour le barème progressif",
-            "À inscrire": "☑️ À COCHER ABSOLUMENT" if sim["cocher_2op"] else "⬜ LAISSER DÉCOCHÉE",
-            "Indication": f"{sim['arbitrage']['choix']} plus avantageux (économie : {ui.eur(sim['arbitrage']['gain'])}).",
+            "Rubrique": "Option globale titres et revenus mobiliers (indépendante de 3CN)",
+            "À inscrire": "☑️ À ENVISAGER" if sim["cocher_2op"] else "⬜ À LAISSER DÉCOCHÉE selon simulation",
+            "Indication": "Estimation sur les seules assiettes saisies ; vérifier tous les revenus mobiliers du foyer.",
+        })
+    if options_calc["assiette_3cn"] > 0:
+        cases_2042.append({
+            "Case": "3CN",
+            "Rubrique": "Option pour le barème des gains crypto privés (indépendante de 2OP)",
+            "À inscrire": "☑️ À ENVISAGER" if sim["cocher_3cn"] else "⬜ À LAISSER DÉCOCHÉE selon simulation",
+            "Indication": "Option sur tous les gains crypto privés du foyer ; vérifier la déclaration 2086.",
         })
     if d2074["case_3vg"] > 0:
         cases_2042.append({
@@ -803,8 +811,33 @@ st.divider()
 st.subheader("💡 3. Arbitrage PFU vs Barème, Bilan de votre Impôt & Taux de Prélèvement à la Source")
 
 arb = sim["arbitrage"]
-if arb is not None:
+options_calc = sim["options_fiscales"]
+if options_calc["assiette_3cn"] > 0:
+    st.markdown("#### ⚖️ Options distinctes 2OP (titres/intérêts) et 3CN (crypto)")
+    st.caption("La 3CN est une option expresse et irrévocable sur la totalité des gains crypto privés du foyer, indépendante de la 2OP. L'impôt progressif est recalculé pour chaque combinaison, pas en additionnant deux simulations isolées.")
+    st.table([{
+        "2OP": "☑" if s["cocher_2op"] else "☐",
+        "3CN": "☑" if s["cocher_3cn"] else "☐",
+        "IR barème": ui.eur(s["ir_bareme"]),
+        "IR forfaitaire": ui.eur(s["ir_forfaitaire"]),
+        "PS annuels": ui.eur(s["ps_total"]),
+        "Total annuel": ui.eur(s["impot_total_foyer"]),
+    } for s in options_calc["scenarios"]])
+    st.info(
+        f"Sur les revenus saisis : 2OP {'à envisager' if sim['cocher_2op'] else 'non retenue'}, "
+        f"3CN {'à envisager' if sim['cocher_3cn'] else 'non retenue'} ; "
+        f"écart contre les deux régimes forfaitaires : {ui.eur(options_calc['economie_vs_pfu'])}. "
+        + options_calc["limite"]
+    )
+    st.caption(
+        "PS déjà précomptés sur intérêts : " + ui.eur(options_calc["retenu"]["ps_deja_precomptes"])
+        + " (PS restant à acquitter : " + ui.eur(options_calc["retenu"]["ps_restants"])
+        + "). Aucun acompte d'IR déjà retenu ni déduction future de CSG n'est reconstitué."
+    )
+elif arb is not None:
     st.markdown("#### ⚖️ Flat Tax (PFU) ou Barème Progressif (Case `2OP`) ?")
+    if annee < 2023 and sim["impot_crypto"] > 0:
+        st.caption("Pour les cessions de 2022, 3CN n'existait pas encore : les gains crypto restent au PFU dans ce bilan.")
     ca1, ca2 = st.columns(2)
     with ca1:
         st.markdown(f"**Option 1 — PFU (titres : {pfu_taux * 100:.1f} % ; intérêts selon précompte)**")
@@ -828,10 +861,10 @@ if arb is not None:
         )
         st.metric("Coût total avec le Barème", ui.eur(arb["bareme"]["total"]))
 
-    st.caption("Comparaison sur les revenus de l'année ; elle n'anticipe pas la déduction éventuelle de CSG lors d'un paiement ultérieur. Les PS déjà précomptés sont inclus dans le coût annuel, pas à reverser.")
+    st.caption("Comparaison sur les seuls revenus saisis : 2OP s'applique globalement à tous les revenus mobiliers et titres du foyer. Elle n'anticipe pas la déduction éventuelle de CSG lors d'un paiement ultérieur. Les PS déjà précomptés sont inclus dans le coût annuel, pas à reverser.")
     if sim["cocher_2op"]:
         st.success(
-            f"✅ **Recommandation : COCHEZ la case `2OP` (Barème Progressif) !** "
+            f"ℹ️ **Sur les revenus saisis, option `2OP` à envisager (Barème Progressif).** "
             f"Le barème vous coûte **{ui.eur(arb['bareme']['total'])}** contre **{ui.eur(arb['pfu']['total'])}** "
             f"au PFU, soit une économie nette de **{ui.eur(arb['gain'])}** "
             f"(pour votre situation modélisée à `{parts}` parts ; ne tient pas compte de la CSG déductible à une date ultérieure)."
@@ -843,7 +876,7 @@ if arb is not None:
             else ""
         )
         st.success(
-            f"✅ **Recommandation : NE COCHEZ PAS la case `2OP` (conservez la Flat Tax / PFU) !** "
+            f"ℹ️ **Sur les revenus saisis, option `2OP` non retenue (PFU).** "
             f"La Flat Tax vous coûte **{ui.eur(arb['pfu']['total'])}** contre **{ui.eur(arb['bareme']['total'])}** "
             f"au barème, soit une économie de **{ui.eur(arb['gain'])}**.{explication_decote}"
         )
@@ -871,11 +904,12 @@ b4.metric(
     delta=f"TMI : {sim['ir_salaires'].tmi * 100:.0f} %",
 )
 
-st.markdown("#### 👨‍👩‍👧‍👦 Taux de Prélèvement à la Source (PAS — CGI art. 204 H & 204 M)")
+st.markdown("#### 👨‍👩‍👧‍👦 Prélèvement à la source — estimation simplifiée")
+st.caption("Calcul indicatif sur les seuls salaires saisis : les revenus communs, crédits et arrondis des articles 204 H et 204 M ne sont pas tous reconstitués. Pour un couple, le taux individualisé est le régime par défaut depuis septembre 2025, sauf option pour le taux foyer. Vérifiez les taux transmis par la DGFiP sur impots.gouv.fr.")
 p1, p2, p3 = st.columns(3)
-p1.info(f"👨‍👩‍👧‍👦 **Taux de PAS du foyer (taux non personnalisé) :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
+p1.info(f"👨‍👩‍👧‍👦 **Taux du foyer estimé sur salaires :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
 if couple:
-    p2.info(f"👤 **Taux individualisé (Vous — CGI art. 204 M) :** **{sim['taux_pas_1'] * 100:.2f} %**")
-    p3.info(f"👤 **Taux individualisé (Conjoint — CGI art. 204 M, {parts/2:g} part(s)) :** **{sim['taux_pas_2'] * 100:.2f} %**")
+    p2.info(f"👤 **Taux individualisé estimé (Vous) :** **{sim['taux_pas_1'] * 100:.2f} %**")
+    p3.info(f"👤 **Taux individualisé estimé (Conjoint) :** **{sim['taux_pas_2'] * 100:.2f} %**")
 else:
-    p2.info(f"👤 **Taux personnalisé estimé :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
+    p2.info(f"👤 **Taux estimé :** **{sim['taux_pas_foyer'] * 100:.2f} %**")

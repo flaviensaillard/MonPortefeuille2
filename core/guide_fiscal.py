@@ -82,6 +82,7 @@ def construire_guide(
     resultats: dict,
     comptes_etrangers: list[str],
     comparaison: dict | None = None,
+    options_fiscales: dict | None = None,
 ) -> list[Etape]:
     """Construit la liste des formulaires à remplir, dans l'ordre du parcours.
 
@@ -305,6 +306,19 @@ def construire_guide(
                 obligatoire=False,
             ))
 
+        if annee >= 2023 and getattr(crypto, "plus_value_imposable", 0) > 0:
+            option_calculee = bool(options_fiscales and options_fiscales["assiette_3cn"] > 0)
+            cn = bool(option_calculee and options_fiscales["retenu"]["cocher_3cn"])
+            cases.append(Case(
+                formulaire="2042-C", numero="3CN",
+                libelle="Option globale barème pour les gains crypto privés",
+                montant=None,
+                comment=("À envisager sur les revenus saisis" if cn else
+                         "Non retenue sur les revenus saisis" if option_calculee else
+                         "Option à évaluer conjointement avec 2OP avant de choisir")
+                        + ". Option expresse distincte de 2OP ; vérifier toutes les cessions du foyer.",
+                obligatoire=cn,
+            ))
         etapes.append(Etape(
             ordre=ordre,
             formulaire="2086",
@@ -377,7 +391,26 @@ def construire_guide(
     # -----------------------------------------------------------------------
     # Choix du régime : 2OP
     # -----------------------------------------------------------------------
-    if comparaison and comparaison.get("plus_value_nette", 0) > 0:
+    if options_fiscales and options_fiscales["assiette_2op"] > 0:
+        ordre += 1
+        op = options_fiscales["retenu"]["cocher_2op"]
+        etapes.append(Etape(
+            ordre=ordre, formulaire="2042", titre="Option pour le barème progressif",
+            obligatoire=False,
+            raison="Estimation conjointe 2OP / 3CN sur les revenus saisis seulement.",
+            ou="impots.gouv.fr → étape 3 → option pour le barème (case 2OP).",
+            cases=[Case(
+                formulaire="2042", numero="2OP",
+                libelle="Option globale pour les gains mobiliers et revenus de capitaux mobiliers",
+                montant=None,
+                comment=("À envisager" if op else "Non retenue")
+                        + " sur les revenus saisis ; vérifier tous les RCM et gains mobiliers du foyer. Indépendante de 3CN.",
+                obligatoire=op,
+            )], reference="CGI art. 200 A",
+        ))
+    elif comparaison and comparaison.get("plus_value_nette", 0) > 0 and not (
+        crypto is not None and getattr(crypto, "plus_value_imposable", 0) > 0
+    ):
         ordre += 1
         retenu = comparaison["choix"]
         etapes.append(Etape(
