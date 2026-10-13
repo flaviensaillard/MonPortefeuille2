@@ -176,6 +176,11 @@ def test_workflow_manuel_sauvegarde_avant_lecture_et_aucune_ecriture():
         "name: sauvegarde-pf2-") < contenu.index("- name: Comparer la révision 2025 en lecture seule")
     assert "if: github.event_name == 'workflow_dispatch'" in contenu
     assert "python jobs/verifier_revision_fiscale_2025.py --lire-supabase" in contenu
+    assert contenu.index("Vérifier les cinq révisions fiscales dans la sauvegarde restaurée") < contenu.index(
+        "name: sauvegarde-pf2-")
+    assert contenu.index("Comparer la table fiscale sauvegardée à la lecture distante") > contenu.index(
+        "Comparer la révision 2025 en lecture seule")
+    assert "--rapport \"$RUNNER_TEMP/rapport-fiscal-2025.json\"" in contenu
     assert "--appliquer" not in contenu
 
 

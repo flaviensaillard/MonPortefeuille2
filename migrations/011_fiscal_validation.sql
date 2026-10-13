@@ -1,6 +1,7 @@
--- PROPOSITION LOCALE : NE PAS APPLIQUER à Supabase sans accord explicite.
--- À exécuter après 010 seulement si le protocole de validation et son lecteur
--- ont été acceptés et testés. Ne publie aucune révision et n'active aucun calcul.
+-- Migration de structure uniquement. Autorisée par le propriétaire sous réserve
+-- d'une sauvegarde chiffrée récente, restaurée et comparée à la lecture seule.
+-- À exécuter après 010 ; ne publie aucune révision, n'active aucun calcul.
+-- Le futur lecteur de règles et la publication R2 restent des étapes distinctes.
 -- Le propriétaire des titres n'est pas un paramètre fiscal de cette table :
 -- user_id identifie le compte applicatif, pas un conjoint ou un co-titulaire.
 

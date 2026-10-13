@@ -50,6 +50,16 @@ jobs:
           fichier=$(ls sauvegardes/*.pf2)
           python jobs/restauration.py "$fichier" --csv /tmp/controle-csv
           (cd sauvegardes && sha256sum -c "$(basename "$fichier").sha256")
+      # Le contrôle de restauration général accepte les tables optionnelles
+      # absentes. Avant 011, la table fiscale et ses 5 R1 doivent EXISTER dans
+      # l'archive ; sinon le run manuel échoue AVANT toute migration.
+      - name: Vérifier les cinq révisions fiscales dans la sauvegarde restaurée
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_011.py "$fichier"
       - uses: actions/upload-artifact@v4
         with:
           name: sauvegarde-pf2-${{ github.run_id }}
@@ -68,6 +78,13 @@ jobs:
         run: |
           python jobs/verifier_revision_fiscale_2025.py --lire-supabase > "$RUNNER_TEMP/rapport-fiscal-2025.json"
           python -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/rapport-fiscal-2025.json")); print("Révisions 2025 confirmables sous réserve :", r["revision_2_confirmable_sous_reserve"], "| écarts :", len(r["ecarts_code_2025_brouillon_vs_base"]), "| problèmes :", len(r["problemes"]), "| écriture autorisée :", r["ecriture_autorisee"])'
+      - name: Comparer la table fiscale sauvegardée à la lecture distante
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_011.py "$fichier" --rapport "$RUNNER_TEMP/rapport-fiscal-2025.json"
       - name: Joindre le rapport anonymisé de lecture fiscale
         if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
