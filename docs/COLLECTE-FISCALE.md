@@ -4,6 +4,77 @@
 Les montants présents dans le code 2.2.1 ne deviennent pas officiels parce qu'ils
 ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
+## Politique de collecte DGFiP (branche, 13/10/2026)
+
+Le bouton « Vérifier cette année (DGFiP) » ou « Vérifier 2023 à 2026 »
+**n'appelle plus OpenFisca**. Le script historique `fiscal_sources.js` reste dans
+le dépôt pour la traçabilité et ses collectes précédentes restent intactes dans
+`pf2_fiscal_collectes`, mais il n'est plus chargé par l'APK, ni autorisé dans
+le pont réseau. Aucune de ces anciennes collectes n'alimente la simulation.
+Aucun SQL nouveau ni migration annuelle : les extraits publics validés et leurs
+révisions sont conservés en cache local, séparés par compte et par **année des
+revenus**, et réévalués à chaque lecture. Une révision R2 2025 déjà active
+conserve toujours la priorité et n'est jamais réécrite par le bouton.
+
+| Revenus | Déclaration | IR (tranches €) | Décote base seule/couple (€) | QF général (€ par demi-part) | Repas salariés sans justificatifs détaillés (€) | Source de frais |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2023 | 2024 | 11 294 / 28 797 / 82 341 / 177 106 | 873 / 1 444 | 1 759 | 5,20 | [aide DGFiP déclaration 2024](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/frais.htm) |
+| 2024 | 2025 | 11 497 / 29 315 / 83 823 / 180 294 | 889 / 1 470 | 1 791 | 5,35 | [aide DGFiP déclaration 2025](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/frais.htm) |
+| 2025 | 2026 | 11 600 / 29 579 / 84 577 / 181 917 | 897 / 1 483 | 1 807 | 5,45 | [aide DGFiP déclaration 2026](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm) et [page repas DGFiP](https://www.impots.gouv.fr/particulier/frais-de-repas) |
+| 2026 | 2027 | non disponible au 13/10/2026 | non disponible | non disponible | non vérifié pour salariés | [aide déclaration 2027](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2027/aides/frais.htm), indisponible lors de la vérification |
+
+BOFiP (publications par année de revenus, et non par année de déclaration) :
+[IR 2023](https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20240618),
+[2024](https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20250414),
+[2025](https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407) ;
+[décote](https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407) ;
+[plafonnement QF](https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407).
+Pour 2023/2024 les deux derniers liens s'obtiennent en remplaçant la date
+`20260407` par `20240618`/`20250414`. Publication 18/06/2024,
+14/04/2025 et 07/04/2026 respectivement. Pour 2026, le lecteur consulte
+les permaliens *courants* de la doctrine BOFiP et exige que chaque valeur
+désigne explicitement **les revenus 2026**, avec date de publication : le BOFiP
+2025 daté de 2026 n'est **pas** réutilisé. Seule une nouvelle publication
+reconnue peut alimenter la simulation. Le code des formules ne se met pas à
+jour tout seul : en cas de changement de régime ou de formule, une nouvelle
+APK et ses tests sont indispensables.
+
+Les pages du simulateur sont consultées avec `année de déclaration = revenus + 1`.
+Le lecteur exige l'année des revenus et cinq lignes de barème automobile avec
+coefficients cohérents ; les repas sans justificatifs détaillés et les bornes
+d'abattement de 10 % sont lus séparément. Pour 2023–2024 les repas proviennent
+de la page du simulateur du millésime ; la page de repas actuelle ne leur est
+pas appliquée rétroactivement. Frais du foyer, justificatifs, participation
+employeur, distance domicile-travail, véhicule, arrondis et éligibilité
+restent à vérifier personnellement.
+
+**Limites non masquées par le bouton :** prélèvements sociaux ventilés par
+nature et par date (RCM précomptés/non précomptés, plus-values et crypto),
+CSG déductible et calendrier, règles complètes de crypto/2086, plafonds QF
+particuliers, options du foyer, PAS et modifications de formules :
+**non disponibles / non vérifiés par ce lecteur**. Les taux de prélèvements
+sociaux de certains RCM encaissés en 2026 ont changé selon la
+[DGFiP](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers), mais
+le régime et la date ne peuvent pas être réduits à un taux universel. Les
+chiffres embarqués non recoupés restent des **hypothèses** pour 2023–2024 ;
+la R2 2025 a son propre audit. **Le calcul revenus 2026 est suspendu** tant
+que les pièces DGFiP nécessaires (IR, décote, QF et frais salariés) ne sont
+pas réunies : pas de recopie des chiffres 2025. Même après leur présence,
+les autres domaines resteront explicitement non vérifiés : il ne s'agit
+jamais d'une révision complète certifiée.
+
+**Écart historique notable :** les anciennes constantes JS 2023 contiennent
+une décote différente ; les constantes JS 2024 contiennent d'autres seuils IR,
+décote et plafond QF. Quand les pages DGFiP passent les contrôles stricts,
+la simulation Android indicative utilise leurs chiffres 2023/2024 ; cela ne
+modifie ni les lignes R1 de Supabase, ni le moteur Python hors APK. Sans
+accès à ces pages ou sans cache DGFiP validé pour ce compte, l'application
+reste sur son code embarqué signalé comme non vérifié. Une correction globale
+Python/serveur serait un chantier distinct.
+
+Les sections ci-dessous retracent **l'ancien fonctionnement OpenFisca et les
+migrations déjà exécutées**, et ne décrivent plus le bouton actuel.
+
 ## Modèle de données
 
 - `pf2_fiscal_annees` contient une **copie par année de revenus de plusieurs
@@ -100,7 +171,7 @@ avec différences attendues et règles non auditées ; ce n'est ni une simulatio
 de lecture Supabase, ni une ligne publiable, ni une sauvegarde. Aucune écriture
 de paramètres fiscaux n'a été effectuée pendant cette préparation : seule la structure de la table a été étendue par 011.
 
-## Collecte sur le téléphone (APK de branche, distincte de la release publique 2.2.1)
+## Historique : collecte OpenFisca sur les APK antérieures
 
 Le bouton de la version antérieure à la migration 012 lit le barème IR de **l'année sélectionnée** sur
 `https://api.fr.openfisca.org/latest/parameter/impot_revenu/bareme_ir_depuis_1945/bareme`.
@@ -127,7 +198,7 @@ installer un APK signé avec une clé de développement par-dessus l'application
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.
 
-## Extension des paramètres isolés (branche, 13/10/2026)
+## Historique : extension des paramètres isolés (APK antérieures)
 
 **Migration 012 exécutée par le propriétaire le 13/10/2026 (succès communiqué), après le run de sauvegarde/restauration 38396580535 réussi. Ne pas la rejouer.** Avant cela, la table 009/010 limitait
 `source` et `source_url` au barème IR. Le script
@@ -180,7 +251,9 @@ Tests locaux sans Supabase :
 `node tests/test_fiscal_maj_indicative.js`.
 
 
-## Frais réels salariés : pages DGFiP (extension du 13/10/2026)
+## Historique : première version du lecteur DGFiP frais (13/10/2026)
+
+Le périmètre ci-dessous décrit la première version, désormais complétée par la politique en tête de page pour 2023–2026.
 
 Le bouton cherche désormais séparément :
 

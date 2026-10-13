@@ -58,13 +58,14 @@ verifier('allowlist HTTPS : Yahoo Finance', /query1\.finance\.yahoo\.com/.test(p
     && /query2\.finance\.yahoo\.com/.test(pont));
 verifier('allowlist HTTPS : INSEE', /api\.insee\.fr/.test(pont));
 const listeHotes = pont.match(/HOTES_AUTORISES\s*=\s*\{([^}]+)\}/);
-const sourceFiscale = lire('app/src/main/assets/www/js/fiscal_sources.js');
-const urlOpenFisca = sourceFiscale.match(/var SOURCE = '(https:\/\/[^']+)'/);
-verifier('source OpenFisca autorisée par hôte exact, sans wildcard',
-    !!listeHotes && !!urlOpenFisca &&
-    listeHotes[1].includes('"' + new URL(urlOpenFisca[1]).hostname + '"') &&
-    !listeHotes[1].includes('".openfisca.org"') &&
-    /h\.equals\(a\)/.test(pont));
+verifier('collecte DGFiP autorisée par hôtes exacts, OpenFisca absent',
+    !!listeHotes && ['bofip.impots.gouv.fr', 'www.impots.gouv.fr',
+        'simulateur-ir-ifi.impots.gouv.fr'].every(h => listeHotes[1].includes('"' + h + '"'))
+    && !listeHotes[1].includes('openfisca.org') && /h\.equals\(a\)/.test(pont));
+verifier('redirection BOFiP unique vers même hôte, pas de suivi général',
+    /doctrine\/BOI-IR-LIQ-20-/.test(pont)
+    && /cible\.getHost\(\)/.test(pont)
+    && /setInstanceFollowRedirects\(false\)/.test(pont));
 verifier('les URL non HTTPS sont refusées par le pont',
     /!"https"\.equalsIgnoreCase/.test(pont) || /https.*equalsIgnoreCase.*getProtocol/.test(pont),
     'executer() doit rejeter tout ce qui n’est pas https');

@@ -58,22 +58,16 @@
 
     var URL_MAJ_BAREMES = 'https://arena.ai/agent/01a0f24c-13af-734b-9dd4-91b1ceafa74f';
 
-    // Les révisions lues sont propres à une session, non persistées sur l'appareil.
-    // Aucun statut SQL ne remplace la validation de forme et de couverture du lecteur.
-    var revisionsActives = Object.create(null), baremesPartiels = Object.create(null),
-        parametresPartiels = Object.create(null), fraisOfficiels = Object.create(null);
-    var sequenceLecture = 0, dernierControle = null;
+    // Collectes BOFiP / frais DGFiP par année et compte. Les anciennes
+    // collectes OpenFisca restent en base mais ne sont plus relues ni appliquées.
+    var revisionsActives = Object.create(null), officiels = Object.create(null),
+        fraisOfficiels = Object.create(null);
+    var sequenceLecture = 0, rapportsControle = Object.create(null);
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
-    function baremePartiel(annee) { return !paramsActifs(annee) && baremesPartiels[annee] || null; }
-    function parametrePartiel(annee, cle) {
-        return !paramsActifs(annee) && BAREMES[annee] && annee >= 2026 &&
-            parametresPartiels[annee] && parametresPartiels[annee].parametres[cle];
-    }
+    function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
     function franchiseCrypto(annee) {
         var p = paramsActifs(annee);
-        if (p) return p.franchise_crypto;
-        var valeur = parametrePartiel(annee, 'crypto_franchise');
-        return typeof valeur === 'number' ? valeur : CRYPTO_FRANCHISE_CESSIONS;
+        return p ? p.franchise_crypto : CRYPTO_FRANCHISE_CESSIONS;
     }
     function tauxIrForfaitaire(annee) {
         var p = paramsActifs(annee);
@@ -90,52 +84,8 @@
     function effacerRevisions() {
         ++sequenceLecture;
         revisionsActives = Object.create(null);
-        baremesPartiels = Object.create(null);
-        parametresPartiels = Object.create(null);
+        officiels = Object.create(null);
         fraisOfficiels = Object.create(null);
-        dernierControle = null;
-    }
-    function chargerBaremesPartiels(lignes, numero, compte) {
-        var actuel = PF.net.auth.utilisateur();
-        if (numero !== sequenceLecture || !actuel || actuel.id !== compte.id ||
-            !Array.isArray(lignes) || !PF.fiscalSources) return;
-        var derniers = Object.create(null);
-        lignes.forEach(function (ligne) {
-            var an = ligne.annee_revenus;
-            if (ligne.source !== 'openfisca_bareme_ir' || !BAREMES[an] || an < 2026 ||
-                paramsActifs(an) || !Number.isInteger(ligne.revision) || ligne.revision < 1) return;
-            var valide = ligne.source_url === PF.fiscalSources.SOURCE
-                ? PF.fiscalSources.validerCollecte(an, ligne.valeurs) : null;
-            if (!derniers[an] || ligne.revision > derniers[an].revision) {
-                derniers[an] = { revision: ligne.revision, valeurs: valide };
-            } else if (ligne.revision === derniers[an].revision) {
-                derniers[an].valeurs = null; // doublon : refuser plutôt que choisir
-            }
-        });
-        Object.keys(derniers).forEach(function (an) {
-            if (derniers[an].valeurs) baremesPartiels[an] = derniers[an].valeurs;
-        });
-    }
-    function chargerParametresPartiels(lignes, numero, compte) {
-        var actuel = PF.net.auth.utilisateur();
-        if (numero !== sequenceLecture || !actuel || actuel.id !== compte.id ||
-            !Array.isArray(lignes) || !PF.fiscalSources) return;
-        var derniers = Object.create(null);
-        lignes.forEach(function (ligne) {
-            var an = ligne.annee_revenus;
-            if (ligne.source !== 'openfisca_parametres' || !BAREMES[an] || an < 2026 ||
-                paramsActifs(an) || !Number.isInteger(ligne.revision) || ligne.revision < 1) return;
-            var valide = ligne.source_url === PF.fiscalSources.RACINE
-                ? PF.fiscalSources.validerParametres(an, ligne.valeurs) : null;
-            if (!derniers[an] || ligne.revision > derniers[an].revision) {
-                derniers[an] = { revision: ligne.revision, valeurs: valide };
-            } else if (ligne.revision === derniers[an].revision) {
-                derniers[an].valeurs = null;
-            }
-        });
-        Object.keys(derniers).forEach(function (an) {
-            if (derniers[an].valeurs) parametresPartiels[an] = derniers[an].valeurs;
-        });
     }
     function actualiserRevisions(ctx) {
         effacerRevisions();
@@ -144,7 +94,12 @@
         // Frais officiels locaux et isolés par compte/millésime, R2 prioritaire.
         if (compte && compte.id && PF.fiscalFraisSources) {
             annees().forEach(function (an) {
-                if (an >= 2026) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+                if (an >= 2023) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+            });
+        }
+        if (compte && compte.id && PF.fiscalDgfipSources) {
+            annees().forEach(function (an) {
+                if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
             });
         }
         // L'or détenu en métal relève d'un régime DISTINCT non publié par R2.
@@ -166,14 +121,7 @@
             }
             return null;
         }).catch(function () { return null; }).then(function (revision) {
-            // Source IR partielle distincte : ne remplace jamais une R2 complète.
-            // Refuser le résultat d'une autre session ou d'une lecture périmée.
-            if (!PF.fiscalSources) return revision;
-            return PF.fiscalSources.consulter().then(function (lignes) {
-                chargerBaremesPartiels(lignes, numero, compte);
-                chargerParametresPartiels(lignes, numero, compte);
-                return revision;
-            }).catch(function () { return revision; });
+            return revision; // historique OpenFisca non consulté, non appliqué
         }); // hors ligne : estimation embarquée, jamais ancienne règle en cache
     }
     function revisionActive(annee) { return !!paramsActifs(annee); }
@@ -189,16 +137,19 @@
                 dcPlafondCouple: b.decote_plafond_couple };
         }
         if (!BAREMES[annee]) throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : ' + annees().join(', ') + '.');
-        var partiel = baremePartiel(annee);
-        if (partiel) {
-            // Seulement seuils et taux de l'IR ; décote et autres règles restent
-            // provisoires. Ne pas écrire cette simulation dans pf2_fiscal_annees.
-            var embarque = BAREMES[annee];
-            return { tranches: partiel.tranches, taux: partiel.taux,
-                dc: embarque.dc, dcPlafond: embarque.dcPlafond,
-                dcCouple: embarque.dcCouple, dcPlafondCouple: embarque.dcPlafondCouple };
-        }
-        return BAREMES[annee];
+        var officiel = officiels[annee] || {};
+        var embarque = BAREMES[annee];
+        // 2026 ne peut pas simuler l'IR avec le barème recopié de 2025.
+        if (annee >= 2026 && (!officiel.ir || !officiel.decote || !officiel.qf ||
+            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
+            !fraisOfficiels[annee].abatt))
+            throw new Error('Revenus ' + annee + ' : barème, décote ou plafond QF DGFiP non disponible ; simulation suspendue.');
+        return { tranches: officiel.ir ? officiel.ir.tranches : embarque.tranches,
+            taux: officiel.ir ? officiel.ir.taux : embarque.taux,
+            dc: officiel.decote ? officiel.decote.dc : embarque.dc,
+            dcPlafond: officiel.decote ? officiel.decote.dcPlafond : embarque.dcPlafond,
+            dcCouple: officiel.decote ? officiel.decote.dcCouple : embarque.dcCouple,
+            dcPlafondCouple: officiel.decote ? officiel.decote.dcPlafondCouple : embarque.dcPlafondCouple };
     }
     function tauxPS(annee) {
         var p = paramsActifs(annee);
@@ -220,8 +171,8 @@
     function plafondQF(annee) {
         var p = paramsActifs(annee);
         if (p) return p.quotient_familial.plafond_general_par_demi_part;
-        var collecte = parametrePartiel(annee, 'plafond_qf');
-        if (typeof collecte === 'number') return collecte;
+        if (officiels[annee] && typeof officiels[annee].qf === 'number') return officiels[annee].qf;
+        if (annee >= 2026) throw new Error('Plafond QF DGFiP non disponible pour les revenus ' + annee + '.');
         if (PLAFOND_QF_GENERAL[annee] === undefined) throw new Error('Aucun plafond QF pour ' + annee + '.');
         return PLAFOND_QF_GENERAL[annee];
     }
@@ -294,8 +245,9 @@
             throw new Error('Aucun abattement 10 % pour les revenus ' + annee + '.');
         var sal = Math.max(0, U.num(salaire, 0));
         if (sal <= 0) return 0;
-        var plancher = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plancher : PLANCHER_ABATTEMENT_10[annee];
-        var plafond = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plafond : PLAFOND_ABATTEMENT_10[annee];
+        var frais = fraisOfficiels[annee] && fraisOfficiels[annee].abatt;
+        var plancher = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plancher : frais ? frais.min : PLANCHER_ABATTEMENT_10[annee];
+        var plafond = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plafond : frais ? frais.max : PLAFOND_ABATTEMENT_10[annee];
         return euro2025(Math.min(Math.max(sal * (paramsActifs(annee) ? paramsActifs(annee).abattement_10.taux : TAUX_ABATTEMENT_SALAIRES), Math.min(sal, plancher)), plafond), annee);
     }
 
@@ -305,7 +257,7 @@
         if (paramsActifs(annee)) return paramsActifs(annee).forfait_repas;
         var officiel = fraisOfficiels[annee];
         if (officiel && typeof officiel.repas === 'number') return officiel.repas;
-        if (FORFAIT_REPAS[annee] === undefined) return null;
+        if (annee >= 2026 || FORFAIT_REPAS[annee] === undefined) return null;
         return FORFAIT_REPAS[annee];
     }
 
@@ -353,6 +305,8 @@
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
         var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
+        if (annee >= 2026 && !sourceKm && !paramsActifs(annee))
+            throw new Error('Barème kilométrique DGFiP des revenus ' + annee + ' non disponible.');
         var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle]
             : sourceKm ? sourceKm[cle] : BAREME_KM_PAR_ANNEE[annee][cle];
         var montant, formule;
@@ -484,6 +438,11 @@
         if (revisionActive(cible)) {
             return { disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
                 message: 'Paramètres publiés pour les revenus ' + cible + ' appliqués ; les situations personnelles restent à vérifier.' };
+        }
+        if (officiels[cible] && officiels[cible].ir && officiels[cible].decote && officiels[cible].qf) {
+            return { disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
+                message: 'IR, décote et plafond QF général DGFiP des revenus ' + cible
+                    + ' relus ; autres régimes et conditions personnels non certifiés.' };
         }
         var src = SOURCE_PAR_ANNEE[cible] || '';
         if ((/recouper|provisoire/i).test(src) && auj >= new Date(cible + 1, 3, 1)) {
@@ -1103,16 +1062,22 @@
         out += '<div class="chips">' + annees().map(function (a) {
             return '<button class="chip' + (a === annee ? ' actif' : '') + '" data-fisc="annee" data-valeur="' + a + '">Revenus ' + a + '</button>';
         }).join('') + '</div>';
-        if (!BAREMES[annee]) {
+        if (!BAREMES[annee] || (annee >= 2026 && (!officiels[annee] ||
+            !officiels[annee].ir || !officiels[annee].decote || !officiels[annee].qf ||
+            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
+            !fraisOfficiels[annee].abatt))) {
             return out + '<div class="info"><b>Revenus ' + UI.h(annee)
-                + ' : calcul fiscal indisponible.</b> Aucun ensemble de règles compatible pour ce millésime. '
+                + ' : calcul fiscal indisponible.</b> IR, décote, plafond QF ou frais salariés officiels de ce millésime non réunis. '
                 + 'Le barème isolé d’une source externe ne suffit pas à produire un bilan ; '
-                + 'les chiffres d’une autre année ne sont pas réutilisés.'
+                + 'les chiffres d’une autre année ne sont pas réutilisés. Déclaration ' + UI.h(annee + 1) + ' ≠ revenus ' + UI.h(annee) + '.'
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="collecter">'
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
-                + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px">'
-                + (dernierControle && dernierControle.annee === annee ? UI.h(dernierControle.texte) : '')
-                + '</div></div>';
+                + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
+                + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
+                + (rapportsControle[annee] ? UI.h(rapportsControle[annee]) : '')
+                + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
+                    .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
+                        + UI.h(rapportsControle[an]) + '</div>'; }).join('') + '</div>';
         }
 
         // --- Bandeau de mise à jour
@@ -1120,19 +1085,18 @@
             out += '<div class="ok-vert">Révision publiée des paramètres ' + UI.h(annee)
                 + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
         } else {
-            var parametresUtilises = [];
-            if (typeof parametrePartiel(annee, 'plafond_qf') === 'number') parametresUtilises.push('plafond QF général');
-            if (typeof parametrePartiel(annee, 'crypto_franchise') === 'number') parametresUtilises.push('seuil crypto');
-            if (fraisOfficiels[annee] && typeof fraisOfficiels[annee].repas === 'number') parametresUtilises.push('forfait repas DGFiP');
-            if (fraisOfficiels[annee] && fraisOfficiels[annee].km) parametresUtilises.push('barème kilométrique DGFiP');
-            out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
-                + (baremePartiel(annee)
-                    ? ' : barème IR OpenFisca appliqué à une simulation indicative seulement.'
-                    : ' : barème IR embarqué, non homologué.')
-                + (parametresUtilises.length
-                    ? ' Valeurs OpenFisca du même millésime utilisées à titre indicatif : ' + UI.h(parametresUtilises.join(', ')) + '.'
-                    : '')
-                + ' Les autres règles restent provisoires.</div>';
+            var valeurDGFiP = officiels[annee] || {};
+            var utilises = [];
+            if (valeurDGFiP.ir) utilises.push('barème IR');
+            if (valeurDGFiP.decote) utilises.push('décote');
+            if (valeurDGFiP.qf) utilises.push('plafond QF général');
+            if (fraisOfficiels[annee] && fraisOfficiels[annee].abatt) utilises.push('abattement salariés');
+            if (fraisOfficiels[annee] && fraisOfficiels[annee].repas) utilises.push('repas salariés');
+            if (fraisOfficiels[annee] && fraisOfficiels[annee].km) utilises.push('kilomètres automobiles');
+            out += '<div class="info">Simulation indicative ' + UI.h(annee) + ' : '
+                + (utilises.length ? 'DGFiP : ' + UI.h(utilises.join(', ')) + '. ' : 'aucune valeur DGFiP relue. ')
+                + 'Autres paramètres embarqués non vérifiés, aucune révision complète. '
+                + 'Les anciennes collectes OpenFisca sont conservées en historique, jamais appliquées.</div>';
         }
         if (maj.disponible) {
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
@@ -1144,14 +1108,19 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">OpenFisca fournit le barème IR et certains paramètres isolés ; les pages DGFiP peuvent fournir repas et kilomètres si le millésime est explicite. '
+            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés. '
             + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
-            + '<button class="btn sec" data-fisc="collecter">⟳ Mettre à jour les données fiscales disponibles</button>'
-            + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px">'
-            + (dernierControle && dernierControle.annee === annee ? UI.h(dernierControle.texte) : '')
+            + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
+            + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+            + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
+            + (rapportsControle[annee] ? UI.h(rapportsControle[annee]) : '')
             + '</div></div>';
+        var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
+        if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
+            + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
+                + UI.h(rapportsControle[an]) + '</div>'; }).join('') + '</div>';
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
@@ -1721,67 +1690,31 @@
     }
 
     function bilanMiseAJour(annee, resultat) {
-        var ir = resultat.disponibles.indexOf(annee) >= 0;
-        var situation = !ir ? (baremePartiel(annee)
-            ? 'Aucun barème IR explicite trouvé aujourd’hui : une collecte antérieure de la même année reste utilisée à titre indicatif.'
-            : resultat.erreur_ir ? 'Recherche IR impossible : aucun nouveau taux IR appliqué.'
-            : 'Aucun barème IR explicite pour cette année : aucun nouveau taux IR appliqué.')
-            : revisionActive(annee) ? 'Barème IR collecté ; la révision complète déjà active garde la priorité.'
-            : baremePartiel(annee) ? 'Seuils et taux IR importés et utilisés dans la simulation indicative.'
-            : 'Barème IR collecté, mais non appliqué (année sans calcul compatible ou relecture indisponible).';
-        var p = resultat.parametres, details = '';
-        var frais = resultat.frais;
-        if (p) {
-            var appliques = [], observes = [], manquants = [], nonEnregistres = [];
-            var noms = {
-                plafond_qf: 'plafond général QF', decote_base_celibataire: 'décote (personne seule)',
-                decote_base_couple: 'décote (couple)', decote_taux: 'taux de décote',
-                csg_patrimoine: 'CSG patrimoine', csg_placement: 'CSG placements',
-                csg_deductible_patrimoine: 'CSG déductible patrimoine',
-                csg_deductible_placement: 'CSG déductible placements',
-                solidarite_patrimoine: 'solidarité patrimoine',
-                solidarite_placement: 'solidarité placements',
-                crypto_franchise: 'seuil crypto', crypto_ir_taux: 'taux IR crypto'
-            };
-            function affiche(nom) {
-                var montant = p.valeurs && p.valeurs[nom];
-                return noms[nom] + (typeof montant === 'number'
-                    ? ' = ' + (nom === 'plafond_qf' || nom.indexOf('decote_base') === 0 ||
-                        nom === 'crypto_franchise' ? montant + ' €' : montant * 100 + ' %') : '');
-            }
-            Object.keys(PF.fiscalSources.PARAMETRES).forEach(function (nom) {
-                var etat = p.etats && p.etats[nom] || 'non recherché';
-                if (etat !== 'valeur explicite collectée') manquants.push(noms[nom] + ' (' + etat + ')');
-                else if (!p.enregistree) nonEnregistres.push(affiche(nom));
-                else if (p.enregistree && BAREMES[annee] && annee >= 2026 && !revisionActive(annee) &&
-                    typeof parametrePartiel(annee, nom) === 'number' &&
-                    (nom === 'plafond_qf' || nom === 'crypto_franchise')) appliques.push(affiche(nom));
-                else observes.push(affiche(nom));
-            });
-            details = ' Paramètres explicitement sourcés et appliqués à la simulation indicative : '
-                + (appliques.join(', ') || 'aucun') + '. Valeurs collectées mais non applicables isolément : '
-                + (observes.join(', ') || 'aucune') + '. Valeurs repérées dont l’enregistrement par ce clic n’est pas confirmé (une collecte antérieure peut rester active) : '
-                + (nonEnregistres.join(', ') || 'aucune') + '. Aucune valeur explicite : '
-                + (manquants.join(', ') || 'aucune') + '.';
-            if (p.erreur) details += ' Enregistrement non confirmé : ' + p.erreur
-                + '. Ne rejouez aucune migration pour un conflit de révision.';
+        var boi = resultat.boi || {}, frais = resultat.frais || {};
+        var v = boi.valeurs || {}, f = frais.valeurs || {};
+        var sources = v.sources || {};
+        function statut(nom, valeur, source) {
+            return nom + ' : ' + (valeur || 'non disponible / non vérifié')
+                + (source ? ' (publication ' + source.datePublication + ', ' + source.url + ')' : '');
         }
-        if (frais) {
-            details += ' Sources officielles DGFiP pour les frais : repas '
-                + (frais.etats && frais.etats.repas || frais.erreur || 'non recherché')
-                + ', barème kilométrique voitures '
-                + (frais.etats && frais.etats.km || frais.erreur || 'non recherché') + '.';
-            if (frais.enregistree && frais.valeurs && BAREMES[annee] && annee >= 2026 && !revisionActive(annee)) {
-                if (typeof frais.valeurs.repas === 'number') details += ' Repas ' + frais.valeurs.repas + ' €/jour utilisés à titre indicatif.';
-                if (frais.valeurs.km) details += ' Barème kilométrique voiture du millésime utilisé à titre indicatif.';
-            }
-            if (frais.erreur) details += ' Erreur de consultation des frais : ' + frais.erreur + '.';
-        }
-        return situation + details + ' Source des valeurs collectées : OpenFisca-France (modèle, non publication officielle). Non vérifiés par ce bouton : formule de décote et plafonds d’application, '
-            + 'quotient familial spécial, composition des prélèvements sociaux par catégorie/date, '
-            + 'CSG effectivement déductible et calendrier, conditions personnelles des frais de repas et kilométriques, '
-            + 'abattements, arrondis, méthode crypto/2086 et changements des formules. '
-            + 'Les revenus personnels et le PAS officiel ne sont jamais contrôlés par cette collecte.';
+        var ir = v.ir && v.ir.tranches.join(' / ') + ' €, taux 0 / 11 / 30 / 41 / 45 %';
+        var decote = v.decote && v.decote.dc + ' / ' + v.decote.dcCouple + ' € (45,25 %, plafond brut '
+            + v.decote.dcPlafond + ' / ' + v.decote.dcPlafondCouple + ' €)';
+        return 'Revenus ' + annee + ' (déclaration ' + (annee + 1) + ') : collecte partielle DGFiP, '
+            + (revisionActive(annee) ? 'R2 déjà active prioritaire. ' : 'simulation indicative seulement. ')
+            + statut('IR', ir, sources.ir) + ' ; ' + statut('Décote', decote, sources.decote) + ' ; '
+            + statut('Plafond QF général (hors plafonds spéciaux)', v.qf && v.qf + ' €/demi-part', sources.qf) + ' ; '
+            + statut('Abattement salariés 10 % (min/max)', f.abatt && f.abatt.min + ' / ' + f.abatt.max + ' €', null) + ' ; '
+            + statut('Repas salariés (sans justificatifs détaillés, conditions à vérifier)', f.repas && f.repas + ' €/repas', null) + ' ; '
+            + statut('Barème kilomètres voiture (3 à 7 CV)', f.km && '5 lignes vérifiées', null)
+            + '. Sources frais : ' + (PF.fiscalFraisSources ? PF.fiscalFraisSources.KM(annee) + ' ; '
+                + PF.fiscalFraisSources.repasUrl(annee) : 'non disponible') + '. '
+            + 'Prélèvements sociaux par régime/date, CSG déductible, crypto/2086, plafonds QF spéciaux, '
+            + 'changements de formule et conditions personnelles : non disponibles / non vérifiés par ce lecteur. '
+            + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
+            + 'État des sources : BOFiP ' + JSON.stringify(boi.etats || boi.erreur || {})
+            + ' ; frais ' + JSON.stringify(frais.etats || frais.erreur || {}) + '. '
+            + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
 
     // -------------------------------------------------------------- événements
@@ -1793,53 +1726,44 @@
         vue.addEventListener('click', function (e) {
             var cible = e.target.closest ? e.target : null;
             if (!cible) return;
-            var collecte = cible.closest('[data-fisc="collecter"]');
+            var collecte = cible.closest('[data-fisc="collecter"], [data-fisc="collecter-tout"]');
             if (collecte) {
                 var etat = vue.querySelector('#etatCollecteFiscale');
-                if (!PF.fiscalSources) { if (etat) etat.textContent = 'Module de collecte absent.'; return; }
-                collecte.disabled = true;
-                if (etat) etat.textContent = 'Recherche auprès d’OpenFisca et des pages DGFiP…';
-                var cibleAnnee = anneeEnCours();
-                var proprietaire = PF.net.auth.utilisateur();
-                if (!proprietaire) {
-                    if (etat) etat.textContent = 'Connectez-vous à votre compte avant de rechercher une mise à jour.';
-                    collecte.disabled = false;
+                if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources) {
+                    if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
-                // Une panne d'une source n'efface pas les autres collectes.
-                // La table des paramètres nécessite la migration 012 (une fois).
-                PF.fiscalSources.synchroniser(cibleAnnee).catch(function (err) {
-                    return { disponibles: [], erreur_ir: String(err && err.message || err) };
-                }).then(function (res) {
+                var proprietaire = PF.net.auth.utilisateur();
+                if (!proprietaire) {
+                    if (etat) etat.textContent = 'Connectez-vous avant de rechercher une mise à jour.';
+                    return;
+                }
+                var années = collecte.getAttribute('data-fisc') === 'collecter-tout'
+                    ? [2023, 2024, 2025, 2026] : [anneeEnCours()];
+                collecte.disabled = true;
+                if (etat) etat.textContent = 'Lecture DGFiP des revenus ' + années.join(', ') + '…';
+                Promise.all(années.map(function (an) {
                     return Promise.all([
-                        PF.fiscalSources.synchroniserParametres(cibleAnnee).catch(function (err) {
+                        PF.fiscalDgfipSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
                         }),
-                        PF.fiscalFraisSources ? PF.fiscalFraisSources.chercher(cibleAnnee).catch(function (err) {
+                        PF.fiscalFraisSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
-                        }) : Promise.resolve({ erreur: 'Module des frais absent.' })
-                    ]).then(function (resultats) {
-                        res.parametres = resultats[0]; res.frais = resultats[1]; return res;
-                    });
-                }).then(function (res) {
+                        })
+                    ]).then(function (resultats) { return { annee: an, boi: resultats[0], frais: resultats[1] }; });
+                })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();
-                    if (!proprietaire || !courant || courant.id !== proprietaire.id) {
-                        throw new Error('Session changée pendant la recherche ; actualisez après reconnexion.');
-                    }
-                    // Relecture sous la session courante : seule une collecte
-                    // valide et appartenant au compte peut servir de simulation.
+                    if (!courant || courant.id !== proprietaire.id)
+                        throw new Error('Session changée pendant la recherche.');
                     return actualiserRevisions(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
-                        dernierControle = { annee: cibleAnnee, texte: bilanMiseAJour(cibleAnnee, res)
-                            + (res.erreur_ir ? ' Recherche du barème IR interrompue : ' + res.erreur_ir + '.' : '') };
+                        resultats.forEach(function (r) { rapportsControle[r.annee] = bilanMiseAJour(r.annee, r); });
                         PF.app.rendre();
                     });
                 }).catch(function (err) {
-                    var message = String(err && err.message || err);
-                    if (etat) etat.textContent = 'Actualisation interrompue : ' + message
-                        + ' Cette collecte partielle ne modifie ni la révision fiscale publiée ni les calculs.'
-                        + ' Ne rejouez pas les migrations ; vérifiez la cause indiquée avant de réessayer.';
+                    if (etat) etat.textContent = 'Actualisation interrompue : '
+                        + String(err && err.message || err) + '. Aucune révision complète publiée.';
                 }).then(function () { collecte.disabled = false; });
                 return;
             }

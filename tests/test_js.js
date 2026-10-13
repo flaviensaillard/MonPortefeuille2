@@ -285,7 +285,7 @@ test('bilan du couple : 3CN et 2OP des cases suivent le scénario retenu', () =>
         && proche(best.ps_deja_precomptes, 86);
 });
 test('comparaison PFU / barème renvoie un choix', () => {
-    const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2026, 'Marié(e) / Pacsé(e)');
+    const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2025, 'Marié(e) / Pacsé(e)');
     return (c.choix === 'PFU' || c.choix === 'Barème progressif') && c.pfu.total > 0;
 });
 test('frais kilométriques 20 000 km / 5 CV (revenus 2025)', () =>

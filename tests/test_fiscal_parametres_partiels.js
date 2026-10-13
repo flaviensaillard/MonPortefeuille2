@@ -1,6 +1,6 @@
 'use strict';
-/* Sources scalaires : période explicite, révisions immuables, lecture isolée,
-   aucune activation d'une formule ou d'un régime social avec un seul taux. */
+/* Archive du collecteur scalaire OpenFisca : conserve ses lignes et leur
+   validation historique, mais aucune n'est appliquée par la simulation. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -49,7 +49,7 @@ for (const nom of ['util.js', 'fiscal.js', 'fiscal_revisions.js', 'fiscal_source
 const f = contexte.PF.fiscal, src = contexte.PF.fiscalSources;
 const chemin = cle => src.PARAMETRES[cle].chemin;
 (async () => {
-    const initial = f.plafondQF(2026);
+    assert.throws(() => f.plafondQF(2026), /non disponible/);
     assert.equal(src.validerParametres(2026, { periode: '2025-01-01', parametres: { plafond_qf: 2000 } }), null);
     assert.equal(src.validerParametres(2026, { periode: '2026-01-01', parametres: { plafond_qf: '2000' } }), null);
     assert.equal(src.validerParametres(2026, { periode: '2026-01-01', parametres: { invente: 2000 }, chemins: { invente: 'invente' } }), null);
@@ -64,13 +64,13 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.equal(ecritures, 1);
     assert.equal(lignes.a[0].valeurs.chemins.plafond_qf, chemin('plafond_qf'));
     await f.actualiserRevisions({ transactions: [] });
-    assert.equal(f.plafondQF(2026), 1900);
-    assert.equal(f.franchiseCrypto(2026), 310);
+    assert.throws(() => f.plafondQF(2026), /non disponible/, 'OpenFisca ne s’applique plus');
+    assert.equal(f.franchiseCrypto(2026), 305, 'crypto OpenFisca ignorée');
     assert.equal(f.plafondQF(2025), 1807, 'millésime historique intact');
     assert.equal(f.tauxPS(2026), f.PS_PAR_ANNEE[2026], 'CSG isolée ≠ PS complets');
-    assert.match(f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat }), /plafond général QF = 1900 €, seuil crypto = 310 €/);
-    assert.match(f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat }), /CSG placements = 10.6 %/);
-    assert.throws(() => f.plafondQF(2027), /Aucun plafond QF/);
+    assert.doesNotMatch(f.bilanMiseAJour(2026, { boi: {} }), /1900|310|OpenFisca/);
+    assert.match(f.bilanMiseAJour(2026, { boi: {} }), /CSG déductible.*non disponibles/);
+    assert.throws(() => f.plafondQF(2027), /non disponible/);
     await src.synchroniserParametres(2026);
     assert.equal(ecritures, 1, 'répétition sans changement');
     masquerLecture = true; // concurrence ou liste initiale tronquée : la révision 1 existe
@@ -86,7 +86,7 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.doesNotMatch(resultat.erreur, /privé|23505/);
     const rapportErreur = f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat });
     assert.doesNotMatch(rapportErreur, /non recherché|vérifier la migration 012/);
-    assert.match(rapportErreur, /Valeurs repérées dont l’enregistrement par ce clic n’est pas confirmé \(une collecte antérieure peut rester active\) : plafond général QF/);
+    assert.doesNotMatch(rapportErreur, /1900|1950/);
     refuserEcriture = false;
     masquerLecture = true; // même collision, nouveau contenu => révision 2
     resultat = await src.synchroniserParametres(2026);
@@ -95,18 +95,18 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.equal(lignes.a[1].revision, 2);
     assert.equal(lignes.a[0].valeurs.parametres.plafond_qf, 1900, 'révision initiale intacte');
     await f.actualiserRevisions({ transactions: [] });
-    assert.equal(f.plafondQF(2026), 1950, 'révision suivante appliquée');
+    assert.throws(() => f.plafondQF(2026), /non disponible/, 'révision OpenFisca jamais appliquée');
     const mauvaise = clone(lignes.a[1]); mauvaise.revision = 3;
     mauvaise.valeurs.chemins.plafond_qf = 'chemin-detourne'; lignes.a.push(mauvaise);
     await f.actualiserRevisions({ transactions: [] });
-    assert.equal(f.plafondQF(2026), initial, 'dernière révision invalide : ne pas reprendre une ancienne');
+    assert.throws(() => f.plafondQF(2026), /non disponible/);
     lignes.a.pop();
     compte = 'b';
     await f.actualiserRevisions({ transactions: [] });
-    assert.equal(f.plafondQF(2026), initial, 'isolation des comptes');
+    assert.throws(() => f.plafondQF(2026), /non disponible/);
     compte = 'a';
     await f.actualiserRevisions({ transactions: [] });
-    assert.equal(f.plafondQF(2026), 1950);
+    assert.throws(() => f.plafondQF(2026), /non disponible/);
     const sql = fs.readFileSync(path.join(racine, 'migrations/012_collecte_parametres_fiscaux.sql'), 'utf8');
     assert.match(sql, /openfisca_parametres/);
     assert.match(sql, /source = 'openfisca_bareme_ir'/);

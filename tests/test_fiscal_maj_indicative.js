@@ -1,6 +1,6 @@
 'use strict';
-/* Un clic annuel : seul le barème explicitement trouvé modifie l'estimation,
-   jamais la révision complète ni les autres années ni un autre compte. */
+/* Archives OpenFisca : leurs anciennes lignes restent stockées mais ne
+   modifient plus la simulation. R2 2025 conserve sa priorité. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -51,51 +51,25 @@ const transactions = { transactions: [] };
     assert.equal(f.revisionActive(2025), true);
     assert.equal(f.revisionActive(2026), false);
     const reference2025 = clone(f.baremeDe(2025));
-    const initial2026 = clone(f.baremeDe(2026));
-    const res = await sources.synchroniser(2026);
+    assert.throws(() => f.baremeDe(2026), /non disponible/, '2025 non reconduit en 2026');
+    const res = await sources.synchroniser(2026); // API historique encore testable, jamais appelée par le bouton
     assert.deepEqual(Array.from(res.disponibles), [2026]);
-    assert.equal(insertions, 1);
-    assert.equal(collectes.a[0].annee_revenus, 2026);
+    assert.equal(insertions, 1, 'historique des collectes conservé');
     await f.actualiserRevisions(transactions);
-    assert.equal(f.baremeDe(2026).tranches[0], 12000);
-    assert.equal(f.baremeDe(2026).dc, initial2026.dc, 'décote non collectée = provisoire');
+    assert.throws(() => f.baremeDe(2026), /non disponible/, 'OpenFisca ne débloque plus 2026');
     assert.deepEqual(clone(f.baremeDe(2025)), reference2025, 'R2 2025 inchangée');
-    assert.equal(f.baremeDe(2024).tranches[0], 11520);
-    assert.equal(f.revisionActive(2026), false, 'barème partiel ≠ règle complète validée');
-    const bilan = f.bilanMiseAJour(2026, res);
-    assert.match(bilan, /utilisés dans la simulation indicative/);
-    for (const manque of ['décote', 'quotient familial', 'prélèvements sociaux',
-        'CSG', 'frais', 'crypto', 'PAS officiel']) assert.ok(bilan.includes(manque), manque);
-    assert.match(f.bilanMiseAJour(2027, { disponibles: [] }), /Aucun barème IR explicite/);
-    await sources.synchroniser(2026);
-    assert.equal(insertions, 1, 'même millésime et chiffres : pas de doublon');
-
-    // Une nouvelle année sans base de calcul, même avec IR, ne réutilise pas 2026.
+    assert.equal(f.baremeDe(2024).tranches[0], 11520, 'aucun recopiage historique sans BOFiP');
+    assert.equal(f.revisionActive(2026), false);
+    const bilan = f.bilanMiseAJour(2026, { boi: { etats: { ir: 'année absente' } }, frais: {} });
+    assert.match(bilan, /collecte partielle DGFiP/);
+    assert.doesNotMatch(bilan, /12000|OpenFisca/);
+    assert.match(bilan, /non disponible/);
     assert.throws(() => f.baremeDe(2027), /Aucun barème enregistré/);
-    donnees.brackets['2027-01-01'] = { '0': 0, '13000': .11, '31000': .30,
-        '86000': .41, '184000': .45 };
-    const anneeFuture = await sources.synchroniser(2027);
-    assert.deepEqual(Array.from(anneeFuture.disponibles), [2027]);
-    await f.actualiserRevisions(transactions);
-    assert.throws(() => f.baremeDe(2027), /Aucun barème enregistré/);
-    assert.match(f.bilanMiseAJour(2027, anneeFuture), /non appliqué/);
-    assert.equal(sources.validerCollecte(2026, { periode: '2026-01-01',
-        tranches: [12000, 30000, 85000, 183000], taux: [.11, .30, .41, .45] }).tranches[0], 12000);
-    assert.equal(sources.validerCollecte(2026, { periode: '2025-01-01',
-        tranches: [12000, 30000, 85000, 183000], taux: [.11, .30, .41, .45] }), null);
-    const mauvaise = clone(collectes.a[0]);
-    mauvaise.revision = 2; mauvaise.valeurs.taux[0] = .9;
-    collectes.a.push(mauvaise);
-    await f.actualiserRevisions(transactions);
-    assert.equal(f.baremeDe(2026).tranches[0], initial2026.tranches[0],
-        'révision plus récente invalide : retour sûr aux constantes, pas à une ancienne collecte');
-    collectes.a.pop();
     compte = 'b';
     await f.actualiserRevisions(transactions);
-    assert.equal(f.baremeDe(2026).tranches[0], initial2026.tranches[0], 'pas de fuite intercomptes');
-    assert.equal(f.revisionActive(2025), false);
+    assert.throws(() => f.baremeDe(2026), /non disponible/);
     compte = 'a';
     await f.actualiserRevisions(transactions);
-    assert.equal(f.baremeDe(2026).tranches[0], 12000, 'relecture du même compte au retour');
-    console.log('Mise à jour indicative annuelle : portée, refus, R2 inchangée OK');
+    assert.throws(() => f.baremeDe(2026), /non disponible/);
+    console.log('Archives OpenFisca inactives, R2 2025 inchangée OK');
 })().catch(e => { console.error(e); process.exitCode = 1; });

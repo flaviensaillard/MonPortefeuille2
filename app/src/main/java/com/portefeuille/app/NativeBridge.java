@@ -73,7 +73,7 @@ public class NativeBridge {
        vers cette liste d'hôtes. Une entrée commençant par « . » autorise le
        domaine et ses sous-domaines. Le projet Supabase du porteur est toujours
        un sous-domaine de supabase.co ; les cours viennent de Yahoo Finance ;
-       l'inflation de l'INSEE ; les collectes de paramètres fiscaux viennent d'OpenFisca ;
+       l'inflation de l'INSEE ; les documents fiscaux viennent exclusivement de la DGFiP ;
        le service IA du porteur, s'il en configure un, vit sur un worker
        Cloudflare (.workers.dev). Toute autre destination est
        refusée, même si le JavaScript la demande. */
@@ -82,9 +82,9 @@ public class NativeBridge {
             "query1.finance.yahoo.com",
             "query2.finance.yahoo.com",
             "api.insee.fr",
-            "api.fr.openfisca.org",  // hôte exact, jamais *.openfisca.org
             "www.impots.gouv.fr", // frais repas des salariés, hôte exact
             "simulateur-ir-ifi.impots.gouv.fr", // barème km officiel, hôte exact
+            "bofip.impots.gouv.fr", // doctrine fiscale DGFiP, hôte exact
             ".workers.dev"
     };
 
@@ -222,8 +222,34 @@ public class NativeBridge {
             }
 
             int status = conn.getResponseCode();
+            // Seuls les liens stables de la doctrine DGFiP sont résolus ; jamais
+            // de redirection générique (notamment avec jeton Supabase). Un saut,
+            // strictement sur le même hôte HTTPS et vers un document BOFiP.
+            if ("GET".equals(m) && url.startsWith("https://bofip.impots.gouv.fr/doctrine/BOI-IR-LIQ-20-")
+                    && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)) {
+                String location = conn.getHeaderField("Location");
+                if (location != null) {
+                    URL cible = new URL(u, location);
+                    String chemin = cible.getPath();
+                    if ("https".equalsIgnoreCase(cible.getProtocol())
+                            && "bofip.impots.gouv.fr".equalsIgnoreCase(cible.getHost())
+                            && (cible.getPort() == -1 || cible.getPort() == 443)
+                            && chemin.matches("/bofip/(2491|2494|2495)-PGP\\.html/identifiant=BOI-IR-LIQ-20-.*")) {
+                        return executer("GET", cible.toString(), null, null);
+                    }
+                }
+            }
             InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String payload = is == null ? "" : readAll(is);
+            // Les anciennes aides DGFiP peuvent encore déclarer ISO-8859-1
+            // ou Windows-1252 ; ne pas déformer les accents des preuves.
+            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+            String contentType = conn.getContentType();
+            if (u.getHost().endsWith(".impots.gouv.fr") && contentType != null) {
+                String ct = contentType.toLowerCase(Locale.US);
+                if (ct.contains("charset=iso-8859-1")) charset = StandardCharsets.ISO_8859_1;
+                else if (ct.contains("charset=windows-1252")) charset = java.nio.charset.Charset.forName("windows-1252");
+            }
+            String payload = is == null ? "" : readAll(is, charset);
             JSONObject res = new JSONObject();
             res.put("ok", status >= 200 && status < 300);
             res.put("status", status);
@@ -510,8 +536,8 @@ public class NativeBridge {
         return -1;
     }
 
-    private static String readAll(InputStream is) throws Exception {
-        BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+    private static String readAll(InputStream is, java.nio.charset.Charset charset) throws Exception {
+        BufferedReader r = new BufferedReader(new InputStreamReader(is, charset));
         StringBuilder sb = new StringBuilder();
         String line;
         while ((line = r.readLine()) != null) {
