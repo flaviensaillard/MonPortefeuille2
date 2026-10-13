@@ -1109,11 +1109,17 @@
             out += '<div class="ok-vert">Révision publiée des paramètres ' + UI.h(annee)
                 + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
         } else {
+            var parametresUtilises = [];
+            if (typeof parametrePartiel(annee, 'plafond_qf') === 'number') parametresUtilises.push('plafond QF général');
+            if (typeof parametrePartiel(annee, 'crypto_franchise') === 'number') parametresUtilises.push('seuil crypto');
             out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
                 + (baremePartiel(annee)
-                    ? ' : barème IR OpenFisca appliqué à une simulation indicative seulement. Les autres règles restent provisoires sauf paramètres explicitement collectés.'
-                    : ' : calculs indicatifs sur les constantes embarquées, non homologuées par la table.')
-                + '</div>';
+                    ? ' : barème IR OpenFisca appliqué à une simulation indicative seulement.'
+                    : ' : barème IR embarqué, non homologué.')
+                + (parametresUtilises.length
+                    ? ' Valeurs OpenFisca du même millésime utilisées à titre indicatif : ' + UI.h(parametresUtilises.join(', ')) + '.'
+                    : '')
+                + ' Les autres règles restent provisoires.</div>';
         }
         if (maj.disponible) {
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
