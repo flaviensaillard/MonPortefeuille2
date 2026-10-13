@@ -1746,7 +1746,7 @@
             });
             details = ' Paramètres explicitement sourcés et appliqués à la simulation indicative : '
                 + (appliques.join(', ') || 'aucun') + '. Valeurs collectées mais non applicables isolément : '
-                + (observes.join(', ') || 'aucune') + '. Valeurs repérées mais non enregistrées et non utilisées : '
+                + (observes.join(', ') || 'aucune') + '. Valeurs repérées dont l’enregistrement par ce clic n’est pas confirmé (une collecte antérieure peut rester active) : '
                 + (nonEnregistres.join(', ') || 'aucune') + '. Aucune valeur explicite : '
                 + (manquants.join(', ') || 'aucune') + '.';
             if (p.erreur) details += ' Enregistrement non confirmé : ' + p.erreur

@@ -86,7 +86,7 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.doesNotMatch(resultat.erreur, /privé|23505/);
     const rapportErreur = f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat });
     assert.doesNotMatch(rapportErreur, /non recherché|vérifier la migration 012/);
-    assert.match(rapportErreur, /Valeurs repérées mais non enregistrées et non utilisées : plafond général QF/);
+    assert.match(rapportErreur, /Valeurs repérées dont l’enregistrement par ce clic n’est pas confirmé \(une collecte antérieure peut rester active\) : plafond général QF/);
     refuserEcriture = false;
     masquerLecture = true; // même collision, nouveau contenu => révision 2
     resultat = await src.synchroniserParametres(2026);
