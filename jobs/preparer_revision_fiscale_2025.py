@@ -30,6 +30,8 @@ SOURCES = {
     "ps_rcm": "https://www.impots.gouv.fr/particulier/les-revenus-mobiliers",
     "ps_crypto": "https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques",
     "options": "https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf",
+    "option_2op": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
+    "option_3cn_debut": "https://bofip.impots.gouv.fr/bofip/14201-PGP.html/ACTU-2024-00078",
     "csg": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
     "abattement_10": "https://bofip.impots.gouv.fr/bofip/10855-PGP.html/identifiant=BOI-BAREME-000035-20260217",
     "frais": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
