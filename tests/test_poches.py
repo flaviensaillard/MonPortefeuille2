@@ -63,13 +63,13 @@ def test_chaque_ticker_appartient_a_au_plus_une_poche():
 
 
 def test_or_et_bitcoin_dans_leurs_poches_respectives():
-    """L'or (IGLN.L) va dans 'Réserve de valeur physique' (15 %) et Bitcoin
-    (BTCUSDT) va dans 'Réserve de valeur numérique' (5 %)."""
+    """L'ETC or va dans la poche historique rv_physique (15 %),
+    sans être décrit comme une détention directe de métal."""
     reinitialiser_allocation_par_defaut()
     p_or = poche_de("IGLN.L")
     p_btc = poche_de("BTCUSDT")
     assert p_or is not None and p_or.cle == "rv_physique"
-    assert p_or.nom == "Réserve de valeur physique"
+    assert p_or.nom == "Exposition à l’or (ETC)"
     assert abs(p_or.cible - 0.15) < 1e-6
     assert p_btc is not None and p_btc.cle == "rv_numerique"
     assert p_btc.nom == "Réserve de valeur numérique"

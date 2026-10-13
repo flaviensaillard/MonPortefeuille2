@@ -86,11 +86,11 @@ class Poche:
 POCHES: list[Poche] = [
     Poche(
         cle="rv_physique",
-        nom="Réserve de valeur physique",
+        nom="Exposition à l’or (ETC)",
         cible=0.15,
         bande=0.03,
         membres=["IGLN.L"],
-        description="Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.",
+        description="ETC coté adossé à l’or ; aucune détention directe de lingots ou de pièces.",
     ),
     Poche(
         cle="rv_numerique",
@@ -197,9 +197,9 @@ class Actif:
 POCHES_INVESTIES_DEFAUT: list[dict] = [
     {
         "cle": "rv_physique",
-        "nom": "Réserve de valeur physique",
+        "nom": "Exposition à l’or (ETC)",
         "bande_pct": 3.0,
-        "description": "Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.",
+        "description": "ETC coté adossé à l’or ; aucune détention directe de lingots ou de pièces.",
     },
     {
         "cle": "rv_numerique",
@@ -370,7 +370,7 @@ def reinitialiser_allocation_par_defaut() -> dict:
 
 def _migrer_poche_rv(poches_cfg: list[dict], actifs_cfg: list[dict]) -> tuple[list[dict], list[dict]]:
     """Migre automatiquement toute ancienne poche `rv` (« Réserve de valeur ») en deux poches distinctes :
-    - `rv_physique` (« Réserve de valeur physique ») pour l'or (`IGLN.L`),
+    - `rv_physique` (« Exposition à l’or (ETC) ») pour l'or (`IGLN.L`),
     - `rv_numerique` (« Réserve de valeur numérique ») pour Bitcoin (`BTCUSDT`)."""
     a_migrer = any(str(p.get("cle", "")).strip() == "rv" for p in poches_cfg) or any(
         str(a.get("poche", "")).strip() == "rv" for a in actifs_cfg
@@ -397,7 +397,7 @@ def _migrer_poche_rv(poches_cfg: list[dict], actifs_cfg: list[dict]) -> tuple[li
             cles_deja.add(def_rv["cle"])
 
     # Si IGLN.L et BTCUSDT étaient tous deux à l'ancien défaut 10 % / 10 % dans "rv",
-    # on passe à 15 % (Or physique) et 5 % (Bitcoin numérique).
+    # on passe à 15 % (ETC or) et 5 % (Bitcoin numérique).
     cibles_rv = {
         str(a.get("ticker", "")).upper().strip(): _lire_cible_pct_actif(a)
         for a in actifs_cfg
@@ -439,6 +439,14 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
     poches_cfg = [dict(p) for p in (cfg_alloc.get("poches") or POCHES_INVESTIES_DEFAUT)]
     actifs_cfg = [dict(a) for a in (cfg_alloc.get("actifs") or ALLOCATION_ACTIFS_DEFAUT)]
     poches_cfg, actifs_cfg = _migrer_poche_rv(poches_cfg, actifs_cfg)
+    # Seul l'ancien libellé PAR DÉFAUT change ; conserver la clé historique
+    # rv_physique (référencée par les allocations) et les noms personnalisés.
+    for p in poches_cfg:
+        if p.get("cle") == "rv_physique":
+            if p.get("nom") == "Réserve de valeur physique":
+                p["nom"] = "Exposition à l’or (ETC)"
+            if p.get("description") == "Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.":
+                p["description"] = "ETC coté adossé à l’or ; aucune détention directe de lingots ou de pièces."
 
     # S'assurer que toute poche référencée par un actif existe dans poches_cfg
     cles_connues = {str(p.get("cle", "")).strip() for p in poches_cfg if p.get("cle")}
@@ -546,7 +554,7 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
             "obligation": Classe.OBLIGATION_ETF,
             "obligation_etf": Classe.OBLIGATION_ETF,
             "or_papier": Classe.OR,
-            "or_physique": Classe.OR,
+            "or_physique": Classe.OR_PHYSIQUE,
             "or": Classe.OR,
             "crypto": Classe.CRYPTO,
         }
@@ -555,7 +563,12 @@ def appliquer_allocation_personnalisee(cfg_alloc: dict | None = None) -> dict:
             if not tk:
                 continue
             cls_str = str(a.get("classe") or "action_etf").lower().strip()
-            if cls_str in _ALIAS_CLASSE:
+            # IGLN.L identifie un ETC coté, même si une ancienne allocation
+            # porte « or_physique » ; le nom de la poche n'est pas fiscal.
+            if tk == "IGLN.L":
+                _pf.CLASSES[tk] = Classe.OR
+                a["classe"] = "or"  # la configuration retournée suit la classe effective
+            elif cls_str in _ALIAS_CLASSE:
                 _pf.CLASSES[tk] = _ALIAS_CLASSE[cls_str]
             else:
                 for c_enum in Classe:

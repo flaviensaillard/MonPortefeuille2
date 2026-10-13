@@ -40,7 +40,7 @@
     ];
 
     var POCHES_INVESTIES_DEFAUT = [
-        { cle: 'rv_physique', nom: 'Réserve de valeur physique', bande_pct: 3.0, description: 'Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.' },
+        { cle: 'rv_physique', nom: 'Exposition à l’or (ETC)', bande_pct: 3.0, description: 'ETC coté adossé à l’or ; aucune détention directe de lingots ou de pièces.' },
         { cle: 'rv_numerique', nom: 'Réserve de valeur numérique', bande_pct: 3.0, description: 'Bitcoin. Réserve de valeur numérique face à la dépréciation monétaire.' },
         { cle: 'energie', nom: 'Énergie', bande_pct: 5.0, description: 'ETF énergie. Surexposition volontaire à la croissance.' },
         { cle: 'asie', nom: 'Asie / Chine', bande_pct: 5.0, description: 'ETF Chine (Franklin FTSE China). Surexposition volontaire à la croissance.' },
@@ -168,6 +168,15 @@
         var migre = migrerPocheRv(pochesCfg, actifsCfg);
         pochesCfg = migre[0];
         actifsCfg = migre[1];
+        // Ancien libellé par défaut trompeur pour un ETC : ne pas renommer
+        // la clé persistée ni les noms de poches choisis par le porteur.
+        pochesCfg.forEach(function (p) {
+            if (p.cle !== 'rv_physique') return;
+            if (p.nom === 'Réserve de valeur physique') p.nom = 'Exposition à l’or (ETC)';
+            if (p.description === 'Or (ETC). Réserve de valeur physique face à la dépréciation monétaire.') {
+                p.description = 'ETC coté adossé à l’or ; aucune détention directe de lingots ou de pièces.';
+            }
+        });
 
         var connues = {};
         pochesCfg.forEach(function (p) { if (p.cle) connues[String(p.cle)] = 1; });
@@ -297,12 +306,12 @@
     };
 
     function classeNormalisee(cls, tk) {
+        // Le ticker identifie un ETC coté, même si une ancienne allocation le
+        // rangeait à tort dans la classe « or_physique ». La poche rv_physique
+        // garde sa clé historique mais ne détermine JAMAIS le régime fiscal.
+        if (tk === 'IGLN.L') return 'or';
         var s = String(cls || '').toLowerCase().trim();
-        if (s && ALIAS_CLASSE[s]) {
-            // « or » reste « or » (ETC) : le régime des métaux précieux physiques
-            // ne s'applique qu'aux lingots et pièces détenus en direct.
-            return ALIAS_CLASSE[s] === 'or_physique' ? 'or_physique' : ALIAS_CLASSE[s];
-        }
+        if (s && ALIAS_CLASSE[s]) return ALIAS_CLASSE[s];
         if (s) return s;
         if (CLASSES_DEFAUT[tk]) return CLASSES_DEFAUT[tk];
         if (DEVISES_ESPECES.indexOf(tk) >= 0) return 'espece';

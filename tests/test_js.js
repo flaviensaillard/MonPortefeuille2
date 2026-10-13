@@ -124,7 +124,30 @@ test('points', () => U.points(0.015) === '+1,5 pt');
 console.log('\nModèle d’allocation');
 test('cible de l’or à 15 %', () => proche(PF.modele.cibleActif('IGLN.L'), 0.15));
 test('bitcoin dans rv_numerique', () => PF.modele.pocheDe('BTCUSDT').cle === 'rv_numerique');
-test('or dans rv_physique', () => PF.modele.pocheDe('IGLN.L').cle === 'rv_physique');
+test('clé historique rv_physique mais libellé ETC', () =>
+    PF.modele.pocheDe('IGLN.L').cle === 'rv_physique' && PF.modele.pocheDe('IGLN.L').nom === 'Exposition à l’or (ETC)');
+test('ETC IGLN.L ne peut être requalifié en lingot par une ancienne allocation', () => {
+    const cfg = PF.modele.allocationDefaut();
+    cfg.poches[0].nom = 'Réserve de valeur physique';
+    cfg.actifs[0].classe = 'or_physique';
+    try {
+        PF.modele.appliquer(cfg);
+        return PF.modele.classeDe('IGLN.L') === 'or' && PF.modele.pocheDe('IGLN.L').nom === 'Exposition à l’or (ETC)';
+    } finally { PF.modele.appliquer(PF.modele.allocationDefaut()); }
+});
+test('or_physique reste une classe distincte pour un autre actif, non certifiée ici', () => {
+    const cfg = PF.modele.allocationDefaut();
+    cfg.actifs.push({ ticker: 'LINGOT_TEST', classe: 'or_physique', poche: 'rv_physique',
+        cible_pct: 0, devise: 'EUR' });
+    try {
+        PF.modele.appliquer(cfg);
+        const r = PF.fiscal.detail2074([
+            { ticker: 'LINGOT_TEST', type: 'vente', date: '2025-06-10', quantite: 1,
+                cours: 5000, frais: 0, devise: 'EUR' }
+        ], 2025, {});
+        return PF.modele.classeDe('LINGOT_TEST') === 'or_physique' && r.operations.length === 0;
+    } finally { PF.modele.appliquer(PF.modele.allocationDefaut()); }
+});
 test('total des cibles = 100 %', () => proche(PF.modele.verifier({ actifs: PF.modele.etat.actifs }).total_pct, 100));
 test('bande de l’or = 3 pts', () => proche(PF.modele.bandeActif('IGLN.L'), 0.03));
 test('classe de XJSE.SW', () => PF.modele.classeDe('XJSE.SW') === 'obligation_etf');
@@ -152,6 +175,16 @@ test('rente mensuelle : on ne consomme que le réel', () => {
 
 console.log('\nFiscalité');
 test('barème 2025 disponible', () => PF.fiscal.annees().indexOf(2025) >= 0);
+test('IGLN.L vendu en 2025 va au 2074/3VG, ni au 2086 ni à 2091/2092', () => {
+    const txs = [
+        { ticker: 'IGLN.L', type: 'achat', date: '2025-01-10', quantite: 10, cours: 50, frais: 0, devise: 'EUR' },
+        { ticker: 'IGLN.L', type: 'vente', date: '2025-06-10', quantite: 10, cours: 70, frais: 0, devise: 'EUR' }
+    ];
+    const d = PF.fiscal.detail2074(txs, 2025, {});
+    const crypto = PF.fiscal.detail2086(txs, 2025, {}, {});
+    return d.operations.length === 1 && d.operations[0].actif === 'IGLN.L'
+        && proche(d.case_3vg, 200) && crypto.cessions.length === 0;
+});
 test('IR nul sous la décote', () => PF.fiscal.impotRevenu(10000, 3, 2025, 'Marié(e) / Pacsé(e)').impot_net === 0);
 test('TMI à 11 % dans la deuxième tranche', () => proche(PF.fiscal.impotRevenu(20000, 1, 2025, 'Célibataire').tmi, 0.11));
 test('TMI à 30 % au-delà de 29 579 €', () => proche(PF.fiscal.impotRevenu(40000, 1, 2025, 'Célibataire').tmi, 0.30));

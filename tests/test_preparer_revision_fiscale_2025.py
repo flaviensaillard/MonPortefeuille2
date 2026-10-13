@@ -25,9 +25,9 @@ def test_inventaire_isole_2025_et_ne_ressemble_pas_a_une_ligne_inserable():
     assert b["type"] == "inventaire_local_non_inserable"
     assert not {"user_id", "revision", "parametres", "origine", "source_ref"} & b.keys()
     assert all("2026" not in str(item) for item in b["parametres_candidats"].keys())
-    assert "or_physique" in b["parametres_candidats"]
-    assert "choix_automatique_du_minimum_incorrect" in b["etat_par_regle"]["or_physique"]
-    assert b["etat_par_regle"]["pas"].startswith("algorithme_simplifie_non_equivalent")
+    assert "or_physique" not in b["parametres_candidats"]
+    assert "exclu" in b["etat_par_regle"]["or_physique"]
+    assert b["etat_par_regle"]["pas"].startswith("estimation_sur_salaires")
 
 
 def test_chiffres_corriges_et_valeurs_precomptees_distingues():

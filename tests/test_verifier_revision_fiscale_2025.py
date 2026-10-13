@@ -46,6 +46,7 @@ def _lignes(uid=None):
                    "tranches": [11600.0, 29579.0, 84577.0, 181917.0],
                    "taux": [0.11, 0.30, 0.41, 0.45]},
         "prelevements_sociaux": .172,
+        "or_physique": {"taxe_forfaitaire": .115},
         "mention_source_code_non_verifiee": "ancienne",
     }
     base = [{"user_id": uid, "annee_revenus": a, "revision": 1, "origine": "reprise_code_non_verifiee",
@@ -64,6 +65,17 @@ def test_diff_json_ne_signale_pas_les_tuples_egaux_aux_listes_de_la_base():
         {"champ": "bareme.tranches[1]", "operation": "changement",
          "avant": 29579, "apres": 30000.0},
     ]
+
+
+def test_simulation_2025_exclut_or_physique_et_ne_peut_pas_etre_inseree():
+    simulation = prep.simuler_ligne_2025()
+    ligne = simulation["champs_ligne_envisagee"]
+    assert simulation["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
+    assert (ligne["annee_revenus"], ligne["revision"]) == (2025, 2)
+    assert ligne["source_ref"] is None and "user_id" not in ligne
+    assert "or_physique" not in ligne["parametres"]
+    assert "pas" not in ligne["parametres"]
+    assert ligne["parametres"]["prelevements_sociaux_par_categorie"]["plus_values_titres"] == .186
 
 
 def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
@@ -93,6 +105,8 @@ def test_diff_distinguant_ajouts_et_modifications_ne_produit_pas_de_ligne_a_inse
     assert ecarts["prelevements_sociaux"]["apres"] == .186
     assert "bareme.tranches" not in ecarts and "bareme.taux" not in ecarts
     assert ecarts["quotient_familial"]["operation"] == "ajout"
+    assert ecarts["or_physique"]["operation"] == "retrait_du_brouillon"
+    assert "avant" not in ecarts["or_physique"]
     assert ecarts["mention_source_code_non_verifiee"]["operation"] == "retrait_du_brouillon"
     assert "avant" not in ecarts["mention_source_code_non_verifiee"]
     assert not {"user_id", "revision", "parametres", "origine", "source_ref"} & r.keys()

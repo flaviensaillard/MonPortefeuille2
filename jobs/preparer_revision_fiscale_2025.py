@@ -2,7 +2,8 @@
 
 Ne crée PAS une ligne pf2_fiscal_annees : ni client Supabase, ni clé, ni
 --appliquer. Le brouillon signale les paramètres non audités et n'est pas une
-publication validée. L'état réel de la révision 1 doit encore être relu en base.
+publication validée. La R1 a été relue le 13/10/2026, mais toute future
+écriture exigerait une nouvelle lecture et une sauvegarde récente.
 """
 from __future__ import annotations
 
@@ -34,8 +35,7 @@ SOURCES = {
     "frais": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
     "repas": "https://www.impots.gouv.fr/particulier/frais-de-repas",
     "seuil_ir": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/21-calcul_impot_369a382.pdf",
-    "or_physique_option": "https://bofip.impots.gouv.fr/bofip/4161-PGP.html/identifiant=BOI-RPPM-PVBMC-20-20-20140401",
-    "or_physique_taxe": "https://bofip.impots.gouv.fr/bofip/4151-PGP.html/identifiant=BOI-RPPM-PVBMC-20-10-20181231",
+    "titres_etc": "https://www.impots.gouv.fr/particulier/les-cessions-mobilieres",
     "pas_couple": "https://bofip.impots.gouv.fr/bofip/11256-PGP.html/identifiant=BOI-IR-PAS-20-20-20-20250507",
 }
 
@@ -95,15 +95,9 @@ def parametres_2025() -> dict:
         "bareme_km": {str(cv): list(valeurs) for cv, valeurs in fb.BAREME_KM_VOITURE.items()},
         "regles_km": {"seuils_distance_km": [5000, 20000], "majoration_electrique": 0.20},
         "franchise_crypto": fb.CRYPTO_FRANCHISE_CESSIONS,
-        "or_physique": {
-            "taxe_forfaitaire": fb.OR_PHYS_TFMP,
-            "plus_value_ir": fb.OR_PHYS_PV_IR,
-            "plus_value_ps": fb.OR_PHYS_PV_PS,
-            "annees_exoneration": fb.OR_PHYS_ABATTEMENT_MAX,
-            "abattement_annuel_apres_deux_ans": 0.05,
-            "option_2092_et_justificatifs_requis": True,
-            "calcul_automatique_du_regime_utilisable": False,
-        },
+        # IGLN.L est un ETC (classe OR, régime des titres), PAS un bien
+        # meuble physique. Ne pas exporter des paramètres or_physique non
+        # vérifiés sous prétexte qu'ils figuraient dans la révision 1.
     }
 
 
@@ -133,7 +127,7 @@ def construire_brouillon() -> dict:
         "reference_historique_code_revision_1": SOURCE_REVISION_1,
         "empreintes_sha256_fichiers_locaux": empreintes,
         "parametres_candidats": params,
-        "ecarts_connus_contre_code_revision_1_non_confirmes_en_base": [
+        "ecarts_connus_contre_revision_1_confirmes_par_lecture_du_13_10_2026": [
             {"champ": chemin, "ancienne_valeur": ancien, "valeur_candidate": nouveau}
             for chemin, (ancien, nouveau) in DIFFERENCES_ATTENDUES.items()
         ],
@@ -154,13 +148,14 @@ def construire_brouillon() -> dict:
             "regles_km": "tranches_et_maj_electrique_recoupees_BOFiP_conditions_personnelles_non_exhaustives",
             "franchise_crypto": "seuil_confirme_DGFiP_conditions_a_verifier_selon_foyer",
             "options_2op_3cn": "testees_pour_foyer_marie_sur_seules_assiettes_saisies",
-            "or_physique": "taux_partiellement_recoupes_mais_choix_automatique_du_minimum_incorrect_option_2092_justificatifs_requis",
-            "pas": "algorithme_simplifie_non_equivalent_aux_formules_DGFiP_pour_foyer_marie_non_parametre_dans_ce_brouillon",
+            "etc_or_igln": "classe_or_du_code_routage_titres_2074_verifie_localement_sous_reserve_de_la_qualification_du_produit",
+            "or_physique": "hors_portefeuille_et_exclu_des_parametres_candidats_non_verifie_pour_d_autres_utilisateurs",
+            "pas": "estimation_sur_salaires_non_equivalente_au_taux_DGFiP_non_exportee_ni_activable",
             "autres_revenus_du_capital": "non_modelises",
         },
         "controles_restants": [
-            "Relire en lecture seule les lignes 2025 existantes et confirmer revision 1, propriétaire et contenu avant tout numéro de révision.",
-            "Corriger le choix automatique du minimum sur l'or physique (option 2092 et justificatifs requis) et recouper ses taux PS 2025, ainsi que les autres catégories à taux dérogatoire.",
+            "Lecture initiale de R1 confirmée le 13/10/2026 par le propriétaire ; refaire la lecture avant toute écriture pour détecter une dérive.",
+            "ETC IGLN.L : confirmer sa qualification sur le relevé du courtier ; l'or physique est exclu du périmètre et n'est pas validé par cette simulation.",
             "Revoir le PAS du couple selon les formules administratives (revenus communs, crédits et arrondis) ou le laisser explicitement en estimation non activable.",
             "Documenter les plafonds QF particuliers : non modélisés ; le foyer marié standard utilise seulement le plafond général.",
             "Recouper frais kilométriques, conditions des frais de repas et champ des revenus éligibles à 2OP avant une activation générale.",
@@ -171,18 +166,51 @@ def construire_brouillon() -> dict:
     }
 
 
+def simuler_ligne_2025() -> dict:
+    """Enveloppe de la future R2, SANS insert possible ni identité personnelle.
+
+    La table SQL n'a pas de statut d'activation : le statut ci-dessous est celui
+    de la simulation, pas une garantie qu'un lecteur de base saurait le lire.
+    """
+    brouillon = construire_brouillon()
+    params = brouillon["parametres_candidats"]
+    assert "or_physique" not in params and "pas" not in params
+    return {
+        "simulation_uniquement": True,
+        "statut_validation": "incomplet_ne_pas_inserer_ni_activer",
+        "champs_ligne_envisagee": {
+            "annee_revenus": ANNEE,
+            "revision": 2,  # sous réserve de relecture immédiatement avant écriture
+            "origine": "nouvelle_publication",  # valeur autorisée par le schéma, NON encore justifiée
+            "source_ref": None,  # commit final figé manquant : champ NOT NULL en base
+            "parametres": params,
+            # user_id absent volontairement : ne jamais exposer le propriétaire.
+        },
+        "bloquants": [
+            "source_ref et commit candidat final manquants ; user_id volontairement absent",
+            "aucun statut validation/activation dans la table ni lecteur sûr dans l'APK",
+            "paramètres or physique exclus ; une publication générale serait trompeuse",
+            "PAS couple = estimation sur salaires, non un taux officiel activable",
+            "dividendes, plafonds QF spéciaux et situations personnelles non couverts",
+            "relecture/backup récents, contrôle final et accord distinct d'écriture requis",
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--annee", type=int, choices=[ANNEE], default=ANNEE,
                         help="Seul 2025 est préparé ; les autres années sont hors périmètre.")
+    parser.add_argument("--simuler-ligne", action="store_true",
+                        help="Affiche une enveloppe incomplète de R2 (jamais insérable).")
     args = parser.parse_args()
     assert args.annee == ANNEE
     try:
-        brouillon = construire_brouillon()
+        sortie = simuler_ligne_2025() if args.simuler_ligne else construire_brouillon()
     except (KeyError, RuntimeError, ValueError) as exc:
         print(f"Préparation annulée : {exc}", file=sys.stderr)
         return 1
-    print(json.dumps(brouillon, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(sortie, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
