@@ -60,10 +60,21 @@
 
     // Les révisions lues sont propres à une session, non persistées sur l'appareil.
     // Aucun statut SQL ne remplace la validation de forme et de couverture du lecteur.
-    var revisionsActives = Object.create(null), baremesPartiels = Object.create(null);
+    var revisionsActives = Object.create(null), baremesPartiels = Object.create(null),
+        parametresPartiels = Object.create(null);
     var sequenceLecture = 0, dernierControle = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && baremesPartiels[annee] || null; }
+    function parametrePartiel(annee, cle) {
+        return !paramsActifs(annee) && BAREMES[annee] && annee >= 2026 &&
+            parametresPartiels[annee] && parametresPartiels[annee].parametres[cle];
+    }
+    function franchiseCrypto(annee) {
+        var p = paramsActifs(annee);
+        if (p) return p.franchise_crypto;
+        var valeur = parametrePartiel(annee, 'crypto_franchise');
+        return typeof valeur === 'number' ? valeur : CRYPTO_FRANCHISE_CESSIONS;
+    }
     function tauxIrForfaitaire(annee) {
         var p = paramsActifs(annee);
         return p ? p.ir_forfaitaire : IR_FORFAITAIRE;
@@ -80,6 +91,7 @@
         ++sequenceLecture;
         revisionsActives = Object.create(null);
         baremesPartiels = Object.create(null);
+        parametresPartiels = Object.create(null);
         dernierControle = null;
     }
     function chargerBaremesPartiels(lignes, numero, compte) {
@@ -101,6 +113,27 @@
         });
         Object.keys(derniers).forEach(function (an) {
             if (derniers[an].valeurs) baremesPartiels[an] = derniers[an].valeurs;
+        });
+    }
+    function chargerParametresPartiels(lignes, numero, compte) {
+        var actuel = PF.net.auth.utilisateur();
+        if (numero !== sequenceLecture || !actuel || actuel.id !== compte.id ||
+            !Array.isArray(lignes) || !PF.fiscalSources) return;
+        var derniers = Object.create(null);
+        lignes.forEach(function (ligne) {
+            var an = ligne.annee_revenus;
+            if (ligne.source !== 'openfisca_parametres' || !BAREMES[an] || an < 2026 ||
+                paramsActifs(an) || !Number.isInteger(ligne.revision) || ligne.revision < 1) return;
+            var valide = ligne.source_url === PF.fiscalSources.RACINE
+                ? PF.fiscalSources.validerParametres(an, ligne.valeurs) : null;
+            if (!derniers[an] || ligne.revision > derniers[an].revision) {
+                derniers[an] = { revision: ligne.revision, valeurs: valide };
+            } else if (ligne.revision === derniers[an].revision) {
+                derniers[an].valeurs = null;
+            }
+        });
+        Object.keys(derniers).forEach(function (an) {
+            if (derniers[an].valeurs) parametresPartiels[an] = derniers[an].valeurs;
         });
     }
     function actualiserRevisions(ctx) {
@@ -131,6 +164,7 @@
             if (!PF.fiscalSources) return revision;
             return PF.fiscalSources.consulter().then(function (lignes) {
                 chargerBaremesPartiels(lignes, numero, compte);
+                chargerParametresPartiels(lignes, numero, compte);
                 return revision;
             }).catch(function () { return revision; });
         }); // hors ligne : estimation embarquée, jamais ancienne règle en cache
@@ -179,6 +213,8 @@
     function plafondQF(annee) {
         var p = paramsActifs(annee);
         if (p) return p.quotient_familial.plafond_general_par_demi_part;
+        var collecte = parametrePartiel(annee, 'plafond_qf');
+        if (typeof collecte === 'number') return collecte;
         if (PLAFOND_QF_GENERAL[annee] === undefined) throw new Error('Aucun plafond QF pour ' + annee + '.');
         return PLAFOND_QF_GENERAL[annee];
     }
@@ -800,7 +836,7 @@
 
         var total213 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_213; }, 0), 2);
         var total224 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_224; }, 0), 2);
-        var exonere = cessions.length > 0 && total213 <= (paramsActifs(annee) ? paramsActifs(annee).franchise_crypto : CRYPTO_FRANCHISE_CESSIONS);
+        var exonere = cessions.length > 0 && total213 <= franchiseCrypto(annee);
         var case3an = 0, case3bn = 0;
         if (!exonere && cessions.length) {
             if (total224 > 0) case3an = total224; else case3bn = Math.abs(total224);
@@ -1075,7 +1111,7 @@
         } else {
             out += '<div class="info">Aucune révision complète active et compatible lue pour ' + UI.h(annee)
                 + (baremePartiel(annee)
-                    ? ' : seuils et taux du barème IR OpenFisca appliqués à une simulation indicative seulement. Décote et autres paramètres restent provisoires.'
+                    ? ' : barème IR OpenFisca appliqué à une simulation indicative seulement. Les autres règles restent provisoires sauf paramètres explicitement collectés.'
                     : ' : calculs indicatifs sur les constantes embarquées, non homologuées par la table.')
                 + '</div>';
         }
@@ -1086,12 +1122,11 @@
         } else {
             out += '<div class="ok-vert">' + UI.h(maj.message) + '</div>';
         }
-        // Le bouton importe uniquement l'IR connu pour l'année demandée. Une
-        // révision complète validée garde toujours la priorité sur ce barème.
+        // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">OpenFisca fournit ici seulement les seuils et taux du barème IR. '
-            + 'Si aucune révision complète n’est publiée, ils alimentent une simulation indicative '
+            + '<div class="st" style="margin:6px 0">OpenFisca fournit le barème IR et certains paramètres isolés si l’année est explicite. '
+            + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Mettre à jour les données fiscales disponibles</button>'
@@ -1670,12 +1705,48 @@
         var ir = resultat.disponibles.indexOf(annee) >= 0;
         var situation = !ir ? (baremePartiel(annee)
             ? 'Aucun barème IR explicite trouvé aujourd’hui : une collecte antérieure de la même année reste utilisée à titre indicatif.'
-            : 'Aucun barème IR explicite pour cette année : aucun nouveau taux appliqué.')
+            : resultat.erreur_ir ? 'Recherche IR impossible : aucun nouveau taux IR appliqué.'
+            : 'Aucun barème IR explicite pour cette année : aucun nouveau taux IR appliqué.')
             : revisionActive(annee) ? 'Barème IR collecté ; la révision complète déjà active garde la priorité.'
             : baremePartiel(annee) ? 'Seuils et taux IR importés et utilisés dans la simulation indicative.'
             : 'Barème IR collecté, mais non appliqué (année sans calcul compatible ou relecture indisponible).';
-        return situation + ' Non vérifiés par ce bouton : décote, quotient familial, prélèvements sociaux par catégorie, '
-            + 'CSG, frais et barème kilométrique, abattements, arrondis, règles crypto et changements des formules. '
+        var p = resultat.parametres, details = '';
+        if (p) {
+            var appliques = [], observes = [], manquants = [];
+            var noms = {
+                plafond_qf: 'plafond général QF', decote_base_celibataire: 'décote (personne seule)',
+                decote_base_couple: 'décote (couple)', decote_taux: 'taux de décote',
+                csg_patrimoine: 'CSG patrimoine', csg_placement: 'CSG placements',
+                csg_deductible_patrimoine: 'CSG déductible patrimoine',
+                csg_deductible_placement: 'CSG déductible placements',
+                solidarite_patrimoine: 'solidarité patrimoine',
+                solidarite_placement: 'solidarité placements',
+                crypto_franchise: 'seuil crypto', crypto_ir_taux: 'taux IR crypto'
+            };
+            function affiche(nom) {
+                var montant = p.valeurs && p.valeurs[nom];
+                return noms[nom] + (typeof montant === 'number'
+                    ? ' = ' + (nom === 'plafond_qf' || nom.indexOf('decote_base') === 0 ||
+                        nom === 'crypto_franchise' ? montant + ' €' : montant * 100 + ' %') : '');
+            }
+            Object.keys(PF.fiscalSources.PARAMETRES).forEach(function (nom) {
+                var etat = p.etats && p.etats[nom] || 'non recherché';
+                if (etat !== 'valeur explicite collectée') manquants.push(noms[nom] + ' (' + etat + ')');
+                else if (p.enregistree && BAREMES[annee] && annee >= 2026 && !revisionActive(annee) &&
+                    typeof parametrePartiel(annee, nom) === 'number' &&
+                    (nom === 'plafond_qf' || nom === 'crypto_franchise')) appliques.push(affiche(nom));
+                else observes.push(affiche(nom));
+            });
+            details = ' Paramètres explicitement sourcés et appliqués à la simulation indicative : '
+                + (appliques.join(', ') || 'aucun') + '. Valeurs collectées mais non applicables isolément : '
+                + (observes.join(', ') || 'aucune') + '. Aucune valeur explicite : '
+                + (manquants.join(', ') || 'aucune') + '.';
+            if (p.erreur) details += ' Enregistrement des paramètres impossible (vérifier la migration 012 après sauvegarde) : ' + p.erreur + '.';
+        }
+        return situation + details + ' Source des valeurs collectées : OpenFisca-France (modèle, non publication officielle). Non vérifiés par ce bouton : formule de décote et plafonds d’application, '
+            + 'quotient familial spécial, composition des prélèvements sociaux par catégorie/date, '
+            + 'CSG effectivement déductible et calendrier, frais de repas et kilométriques, '
+            + 'abattements, arrondis, méthode crypto/2086 et changements des formules. '
             + 'Les revenus personnels et le PAS officiel ne sont jamais contrôlés par cette collecte.';
     }
 
@@ -1701,7 +1772,17 @@
                     collecte.disabled = false;
                     return;
                 }
-                PF.fiscalSources.synchroniser(cibleAnnee).then(function (res) {
+                // Une panne d'une source n'efface pas les autres collectes.
+                // La table des paramètres nécessite la migration 012 (une fois).
+                PF.fiscalSources.synchroniser(cibleAnnee).catch(function (err) {
+                    return { disponibles: [], erreur_ir: String(err && err.message || err) };
+                }).then(function (res) {
+                    return PF.fiscalSources.synchroniserParametres(cibleAnnee).then(function (p) {
+                        res.parametres = p; return res;
+                    }).catch(function (err) {
+                        res.parametres = { erreur: String(err && err.message || err) }; return res;
+                    });
+                }).then(function (res) {
                     var courant = PF.net.auth.utilisateur();
                     if (!proprietaire || !courant || courant.id !== proprietaire.id) {
                         throw new Error('Session changée pendant la recherche ; actualisez après reconnexion.');
@@ -1711,7 +1792,8 @@
                     return actualiserRevisions(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
-                        dernierControle = { annee: cibleAnnee, texte: bilanMiseAJour(cibleAnnee, res) };
+                        dernierControle = { annee: cibleAnnee, texte: bilanMiseAJour(cibleAnnee, res)
+                            + (res.erreur_ir ? ' Recherche du barème IR interrompue : ' + res.erreur_ir + '.' : '') };
                         PF.app.rendre();
                     });
                 }).catch(function (err) {
@@ -1787,6 +1869,7 @@
         snapshotConstantesCode: snapshotConstantesCode,
         actualiserRevisions: actualiserRevisions, effacerRevisions: effacerRevisions,
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
+        plafondQF: plafondQF, franchiseCrypto: franchiseCrypto,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

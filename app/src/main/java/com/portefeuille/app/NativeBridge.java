@@ -73,7 +73,7 @@ public class NativeBridge {
        vers cette liste d'hôtes. Une entrée commençant par « . » autorise le
        domaine et ses sous-domaines. Le projet Supabase du porteur est toujours
        un sous-domaine de supabase.co ; les cours viennent de Yahoo Finance ;
-       l'inflation de l'INSEE ; la collecte du seul barème IR vient d'OpenFisca ;
+       l'inflation de l'INSEE ; les collectes de paramètres fiscaux viennent d'OpenFisca ;
        le service IA du porteur, s'il en configure un, vit sur un worker
        Cloudflare (.workers.dev). Toute autre destination est
        refusée, même si le JavaScript la demande. */

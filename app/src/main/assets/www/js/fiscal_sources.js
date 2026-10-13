@@ -1,11 +1,27 @@
-/* Collecte annuelle OpenFisca (source structurée, pas le Journal officiel).
-   Le moteur fiscal ne consomme PAS ces données incomplètes. Chaque correction
-   d'une année ajoute une révision ; les anciennes restent dans Supabase. */
+/* Collectes annuelles OpenFisca (modélisation, non certification DGFiP).
+   Les valeurs isolées ne sont jamais une révision complète. */
 (function (root) {
     'use strict';
     var PF = root.PF = root.PF || {};
     var SOURCE = 'https://api.fr.openfisca.org/latest/parameter/impot_revenu/bareme_ir_depuis_1945/bareme';
     var TABLE = 'pf2_fiscal_collectes';
+    var RACINE = 'https://api.fr.openfisca.org/latest/parameter';
+    // Identifiants OpenFisca explicites. Ne pas assimiler patrimoine et placement,
+    // CSG globale et déductible, ou une franchise crypto à la formule 2086.
+    var PARAMETRES = {
+        plafond_qf: { chemin: 'impot_revenu/calcul_impot_revenu/plaf_qf/plafond_avantages_procures_par_demi_part/general', min: 1, max: 10000 },
+        decote_base_celibataire: { chemin: 'impot_revenu/calcul_impot_revenu/plaf_qf/decote/seuil_celib', min: 1, max: 10000 },
+        decote_base_couple: { chemin: 'impot_revenu/calcul_impot_revenu/plaf_qf/decote/seuil_couple', min: 1, max: 20000 },
+        decote_taux: { chemin: 'impot_revenu/calcul_impot_revenu/plaf_qf/decote/taux', min: 0, max: 1 },
+        csg_patrimoine: { chemin: 'taxation_capital/prelevements_sociaux/csg/taux_global/revenus_du_patrimoine', min: 0, max: 0.5 },
+        csg_placement: { chemin: 'taxation_capital/prelevements_sociaux/csg/taux_global/produits_de_placement', min: 0, max: 0.5 },
+        csg_deductible_patrimoine: { chemin: 'taxation_capital/prelevements_sociaux/csg/taux_deductible/revenus_du_patrimoine', min: 0, max: 0.5 },
+        csg_deductible_placement: { chemin: 'taxation_capital/prelevements_sociaux/csg/taux_deductible/produits_de_placement', min: 0, max: 0.5 },
+        solidarite_patrimoine: { chemin: 'taxation_capital/prelevements_sociaux/prelevements_solidarite/revenus_du_patrimoine', min: 0, max: 0.5 },
+        solidarite_placement: { chemin: 'taxation_capital/prelevements_sociaux/prelevements_solidarite/produits_de_placement', min: 0, max: 0.5 },
+        crypto_franchise: { chemin: 'impot_revenu/calcul_impot_revenu/pv/actifs_numeriques/plancher', min: 0, max: 100000 },
+        crypto_ir_taux: { chemin: 'impot_revenu/calcul_impot_revenu/pv/actifs_numeriques/taux', min: 0, max: 0.6 }
+    };
 
     function entier(x) { return typeof x === 'number' && isFinite(x) && Math.floor(x) === x; }
 
@@ -126,6 +142,85 @@
         });
     }
 
+    // Une valeur conservée au fil des ans n'est pas une vérification explicite
+    // de la loi de ce millésime. Toute absence/erreur reste visible après le clic.
+    function validerParametres(annee, valeurs) {
+        if (!entier(annee) || annee < 2000 || annee > new Date().getFullYear() ||
+            !valeurs || valeurs.periode !== annee + '-01-01' ||
+            !valeurs.parametres || typeof valeurs.parametres !== 'object' ||
+            Array.isArray(valeurs.parametres) ||
+            !valeurs.chemins || typeof valeurs.chemins !== 'object' ||
+            Array.isArray(valeurs.chemins)) return null;
+        var noms = Object.keys(valeurs.parametres);
+        if (!noms.length || Object.keys(valeurs.chemins).length !== noms.length || noms.some(function (nom) {
+            var cfg = PARAMETRES[nom], valeur = valeurs.parametres[nom];
+            return !cfg || valeurs.chemins[nom] !== cfg.chemin || typeof valeur !== 'number' || !isFinite(valeur) ||
+                valeur < cfg.min || valeur > cfg.max;
+        })) return null;
+        return { periode: valeurs.periode, parametres: valeurs.parametres, chemins: valeurs.chemins };
+    }
+
+    function chercherParametres(annee) {
+        if (!entier(annee) || annee < 2000 || annee > new Date().getFullYear())
+            return Promise.reject(new Error('Année de revenus invalide.'));
+        var periode = annee + '-01-01', etats = {}, valeurs = {}, chemins = {};
+        return Promise.all(Object.keys(PARAMETRES).map(function (nom) {
+            var cfg = PARAMETRES[nom];
+            return PF.net.req('GET', RACINE + '/' + cfg.chemin, { Accept: 'application/json' })
+                .then(function (rep) {
+                    if (!rep.ok) { etats[nom] = 'source inaccessible'; return; }
+                    var data = rep.json, v = data && data.values && data.values[periode];
+                    if (!data || data.id !== cfg.chemin.replace(/\//g, '.') ||
+                        !data.values || typeof data.values !== 'object') {
+                        etats[nom] = 'format inattendu'; return;
+                    }
+                    if (!Object.prototype.hasOwnProperty.call(data.values, periode)) {
+                        etats[nom] = 'aucune valeur explicite'; return;
+                    }
+                    if (typeof v !== 'number' || !isFinite(v) || v < cfg.min || v > cfg.max) {
+                        etats[nom] = 'valeur incompatible'; return;
+                    }
+                    valeurs[nom] = v;
+                    chemins[nom] = cfg.chemin;
+                    etats[nom] = 'valeur explicite collectée';
+                }).catch(function () { etats[nom] = 'source inaccessible'; });
+        })).then(function () {
+            return { etats: etats, valeurs: { periode: periode, parametres: valeurs, chemins: chemins } };
+        });
+    }
+
+    function memesParametres(a, b) {
+        if (!a || !b || a.periode !== b.periode) return false;
+        var x = a.parametres || {}, y = b.parametres || {};
+        var nx = Object.keys(x).sort(), ny = Object.keys(y).sort();
+        return JSON.stringify(nx) === JSON.stringify(ny) && nx.every(function (k) { return x[k] === y[k]; });
+    }
+
+    function synchroniserParametres(annee) {
+        return consulter().then(function (lignes) {
+            return chercherParametres(annee).then(function (resultat) {
+                var valides = validerParametres(annee, resultat.valeurs);
+                if (!valides) return { etats: resultat.etats, enregistree: false };
+                var dernier = null;
+                (lignes || []).forEach(function (r) {
+                    if (r.annee_revenus === annee && r.source === 'openfisca_parametres' &&
+                        (!dernier || Number(r.revision) > Number(dernier.revision))) dernier = r;
+                });
+                if (dernier && dernier.source_url === RACINE &&
+                    validerParametres(annee, dernier.valeurs) && memesParametres(dernier.valeurs, valides))
+                    return { etats: resultat.etats, enregistree: true, valeurs: valides.parametres };
+                var revision = dernier ? Number(dernier.revision) + 1 : 1;
+                if (!entier(revision) || revision < 1) throw new Error('Historique des paramètres invalide.');
+                return PF.net.supabase.insert(TABLE, [{ annee_revenus: annee, source: 'openfisca_parametres',
+                    source_url: RACINE, revision: revision, valeurs: valides }]).then(function () {
+                    return { etats: resultat.etats, enregistree: true, valeurs: valides.parametres };
+                });
+            });
+        });
+    }
+
     PF.fiscalSources = { validerBareme: validerBareme, validerCollecte: validerCollecte,
-        chercher: chercher, consulter: consulter, synchroniser: synchroniser, SOURCE: SOURCE };
+        chercher: chercher, consulter: consulter, synchroniser: synchroniser, SOURCE: SOURCE,
+        RACINE: RACINE, PARAMETRES: PARAMETRES, validerParametres: validerParametres,
+        chercherParametres: chercherParametres, synchroniserParametres: synchroniserParametres };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

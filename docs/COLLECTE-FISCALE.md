@@ -15,7 +15,7 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
   L'année est une ligne, pas une nouvelle table. Chaque ligne porte une
   `revision` et une référence vers le commit source. Ces lignes sont lisibles
   depuis l'APK connectée mais insérables uniquement côté serveur.
-- `pf2_fiscal_collectes` reçoit pour l'instant le barème IR transmis par
+- `pf2_fiscal_collectes` reçoit historiquement le barème IR transmis par
   OpenFisca-France. Il s'agit d'une **source partielle**, pas d'un millésime prêt
   pour une déclaration. Les données d'un autre utilisateur sont invisibles (RLS).
 - Une rectification des chiffres d'une même année crée la **révision N+1**.
@@ -102,7 +102,7 @@ de paramètres fiscaux n'a été effectuée pendant cette préparation : seule l
 
 ## Collecte sur le téléphone (APK de branche, distincte de la release publique 2.2.1)
 
-Le bouton « Mettre à jour les données fiscales disponibles » lit le barème IR de **l'année sélectionnée** sur
+Le bouton de la version antérieure à la migration 012 lit le barème IR de **l'année sélectionnée** sur
 `https://api.fr.openfisca.org/latest/parameter/impot_revenu/bareme_ir_depuis_1945/bareme`.
 Le pont réseau de l'APK de branche doit autoriser l'hôte HTTPS **exact**
 `api.fr.openfisca.org` : son omission a causé le message « source injoignable »
@@ -126,3 +126,52 @@ installer un APK signé avec une clé de développement par-dessus l'application
 
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.
+
+## Extension des paramètres isolés (branche, 13/10/2026)
+
+**Préparation uniquement : migration 012 non exécutée.** La table 009/010 limite
+`source` et `source_url` au barème IR. Le script
+[`migrations/012_collecte_parametres_fiscaux.sql`](../migrations/012_collecte_parametres_fiscaux.sql)
+élargit ces deux contraintes à `openfisca_parametres` sans modifier une seule
+révision existante. Il doit être appliqué **une seule fois** par le propriétaire,
+après sauvegarde vérifiée et avec son accord, avant d'installer/utiliser le nouveau
+bouton. Ne pas rejouer 009, 010, 011 ni le SQL R2 2025. Sans 012, la recherche
+peut retrouver des valeurs mais ne peut pas les enregistrer : l'écran affiche
+l'erreur ; aucun chiffre non enregistré n'est utilisé.
+
+Le clic interroge, pour l'année de revenus choisie, les paramètres scalaires
+suivants d'OpenFisca-France, à partir de
+`https://api.fr.openfisca.org/latest/parameter/` :
+
+| Catégorie | Chemin sous `/parameter/` | Traitement |
+| --- | --- | --- |
+| Plafond général QF | `impot_revenu/calcul_impot_revenu/plaf_qf/plafond_avantages_procures_par_demi_part/general` | Utilisé **dans la simulation indicative seulement** si valeur explicite pour l'année et moteur compatible. Les demi-parts particulières ne sont pas couvertes. |
+| Décote | `impot_revenu/calcul_impot_revenu/plaf_qf/decote/seuil_celib`, `seuil_couple`, `taux` | Chiffres collectés mais **non appliqués isolément** : seuils d'application, arrondis et méthode restent à auditer. |
+| CSG et PS du capital | `taxation_capital/prelevements_sociaux/csg/{taux_global,taux_deductible}/{revenus_du_patrimoine,produits_de_placement}` et `taxation_capital/prelevements_sociaux/prelevements_solidarite/{revenus_du_patrimoine,produits_de_placement}` | Collectés séparément, **jamais additionnés en un taux de PS global**. CRDS, autres composantes, date de paiement et catégories ne sont pas vérifiées. |
+| Crypto | `impot_revenu/calcul_impot_revenu/pv/actifs_numeriques/{plancher,taux}` | Seul le seuil de cessions peut alimenter la simulation indicative si explicite ; taux, méthode de calcul 2086, exhaustivité du foyer et option 3CN non certifiés. |
+| Repas, kilomètres | Aucune feuille OpenFisca structurée repérée pour ces barèmes | **Pas de mise à jour automatique** à partir de cette source. Les frais réels embarqués restent estimatifs et soumis aux justificatifs personnels. |
+| Changements de formules | Ce ne sont pas des paramètres scalaires | **Non appliqués automatiquement**. Mise à jour/test du moteur et nouvelle APK indispensables. L'absence de changement de code n'est pas certifiée par ce bouton. |
+
+La collecte conserve **chaque révision d'un même millésime** dans
+`pf2_fiscal_collectes` avec sa source, le chemin de chaque feuille et sa date ; une nouvelle année est
+séparée. Seule une valeur numérique valide à la clé exacte `AAAA-01-01` est
+acceptée. Une valeur d'une année antérieure n'est **jamais** présumée encore
+valide. Une panne d'une feuille n'empêche pas de rapporter les autres ; les
+feuilles manquantes/inaccessibles sont nommées après le clic. Le lecteur
+revérifie à chaque session la période, la source, la forme et les bornes de la
+dernière révision : une révision plus récente invalide désactive la collecte
+partielle plutôt que revenir silencieusement à une ancienne. R2 2025 complète
+reste prioritaire. La publication d'une R2 pour une année future n'est **pas**
+automatisée et 2027 n'a pas de moteur fiscal compatible dans cette APK.
+
+L'API OpenFisca décrit une modélisation publique, **pas** la certification de
+la DGFiP ou d'une LF/LFSS publiée. Au 13/10/2026, lors de l'essai utilisateur,
+le barème IR explicite 2026 était absent ; aucune hausse ou stabilité d'IR
+2026 ne doit en être déduite. Le fait qu'une autre feuille soit datée de 2026
+ne complète pas le millésime fiscal. Le rapport n'atteste pas l'absence d'une
+loi rectificative ni la validité de la déclaration.
+
+Tests locaux sans Supabase :
+`node tests/test_fiscal_parametres_partiels.js`,
+`node tests/test_fiscal_sources.js`,
+`node tests/test_fiscal_maj_indicative.js`.
