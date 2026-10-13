@@ -1,5 +1,8 @@
 """La proposition d'écriture ne possède ni client réseau ni identité publiée."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from jobs import ligne_r2_2025_hors_ligne as ligne
@@ -18,6 +21,8 @@ def test_enveloppe_complete_figee_non_inseree():
     assert set(r["perimetre_validation"]["sources_par_parametre"]) == set(
         r["perimetre_validation"]["parametres_utilises"])
     assert "or_physique" not in r["parametres"] and "pas" not in r["parametres"]
+    fichier = Path(__file__).resolve().parents[1] / "docs/PROPOSITION-R2-2025.json"
+    assert json.loads(fichier.read_text(encoding="utf-8")) == json.loads(json.dumps(document))
 
 
 def test_changement_dune_valeur_ou_dune_source_invalide_la_proposition(monkeypatch):
