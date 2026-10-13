@@ -76,13 +76,33 @@ def test_simulation_2025_exclut_or_physique_et_ne_peut_pas_etre_inseree():
     scope = simulation["perimetre_personnel_hors_parametres_fiscaux"]
     assert scope["titulaire_des_titres_de_ce_portefeuille"] == "proprietaire_du_compte_seul"
     assert scope["foyer_pour_la_declaration_ir"] == "marie_declaration_commune"
-    assert scope["autres_revenus_mobiliers_ou_cessions_du_conjoint"] == "inconnus_non_presumes_nuls"
+    assert scope["rcm_hors_portefeuille_2025"] == "inconnu"
+    assert scope["cessions_crypto_hors_portefeuille_2025"] == "inconnu"
+    assert scope["cessions_titres_hors_portefeuille_2025"] == "inconnu_non_presume_nul"
     assert "titulaire_des_titres_de_ce_portefeuille" not in ligne["parametres"]
     meta = simulation["proposition_metadonnees_apres_migration_011_non_appliquee"]
     assert meta["statut_validation"] == "brouillon" and meta["actif"] is False
     assert "or_physique" not in ligne["parametres"]
     assert "pas" not in ligne["parametres"]
     assert ligne["parametres"]["prelevements_sociaux_par_categorie"]["plus_values_titres"] == .186
+
+
+def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
+    avant = prep.simuler_ligne_2025()
+    ponctuel = prep.simuler_ligne_2025(aucun_autre_rcm=True, aucune_autre_cession_crypto=True)
+    scope = ponctuel["perimetre_personnel_hors_parametres_fiscaux"]
+    assert scope["rcm_hors_portefeuille_2025"] == "absence_confirmee_pour_cette_simulation"
+    assert scope["cessions_crypto_hors_portefeuille_2025"] == "absence_confirmee_pour_cette_simulation"
+    assert scope["cessions_titres_hors_portefeuille_2025"] == "inconnu_non_presume_nul"
+    assert ponctuel["portee_calcul_2025"]["franchise_crypto_evaluable_sur_les_cessions_chargees"] is True
+    assert ponctuel["portee_calcul_2025"]["assiette_2op_foyer_complete_confirmee"] is False
+    assert ponctuel["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
+    assert ponctuel["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
+    assert "rcm_hors_portefeuille_non_confirmes" not in ponctuel[
+        "proposition_metadonnees_apres_migration_011_non_appliquee"]["perimetre_validation"]["regles_exclues"]
+    assert prep.simuler_ligne_2025()["perimetre_personnel_hors_parametres_fiscaux"]["rcm_hors_portefeuille_2025"] == "inconnu"
+    with pytest.raises(ValueError, match="booléennes"):
+        prep.simuler_ligne_2025(aucun_autre_rcm="non")
 
 
 def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():

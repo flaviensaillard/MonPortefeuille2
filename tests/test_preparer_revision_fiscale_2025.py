@@ -61,7 +61,16 @@ def test_cli_hors_ligne_refuse_appliquer_et_les_autres_annees():
     b = json.loads(p.stdout)
     assert b["annee_revenus"] == 2025 and "FAUX_SECRET_NON_UTILISE" not in p.stdout
     assert not p.stderr
-    for args in (["--appliquer"], ["--annee", "2026"]):
+    simulation = subprocess.run([
+        sys.executable, str(SCRIPT), "--simuler-ligne", "--aucun-autre-rcm-2025",
+        "--aucune-autre-cession-crypto-2025",
+    ], cwd=RACINE, env=env, capture_output=True, text=True, check=True)
+    document = json.loads(simulation.stdout)
+    assert document["portee_calcul_2025"]["franchise_crypto_evaluable_sur_les_cessions_chargees"] is True
+    assert document["champs_ligne_envisagee"]["annee_revenus"] == 2025
+    assert document["champs_ligne_envisagee"]["source_ref"] is None
+    assert "FAUX_SECRET_NON_UTILISE" not in simulation.stdout
+    for args in (["--appliquer"], ["--annee", "2026"], ["--aucun-autre-rcm-2025"]):
         refus = subprocess.run([sys.executable, str(SCRIPT), *args], cwd=RACINE,
                                env=env, capture_output=True, text=True)
         assert refus.returncode != 0
