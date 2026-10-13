@@ -80,7 +80,7 @@ def test_simulation_2025_exclut_or_physique_et_ne_peut_pas_etre_inseree():
     assert scope["cessions_crypto_hors_portefeuille_2025"] == "inconnu"
     assert scope["cessions_titres_hors_portefeuille_2025"] == "inconnu_non_presume_nul"
     assert "titulaire_des_titres_de_ce_portefeuille" not in ligne["parametres"]
-    meta = simulation["proposition_metadonnees_apres_migration_011_non_appliquee"]
+    meta = simulation["proposition_metadonnees_brouillon_non_publie"]
     assert meta["statut_validation"] == "brouillon" and meta["actif"] is False
     assert "or_physique" not in ligne["parametres"]
     assert "pas" not in ligne["parametres"]
@@ -99,7 +99,7 @@ def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
     assert ponctuel["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
     assert ponctuel["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
     assert "rcm_hors_portefeuille_non_confirmes" not in ponctuel[
-        "proposition_metadonnees_apres_migration_011_non_appliquee"]["perimetre_validation"]["regles_exclues"]
+        "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
     tous_flux_absents = prep.simuler_ligne_2025(
         aucun_autre_rcm=True, aucune_autre_cession_crypto=True,
         aucune_autre_cession_titres=True,
@@ -110,9 +110,9 @@ def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
     assert p["assiette_2op_foyer_complete_confirmee"] is False  # revenus du portefeuille non inventoriés
     assert p["plus_value_2086_complete_confirmee"] is False  # avoirs historiques ailleurs possibles
     assert tous_flux_absents["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
-    assert tous_flux_absents["proposition_metadonnees_apres_migration_011_non_appliquee"]["actif"] is False
+    assert tous_flux_absents["proposition_metadonnees_brouillon_non_publie"]["actif"] is False
     assert "cessions_titres_hors_portefeuille_non_confirmees" not in tous_flux_absents[
-        "proposition_metadonnees_apres_migration_011_non_appliquee"]["perimetre_validation"]["regles_exclues"]
+        "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
     assert prep.simuler_ligne_2025()["perimetre_personnel_hors_parametres_fiscaux"]["rcm_hors_portefeuille_2025"] == "inconnu"
     with pytest.raises(ValueError, match="booléennes"):
         prep.simuler_ligne_2025(aucun_autre_rcm="non")

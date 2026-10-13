@@ -223,7 +223,7 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
             "plus_value_2086_complete_confirmee": False,
             "raison_2086": "Aucune cession externe ne prouve l'absence de crypto déjà détenue hors application.",
         },
-        "proposition_metadonnees_apres_migration_011_non_appliquee": {
+        "proposition_metadonnees_brouillon_non_publie": {
             "statut_validation": "brouillon",
             "perimetre_validation": {
                 "couverture": "aucune_pour_activation",
@@ -242,7 +242,7 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
         },
         "bloquants": [
             "source_ref et commit candidat final manquants ; user_id volontairement absent",
-            "aucun statut validation/activation dans la table ni lecteur sûr dans l'APK",
+            "colonnes de validation présentes après 011, mais aucun lecteur fiscal sûr dans l'APK",
             "paramètres or physique exclus ; une publication générale serait trompeuse",
             "PAS couple = estimation sur salaires, non un taux officiel activable",
             "revenus mobiliers de ce portefeuille non inventoriés exhaustivement (dividendes/coupons) ; 2OP non certifiée",
