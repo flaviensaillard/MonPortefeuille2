@@ -69,6 +69,13 @@ def _differences(actuel, candidat, prefixe="") -> list[dict]:
             else:
                 sorties.extend(_differences(actuel[cle], candidat[cle], chemin))
         return sorties
+    # JSONB renvoie des listes, alors que les tables Python du code source
+    # contiennent des tuples : même suite de valeurs ≠ changement fiscal.
+    if isinstance(actuel, (list, tuple)) and isinstance(candidat, (list, tuple)):
+        if len(actuel) != len(candidat):
+            return [{"champ": prefixe, "operation": "changement", "avant": list(actuel), "apres": list(candidat)}]
+        return [diff for i, (a, b) in enumerate(zip(actuel, candidat))
+                for diff in _differences(a, b, f"{prefixe}[{i}]")]
     if actuel != candidat:
         return [{"champ": prefixe, "operation": "changement", "avant": actuel, "apres": candidat}]
     return []

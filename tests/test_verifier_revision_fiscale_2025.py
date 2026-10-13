@@ -42,7 +42,9 @@ class ClientLectureSeule:
 def _lignes(uid=None):
     params = {
         "bareme": {"decote_base_celibataire": 898.0, "decote_plafond_celibataire": 1986.0,
-                   "decote_base_couple": 1486.0, "decote_plafond_couple": 3284.0},
+                   "decote_base_couple": 1486.0, "decote_plafond_couple": 3284.0,
+                   "tranches": [11600.0, 29579.0, 84577.0, 181917.0],
+                   "taux": [0.11, 0.30, 0.41, 0.45]},
         "prelevements_sociaux": .172,
         "mention_source_code_non_verifiee": "ancienne",
     }
@@ -50,6 +52,18 @@ def _lignes(uid=None):
              "source_ref": prep.SOURCE_REVISION_1, "parametres": deepcopy(params)}
             for a in (2022, 2023, 2024, 2025, 2026)]
     return base
+
+
+def test_diff_json_ne_signale_pas_les_tuples_egaux_aux_listes_de_la_base():
+    # `asdict(Bareme)` conserve les tuples ; JSONB les restitue comme listes.
+    ancien = {"bareme": {"tranches": [11600, 29579], "taux": [0.11, 0.30]}}
+    candidat = {"bareme": {"tranches": (11600.0, 29579.0), "taux": (0.11, 0.30)}}
+    assert verification._differences(ancien, candidat) == []
+    candidat["bareme"]["tranches"] = (11600.0, 30000.0)
+    assert verification._differences(ancien, candidat) == [
+        {"champ": "bareme.tranches[1]", "operation": "changement",
+         "avant": 29579, "apres": 30000.0},
+    ]
 
 
 def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
@@ -77,6 +91,7 @@ def test_diff_distinguant_ajouts_et_modifications_ne_produit_pas_de_ligne_a_inse
     assert ecarts["bareme.decote_base_couple"] == {
         "champ": "bareme.decote_base_couple", "operation": "changement", "avant": 1486.0, "apres": 1483.0}
     assert ecarts["prelevements_sociaux"]["apres"] == .186
+    assert "bareme.tranches" not in ecarts and "bareme.taux" not in ecarts
     assert ecarts["quotient_familial"]["operation"] == "ajout"
     assert ecarts["mention_source_code_non_verifiee"]["operation"] == "retrait_du_brouillon"
     assert "avant" not in ecarts["mention_source_code_non_verifiee"]
