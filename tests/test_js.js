@@ -191,6 +191,15 @@ test('TMI à 30 % au-delà de 29 579 €', () => proche(PF.fiscal.impotRevenu(40
 test('IR positif au-delà', () => PF.fiscal.impotRevenu(60000, 1, 2025, 'Célibataire').impot_net > 3000);
 test('abattement 10 % plancher', () => proche(PF.fiscal.abattement10(1000, 2025), 509));
 test('abattement 10 % plafond', () => proche(PF.fiscal.abattement10(200000, 2025), 14555));
+test('abattement : jamais de repli vers un autre millésime', () => {
+    for (const annee of [2021, 2027]) {
+        for (const salaire of [0, 30000]) {
+            try { PF.fiscal.abattement10(salaire, annee); return false; }
+            catch (e) { if (!/Aucun abattement/.test(e.message)) return false; }
+        }
+    }
+    return true;
+});
 test('PFU 2026 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2026), 0.314, 1e-9));
 test('PFU titres 2025 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2025), 0.314, 1e-9));
 test('décote 2025 DGFiP : célibataire 897/1982, couple 1483/3277', () => {

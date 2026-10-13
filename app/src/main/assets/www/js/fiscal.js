@@ -130,10 +130,12 @@
     }
 
     function abattement10(salaire, annee) {
+        if (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined)
+            throw new Error('Aucun abattement 10 % pour les revenus ' + annee + '.');
         var sal = Math.max(0, U.num(salaire, 0));
         if (sal <= 0) return 0;
-        var plancher = PLANCHER_ABATTEMENT_10[annee] || PLANCHER_ABATTEMENT_10[derniereAnnee()];
-        var plafond = PLAFOND_ABATTEMENT_10[annee] || PLAFOND_ABATTEMENT_10[derniereAnnee()];
+        var plancher = PLANCHER_ABATTEMENT_10[annee];
+        var plafond = PLAFOND_ABATTEMENT_10[annee];
         return Math.min(Math.max(sal * 0.10, Math.min(sal, plancher)), plafond);
     }
 

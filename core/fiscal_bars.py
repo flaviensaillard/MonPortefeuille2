@@ -282,23 +282,21 @@ PLAFOND_ABATTEMENT_10_PAR_ANNEE: dict[int, float] = {
 
 
 def forfait_repas_de(annee: int) -> float:
-    """Valeur forfaitaire d'un repas déductible aux frais réels pour `annee`."""
-    if annee in FORFAIT_REPAS_PAR_ANNEE:
-        return FORFAIT_REPAS_PAR_ANNEE[annee]
-    return FORFAIT_REPAS_PAR_ANNEE[max(FORFAIT_REPAS_PAR_ANNEE)]
+    """Valeur du millésime demandé ; jamais le forfait de la dernière année."""
+    if annee not in FORFAIT_REPAS_PAR_ANNEE:
+        raise ValueError(f"Aucun forfait repas pour les revenus {annee}.")
+    return FORFAIT_REPAS_PAR_ANNEE[annee]
 
 
 def abattement_10_salaire(salaire: float, annee: int) -> float:
-    """Abattement forfaitaire de 10 % sur un salaire net imposable."""
+    """Abattement pour l'année demandée, sans substitution d'un autre millésime."""
+    if annee not in PLANCHER_ABATTEMENT_10_PAR_ANNEE or annee not in PLAFOND_ABATTEMENT_10_PAR_ANNEE:
+        raise ValueError(f"Aucun abattement 10 % pour les revenus {annee}.")
     sal = max(0.0, float(salaire))
     if sal <= 0:
         return 0.0
-    plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE.get(
-        annee, PLANCHER_ABATTEMENT_10_PAR_ANNEE[max(PLANCHER_ABATTEMENT_10_PAR_ANNEE)]
-    )
-    plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE.get(
-        annee, PLAFOND_ABATTEMENT_10_PAR_ANNEE[max(PLAFOND_ABATTEMENT_10_PAR_ANNEE)]
-    )
+    plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE[annee]
+    plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE[annee]
     brut = sal * 0.10
     return min(max(brut, min(sal, plancher)), plafond)
 

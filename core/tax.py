@@ -56,7 +56,7 @@ class ResultatIR:
     bareme_annee: int
 
 
-def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> float:
+def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme) -> float:
     """Impôt sur un revenu par part, sans décote.
 
     `bareme.tranches` contient les plafonds des tranches 1 à 4 ; `bareme.taux`
@@ -64,8 +64,10 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> 
     donc préfixer les taux d'un zéro, sans quoi la première tranche est taxée au
     taux de la deuxième.
     """
+    # L'appelant doit fournir le barème exact de l'année demandée ; ne jamais
+    # appliquer implicitement le dernier millésime enregistré.
     if bareme is None:
-        bareme = fb.BAREMES[max(fb.BAREMES)]
+        raise ValueError("Barème annuel requis pour le calcul par part.")
     bornes = (0.0,) + bareme.tranches
     taux = (0.0,) + bareme.taux
     impot = 0.0
