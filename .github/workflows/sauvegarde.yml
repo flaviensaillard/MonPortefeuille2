@@ -22,13 +22,7 @@ name: Sauvegarde chiffrée
 on:
   schedule:
     - cron: "0 20 * * 0"   # chaque dimanche, 20 h UTC
-  workflow_dispatch:
-    inputs:
-      verifier_revision_2025:
-        description: 'Après la sauvegarde/restauration, lire les révisions fiscales 2025 (lecture seule, aucune insertion) ?'
-        required: false
-        default: false
-        type: boolean
+  workflow_dispatch: {}  # sur la branche de la PR : sauvegarde puis lecture fiscale 2025
 
 permissions:
   contents: read
@@ -62,10 +56,11 @@ jobs:
           path: sauvegardes/
           retention-days: 90
           if-no-files-found: error
-      # Option manuelle : aucune écriture Supabase. La sauvegarde chiffrée et
+      # Sur lancement manuel DE CETTE BRANCHE : aucune écriture Supabase.
+      # La sauvegarde chiffrée et
       # son contrôle sont déjà publiés avant cette lecture fiscale facultative.
       - name: Comparer la révision 2025 en lecture seule
-        if: github.event_name == 'workflow_dispatch' && inputs.verifier_revision_2025
+        if: github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -74,7 +69,7 @@ jobs:
           python jobs/verifier_revision_fiscale_2025.py --lire-supabase > "$RUNNER_TEMP/rapport-fiscal-2025.json"
           python -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/rapport-fiscal-2025.json")); print("Révisions 2025 confirmables sous réserve :", r["revision_2_confirmable_sous_reserve"], "| écarts :", len(r["ecarts_code_2025_brouillon_vs_base"]), "| problèmes :", len(r["problemes"]), "| écriture autorisée :", r["ecriture_autorisee"])'
       - name: Joindre le rapport anonymisé de lecture fiscale
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.verifier_revision_2025
+        if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: rapport-fiscal-2025-${{ github.run_id }}

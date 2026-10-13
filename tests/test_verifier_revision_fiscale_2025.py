@@ -102,10 +102,10 @@ def test_derives_bloquent_numero_suppose(mutation, attendu):
 
 def test_workflow_manuel_sauvegarde_avant_lecture_et_aucune_ecriture():
     contenu = (Path(__file__).resolve().parents[1] / ".github/workflows/sauvegarde.yml").read_text()
-    assert "type: boolean" in contenu and "verifier_revision_2025:" in contenu
+    assert "workflow_dispatch: {}" in contenu
     assert contenu.index("- name: Restauration de contrôle") < contenu.index(
         "name: sauvegarde-pf2-") < contenu.index("- name: Comparer la révision 2025 en lecture seule")
-    assert "if: github.event_name == 'workflow_dispatch' && inputs.verifier_revision_2025" in contenu
+    assert "if: github.event_name == 'workflow_dispatch'" in contenu
     assert "python jobs/verifier_revision_fiscale_2025.py --lire-supabase" in contenu
     assert "--appliquer" not in contenu
 
