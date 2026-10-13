@@ -483,33 +483,42 @@ sim = tax.simuler_foyer_complet(
 )
 
 with cont_frais_reels:
+    if use_frais_1 or use_frais_2:
+        st.warning(
+            "Frais réels : simulation non certifiée. Vérifiez que les trajets sont professionnels "
+            "et la règle des 40 km, ainsi que les conditions des repas (hors domicile imposé, "
+            "cantine, justificatifs, participation employeur). Le forfait de repas ne s'applique "
+            "pas automatiquement à tous les repas ; ne recopiez pas ces montants sans contrôle."
+        )
     res_f1, res_f2 = st.columns(2)
     with res_f1:
         if sim["retenir_frais_reels_1"]:
-            st.success(
-                f"✅ **Vous — Frais réels retenus : {ui.eur(sim['frais_reels_1'], 0)}** "
+            st.warning(
+                f"⚠️ **Vous — Frais réels estimés : {ui.eur(sim['frais_reels_1'], 0)}** "
                 f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_1'], 0)}, "
                 f"soit **+{ui.eur(sim['frais_reels_1'] - sim['abattement_10_1'], 0)}** de déduction supplémentaire).\n\n"
-                f"👉 **Inscrivez `{sim['case_1ak']} €` en case `1AK`** ({sim['frais_km_formule_1']} · {sim['frais_repas_formule_1']})."
+                f"Montant indicatif `{sim['case_1ak']} €` pour la case `1AK`, à contrôler avant déclaration "
+                f"({sim['frais_km_formule_1']} · {sim['frais_repas_formule_1']})."
             )
         else:
             st.info(
                 f"ℹ️ **Vous — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_1'], 0)}** "
-                f"(frais réels : {ui.eur(sim['frais_reels_1'], 0)}). **Laissez la case `1AK` vide.**"
+                    f"(frais réels estimés : {ui.eur(sim['frais_reels_1'], 0)}). **Vérifiez la case `1AK` avant déclaration.**"
             )
     with res_f2:
         if couple and salaire_2 > 0:
             if sim["retenir_frais_reels_2"]:
-                st.success(
-                    f"✅ **Conjoint — Frais réels retenus : {ui.eur(sim['frais_reels_2'], 0)}** "
+                st.warning(
+                    f"⚠️ **Conjoint — Frais réels estimés : {ui.eur(sim['frais_reels_2'], 0)}** "
                     f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_2'], 0)}, "
                     f"soit **+{ui.eur(sim['frais_reels_2'] - sim['abattement_10_2'], 0)}** de déduction supplémentaire).\n\n"
-                    f"👉 **Inscrivez `{sim['case_1bk']} €` en case `1BK`** ({sim['frais_km_formule_2']} · {sim['frais_repas_formule_2']})."
+                    f"Montant indicatif `{sim['case_1bk']} €` pour la case `1BK`, à contrôler avant déclaration "
+                    f"({sim['frais_km_formule_2']} · {sim['frais_repas_formule_2']})."
                 )
             else:
                 st.info(
                     f"ℹ️ **Conjoint — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_2'], 0)}** "
-                    f"(frais réels : {ui.eur(sim['frais_reels_2'], 0)}). **Laissez la case `1BK` vide.**"
+                        f"(frais réels estimés : {ui.eur(sim['frais_reels_2'], 0)}). **Vérifiez la case `1BK` avant déclaration.**"
                 )
 
 # ---------------------------------------------------------------------------

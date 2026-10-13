@@ -170,7 +170,8 @@ def construire_brouillon() -> dict:
 def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
                        aucune_autre_cession_crypto: bool = False,
                        aucune_autre_cession_titres: bool = False,
-                       aucun_avoir_crypto_externe_aux_cessions: bool = False) -> dict:
+                       aucun_avoir_crypto_externe_aux_cessions: bool = False,
+                       aucun_rcm_portefeuille_non_comptabilise: bool = False) -> dict:
     """Enveloppe R2 hors ligne, non insérable, avec confirmations ÉPHÉMÈRES.
 
     Les réponses concernent uniquement 2025 et ne sont pas sauvegardées dans
@@ -181,13 +182,15 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
     """
     if any(type(v) is not bool for v in (
         aucun_autre_rcm, aucune_autre_cession_crypto, aucune_autre_cession_titres,
-        aucun_avoir_crypto_externe_aux_cessions
+        aucun_avoir_crypto_externe_aux_cessions, aucun_rcm_portefeuille_non_comptabilise
     )):
         raise ValueError("Les confirmations de périmètre doivent être explicites (booléennes).")
     brouillon = construire_brouillon()
     params = brouillon["parametres_candidats"]
     assert "or_physique" not in params and "pas" not in params
-    regles_exclues = ["or_physique", "pas_officiel", "rcm_du_portefeuille_non_audites"]
+    regles_exclues = ["or_physique", "pas_officiel"]
+    if not aucun_rcm_portefeuille_non_comptabilise:
+        regles_exclues.append("rcm_du_portefeuille_non_audites")
     if not aucun_avoir_crypto_externe_aux_cessions:
         regles_exclues.append("inventaire_crypto_hors_application_non_confirme")
     if not aucune_autre_cession_titres:
@@ -215,6 +218,10 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
                 "absence_confirmee_pour_cette_simulation"
                 if aucun_avoir_crypto_externe_aux_cessions else "inconnu"
             ),
+            "rcm_du_portefeuille_non_comptabilises_2025": (
+                "absence_confirmee_pour_cette_simulation"
+                if aucun_rcm_portefeuille_non_comptabilise else "inconnu"
+            ),
         },
         "portee_calcul_2025": {
             "franchise_crypto_evaluable_sur_les_cessions_chargees": aucune_autre_cession_crypto,
@@ -223,10 +230,12 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
             ),
             "assiette_2op_foyer_complete_confirmee": False,
             "raison_2op": (
-                "Même sans flux hors portefeuille, l'application n'inventorie pas tous les revenus "
-                "mobiliers du portefeuille (p. ex. dividendes/coupons) ; choix fiscal indicatif."
-                if aucun_autre_rcm and aucune_autre_cession_titres else
-                "Flux hors portefeuille non confirmés ; choix fiscal indicatif."
+                "Absence de revenus mobiliers non comptabilisés confirmée ponctuellement ; "
+                "opérations, traitements et précompte restent à vérifier."
+                if (aucun_autre_rcm and aucune_autre_cession_titres
+                    and aucun_rcm_portefeuille_non_comptabilise) else
+                "Assiette du foyer ou revenus mobiliers du portefeuille non entièrement confirmés ; "
+                "choix fiscal indicatif."
             ),
             "plus_value_2086_complete_confirmee": False,
             "raison_2086": (
@@ -258,7 +267,9 @@ def simuler_ligne_2025(*, aucun_autre_rcm: bool = False,
             "colonnes de validation présentes après 011, mais aucun lecteur fiscal sûr dans l'APK",
             "paramètres or physique exclus ; une publication générale serait trompeuse",
             "PAS couple = estimation sur salaires, non un taux officiel activable",
-            "revenus mobiliers de ce portefeuille non inventoriés exhaustivement (dividendes/coupons) ; 2OP non certifiée",
+            ("2OP non certifiée : vérification des opérations et revenus déclarés encore requise"
+             if aucun_rcm_portefeuille_non_comptabilise else
+             "revenus mobiliers de ce portefeuille non inventoriés exhaustivement (dividendes/coupons) ; 2OP non certifiée"),
             ("2086 non certifié : exhaustivité des opérations et valorisations non vérifiées"
              if aucun_avoir_crypto_externe_aux_cessions else
              "inventaire des cryptoactifs déjà détenus hors application non confirmé ; 2086 non certifié"),
@@ -284,18 +295,23 @@ def main() -> int:
                         help="Confirmation ponctuelle hors portefeuille, non conservée.")
     parser.add_argument("--aucun-avoir-crypto-externe-aux-cessions-2025", action="store_true",
                         help="Confirmation ponctuelle aux dates des cessions ; ne certifie pas la 2086.")
+    parser.add_argument("--aucun-rcm-portefeuille-non-comptabilise-2025", action="store_true",
+                        help="Confirmation ponctuelle de la couverture des revenus du portefeuille.")
     args = parser.parse_args()
     assert args.annee == ANNEE
     if any((args.aucun_autre_rcm_2025, args.aucune_autre_cession_crypto_2025,
             args.aucune_autre_cession_titres_2025,
-            args.aucun_avoir_crypto_externe_aux_cessions_2025)) and not args.simuler_ligne:
+            args.aucun_avoir_crypto_externe_aux_cessions_2025,
+            args.aucun_rcm_portefeuille_non_comptabilise_2025)) and not args.simuler_ligne:
         parser.error("Les confirmations ne s'appliquent qu'à --simuler-ligne (revenus 2025).")
     try:
         sortie = (simuler_ligne_2025(aucun_autre_rcm=args.aucun_autre_rcm_2025,
                                     aucune_autre_cession_crypto=args.aucune_autre_cession_crypto_2025,
                                     aucune_autre_cession_titres=args.aucune_autre_cession_titres_2025,
                                     aucun_avoir_crypto_externe_aux_cessions=(
-                                        args.aucun_avoir_crypto_externe_aux_cessions_2025))
+                                        args.aucun_avoir_crypto_externe_aux_cessions_2025),
+                                    aucun_rcm_portefeuille_non_comptabilise=(
+                                        args.aucun_rcm_portefeuille_non_comptabilise_2025))
                   if args.simuler_ligne else construire_brouillon())
     except (KeyError, RuntimeError, ValueError) as exc:
         print(f"Préparation annulée : {exc}", file=sys.stderr)

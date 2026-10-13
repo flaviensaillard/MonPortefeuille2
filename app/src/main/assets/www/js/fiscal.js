@@ -1507,13 +1507,16 @@
         }
         out += '<div class="' + (f.retenir ? 'ok-vert' : 'info') + '" style="margin-top:8px">'
             + (f.retenir
-                ? '<b>Case ' + caseNom + ' : inscrivez ' + U.eur(f.caseValeur, { dec: 0 }) + '</b><br>'
+                ? '<b>Case ' + caseNom + ' : estimation ' + U.eur(f.caseValeur, { dec: 0 }) + ' à vérifier avant déclaration</b><br>'
                     + UI.h('Frais kilométriques (' + U.num(r['cvFiscal' + n], 5) + ' CV) : ' + f.km.formule)
                     + '<br>' + UI.h(f.repas.formule) + '<br>'
                     + 'Total <b>' + U.eur(f.total, { dec: 0 }) + '</b> contre ' + U.eur(f.abattement, { dec: 0 })
                     + ' d’abattement 10 % : <b>' + U.eur(f.gain, { dec: 0 }) + '</b> de déduction supplémentaire.'
-                : 'Abattement de 10 % retenu (' + U.eur(f.abattement, { dec: 0 }) + ') contre '
-                    + U.eur(f.total, { dec: 0 }) + ' de frais réels : <b>laissez la case ' + caseNom + ' vide</b>.')
+                : 'Abattement de 10 % estimé (' + U.eur(f.abattement, { dec: 0 }) + ') contre '
+                    + U.eur(f.total, { dec: 0 }) + ' de frais réels estimés : <b>vérifiez avant la case ' + caseNom + '</b>.')
+            + (f.utilise ? '<div class="st">Simulation non certifiée : vérifiez trajets éligibles, règle des 40 km, '
+                + 'repas imposés hors domicile, mode de restauration, justificatifs et participation employeur. '
+                + 'Le forfait repas ne s’applique pas automatiquement à tous les repas.</div>' : '')
             + '</div>';
         return out;
     }

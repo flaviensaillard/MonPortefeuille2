@@ -121,10 +121,17 @@ def test_confirmations_ponctuelles_restreintes_a_2025_et_hors_parametres_sql():
     assert "inventaire_crypto_hors_application_non_confirme" not in hypothese_sans_avoirs[
         "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
     assert hypothese_sans_avoirs["statut_validation"] == "incomplet_ne_pas_inserer_ni_activer"
+    scenario_sans_rcm = prep.simuler_ligne_2025(aucun_rcm_portefeuille_non_comptabilise=True)
+    assert "rcm_du_portefeuille_non_audites" not in scenario_sans_rcm[
+        "proposition_metadonnees_brouillon_non_publie"]["perimetre_validation"]["regles_exclues"]
+    assert scenario_sans_rcm["portee_calcul_2025"]["assiette_2op_foyer_complete_confirmee"] is False
+    assert scenario_sans_rcm["champs_ligne_envisagee"] == avant["champs_ligne_envisagee"]
     with pytest.raises(ValueError, match="booléennes"):
         prep.simuler_ligne_2025(aucun_autre_rcm="non")
     with pytest.raises(ValueError, match="booléennes"):
         prep.simuler_ligne_2025(aucun_avoir_crypto_externe_aux_cessions="non")
+    with pytest.raises(ValueError, match="booléennes"):
+        prep.simuler_ligne_2025(aucun_rcm_portefeuille_non_comptabilise="non")
 
 
 def test_requete_unique_filtre_proprietaire_et_aucune_ecriture():
