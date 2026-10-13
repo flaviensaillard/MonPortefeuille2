@@ -26,7 +26,7 @@ def _options(revenu=18_000, parts=2, titres=0, crypto=0, interets=0, precompte=N
 @pytest.mark.parametrize("titres,crypto,choix", [
     (15_000, 100, (True, False)),     # 2OP sans 3CN
     (100, 15_000, (False, True)),     # 3CN sans 2OP
-    (100, 100, (True, True)),        # deux options distinctes
+    (100, 100, (False, False)),      # IR global sous 61 € : égalité, défaut sans options
 ])
 def test_les_options_sont_independantes(titres, crypto, choix):
     r = _options(titres=titres, crypto=crypto)

@@ -101,7 +101,7 @@
         return s.indexOf('mari') >= 0 || s.indexOf('pacs') >= 0;
     }
 
-    function impotRevenu(revenu, parts, annee, statut) {
+    function impotRevenu(revenu, parts, annee, statut, appliquerSeuil) {
         var b = baremeDe(annee);
         revenu = Math.max(0, U.num(revenu, 0));
         parts = Math.max(0.5, U.num(parts, 1));
@@ -137,7 +137,7 @@
             decote = Math.min(decote, impot);
         }
         var net = impot - decote;
-        if (net < SEUIL_NON_RECOUVREMENT_IR) net = 0;  // seuil de non-recouvrement
+        if (appliquerSeuil !== false && net < SEUIL_NON_RECOUVREMENT_IR) net = 0;  // seul si IR global = barème
         return { impot_brut: impot, decote: decote, impot_net: net, tmi: tmi, quotient: qf, annee: annee, plafonnement: gainMax || 0 };
     }
 
@@ -220,20 +220,23 @@
         if (pv + interets <= 0) return { choix: 'PFU', gain: 0, detail: 'Aucun revenu mobilier imposable.' };
         var psInterets = interets ? interets * tauxPSRevenuMobilier(annee, interetsPrecomptes) : 0;
         var ps = pv * tauxPS(annee) + psInterets;
-        var pfuIr = (pv + interets) * IR_FORFAITAIRE;
-        var pfuTotal = pfuIr + ps;
+        var irSans = impotRevenu(autresRevenus, parts, annee, statut);
+        var irSansBrut = impotRevenu(autresRevenus, parts, annee, statut, false).impot_net;
+        var pfuGlobal = irSansBrut + (pv + interets) * IR_FORFAITAIRE;
+        var pfuIr = pfuGlobal >= SEUIL_NON_RECOUVREMENT_IR ? (pv + interets) * IR_FORFAITAIRE : 0;
+        var irBaremeDebloque = pfuIr ? irSansBrut - irSans.impot_net : 0;
+        var pfuTotal = pfuIr + irBaremeDebloque + ps;
 
         var csgCetteAnnee = interetsPrecomptes ? interets * CSG_DEDUCTIBLE : 0;
         var csgApresPaiement = (pv + (interetsPrecomptes ? 0 : interets)) * CSG_DEDUCTIBLE;
-        var irAvec = impotRevenu(autresRevenus + pv + interets - csgCetteAnnee, parts, annee, statut);
-        var irSans = impotRevenu(autresRevenus, parts, annee, statut);
-        var irMarginal = Math.max(0, irAvec.impot_net - irSans.impot_net);
+        var irAvec = impotRevenu(autresRevenus + pv + interets - csgCetteAnnee, parts, annee, statut, false);
+        var irMarginal = Math.max(0, (irAvec.impot_net >= SEUIL_NON_RECOUVREMENT_IR ? irAvec.impot_net : 0) - irSans.impot_net);
         var baremeTotal = irMarginal + ps;
         var avantage = pfuTotal - baremeTotal;
 
         return {
             annee: annee, plus_value_nette: pv + interets,
-            pfu: { ir: pfuIr, ps: ps, total: pfuTotal },
+            pfu: { ir: pfuIr, ir_bareme_debloque: irBaremeDebloque, ps: ps, total: pfuTotal },
             bareme: { ir_marginal: irMarginal, ps: ps, total: baremeTotal,
                 csg_deductible: csgCetteAnnee, csg_deductible_apres_paiement_estimee: csgApresPaiement },
             ps_titres: pv * tauxPS(annee), ps_interets: psInterets,
@@ -264,8 +267,11 @@
             cnChoix.forEach(function (cn) {
                 var csgPayee = op && precomptes ? rcm * CSG_DEDUCTIBLE : 0;
                 var revenuBareme = revenuSalaires + (op ? pv + rcm : 0) + (cn ? crypto : 0) - csgPayee;
-                var irBareme = impotRevenu(revenuBareme, parts, annee, statut).impot_net;
+                var irBareme = impotRevenu(revenuBareme, parts, annee, statut, false).impot_net;
                 var irForfait = IR_FORFAITAIRE * ((op ? 0 : pv + rcm) + (cn ? 0 : crypto));
+                if (irBareme + irForfait < SEUIL_NON_RECOUVREMENT_IR) {
+                    irBareme = 0; irForfait = 0;
+                }
                 var total = irBareme + irForfait + psTotal;
                 scenarios.push({
                     cocher_2op: op, cocher_3cn: cn,
@@ -1431,6 +1437,7 @@
                 + '<div style="flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:10px">'
                 + '<div style="font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.06em">Flat tax</div>'
                 + ligneResultat('IR ' + U.nombre(IR_FORFAITAIRE * 100, 1) + ' %', U.eur(a.pfu.ir, { dec: 0 }))
+                + (a.pfu.ir_bareme_debloque ? ligneResultat('IR au barème rétabli (seuil global)', U.eur(a.pfu.ir_bareme_debloque, { dec: 0 })) : '')
                 + ligneResultat('PS (titres ' + U.nombre(tauxPS(annee) * 100, 1) + ' %, intérêts selon précompte)', U.eur(a.pfu.ps, { dec: 0 }))
                 + ligneResultat('Total', U.eur(a.pfu.total, { dec: 0 }), true)
                 + '</div>'

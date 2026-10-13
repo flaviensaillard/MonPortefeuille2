@@ -862,6 +862,8 @@ elif arb is not None:
     with ca1:
         st.markdown(f"**Option 1 — PFU (titres : {pfu_taux * 100:.1f} % ; intérêts selon précompte)**")
         st.metric(f"Impôt sur le revenu ({fb.IR_FORFAITAIRE * 100:.1f} %)", ui.eur(arb["pfu"]["ir"]))
+        if arb["pfu"]["ir_bareme_debloque"]:
+            st.metric("IR au barème rétabli (seuil global)", ui.eur(arb["pfu"]["ir_bareme_debloque"]))
         st.metric("PS (titres + intérêts, selon précompte)", ui.eur(arb["pfu"]["ps"]))
         st.metric("Coût total avec la Flat Tax", ui.eur(arb["pfu"]["total"]))
     with ca2:

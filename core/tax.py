@@ -90,6 +90,7 @@ def impot_revenu(
     annee: int,
     statut: str = "Célibataire",
     avec_decote: bool = True,
+    appliquer_seuil: bool = True,
 ) -> ResultatIR:
     """Impôt sur le revenu selon le barème de `annee` (CGI art. 197).
 
@@ -138,7 +139,7 @@ def impot_revenu(
 
     net = impot - decote
     # Seuil de non-recouvrement : en dessous de 61 €, l'impôt n'est pas prélevé.
-    if net < fb.SEUIL_NON_RECOUVREMENT_IR:
+    if appliquer_seuil and net < fb.SEUIL_NON_RECOUVREMENT_IR:
         net = 0.0
 
     return ResultatIR(impot_brut=impot, decote=decote, impot_net=net, tmi=tmi, bareme_annee=annee)
@@ -432,22 +433,29 @@ def comparer_pfu_bareme(
         annee, precompte=interets_ps_precomptes,
     ) if interets else 0.0
     ps = ps_pv + ps_interets  # dette totale, déjà versée en partie si précomptée
-    pfu_ir = (pv + interets) * fb.IR_FORFAITAIRE
-    pfu_total = pfu_ir + ps
+    ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
+    ir_sans_brut = impot_revenu(autres_revenus, parts, annee, statut, appliquer_seuil=False).impot_net
+    pfu_ir_brut = (pv + interets) * fb.IR_FORFAITAIRE
+    # 61 € s'apprécie sur la cotisation globale (barème + taux proportionnel),
+    # pas sur la composante au barème prise isolément.
+    pfu_global = ir_sans_brut + pfu_ir_brut
+    pfu_ir = pfu_ir_brut if pfu_global >= fb.SEUIL_NON_RECOUVREMENT_IR else 0.0
+    ir_bareme_debloque = (ir_sans_brut - ir_sans.impot_net) if pfu_ir else 0.0
+    pfu_total = pfu_ir + ir_bareme_debloque + ps
 
     csg_annee = interets * fb.CSG_DEDUCTIBLE if interets_ps_precomptes else 0.0
     csg_ulterieure = (pv + (0.0 if interets_ps_precomptes else interets)) * fb.CSG_DEDUCTIBLE
     revenu_imposable_supp = pv + interets - csg_annee
-    ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut)
-    ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
-    ir_marginal = max(0.0, ir_avec.impot_net - ir_sans.impot_net)
+    ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut, appliquer_seuil=False)
+    ir_marginal = max(0.0, (ir_avec.impot_net if ir_avec.impot_net >= fb.SEUIL_NON_RECOUVREMENT_IR else 0.0) - ir_sans.impot_net)
     bareme_total = ir_marginal + ps
 
     avantage = pfu_total - bareme_total
     return {
         "annee": annee,
         "plus_value_nette": pv + interets,
-        "pfu": {"ir": pfu_ir, "ps": ps, "total": pfu_total},
+        "pfu": {"ir": pfu_ir, "ir_bareme_debloque": ir_bareme_debloque,
+                "ps": ps, "total": pfu_total},
         "bareme": {"ir_marginal": ir_marginal, "ps": ps, "total": bareme_total,
                    "csg_deductible": csg_annee,
                    "csg_deductible_apres_paiement_estimee": csg_ulterieure},
@@ -492,9 +500,12 @@ def comparer_options_foyer(
             csg_payee_annee = rcm * fb.CSG_DEDUCTIBLE if op and interets_ps_precomptes else 0.0
             revenu_au_bareme = (revenu_salaires + (pv + rcm if op else 0.0)
                                 + (crypto if cn else 0.0) - csg_payee_annee)
-            ir_bareme = impot_revenu(revenu_au_bareme, parts, annee, statut).impot_net
+            ir_bareme = impot_revenu(revenu_au_bareme, parts, annee, statut,
+                                     appliquer_seuil=False).impot_net
             ir_forfaitaire = fb.IR_FORFAITAIRE * ((0.0 if op else pv + rcm)
                                                  + (0.0 if cn else crypto))
+            if ir_bareme + ir_forfaitaire < fb.SEUIL_NON_RECOUVREMENT_IR:
+                ir_bareme = ir_forfaitaire = 0.0
             total = ir_bareme + ir_forfaitaire + ps_total
             scenarios.append({
                 "cocher_2op": op, "cocher_3cn": cn,

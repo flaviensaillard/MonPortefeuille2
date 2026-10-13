@@ -235,8 +235,17 @@ test('statut de précompte Android local et distinct par année', () => {
     PF.store.sauverReglages({ interetsPs2025: null });
     return ok;
 });
+test('seuil 61 € appliqué à l’IR global, barème et taux forfaitaire', () => {
+    const bareme = PF.fiscal.impotRevenu(17300, 1, 2025, 'Célibataire');
+    const o = PF.fiscal.comparerOptionsFoyer(17300, 1, 2025, 'Célibataire', 400, 0, null, 0);
+    const pfu = o.scenarios.find(s => !s.cocher_2op);
+    return bareme.impot_net === 0 && pfu.ir_bareme > 0 &&
+        pfu.ir_bareme + pfu.ir_forfaitaire >= 61;
+});
 test('couple marié : 2OP et 3CN sont indépendantes', () => {
-    const cases = [[15000, 100, true, false], [100, 15000, false, true], [100, 100, true, true]];
+    // Pour 100 + 100 € sans autre IR, toutes les options passent sous le
+    // seuil GLOBAL de 61 € : égalité, pas de cases à cocher par défaut.
+    const cases = [[15000, 100, true, false], [100, 15000, false, true], [100, 100, false, false]];
     return cases.every(([titres, crypto, op, cn]) => {
         const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2025, 'Marié(e) / Pacsé(e)', titres, 0, null, crypto);
         return o.scenarios.length === 4 && o.retenu.cocher_2op === op && o.retenu.cocher_3cn === cn;
