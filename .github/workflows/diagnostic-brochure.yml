@@ -5,7 +5,6 @@ on:
     paths: ['.github/workflows/diagnostic-brochure.yml']
 permissions:
   contents: read
-  issues: write
 jobs:
   lire:
     runs-on: ubuntu-latest
@@ -36,7 +35,8 @@ jobs:
             await doc.destroy();
           })().catch(e => {console.error(e);process.exitCode=1});
           JS
-          # Le commentaire temporaire expose uniquement un passage public DGFiP,
-          # jamais des données du portefeuille ; supprimé après diagnostic.
-          GH_TOKEN="${{ github.token }}" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/22/comments" \
-            -f body="$(cat diagnostic-public.txt)" --jq '.id'
+          # Annotations consultables via api.github.com, sans stockage d'une
+          # copie binaire du PDF ni commentaire sur la PR.
+          while IFS= read -r ligne; do
+            echo "::warning::${ligne:0:850}"
+          done < diagnostic-public.txt
