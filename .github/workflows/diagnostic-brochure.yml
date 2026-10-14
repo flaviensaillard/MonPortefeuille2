@@ -5,6 +5,7 @@ on:
     paths: ['.github/workflows/diagnostic-brochure.yml']
 permissions:
   contents: read
+  issues: write
 jobs:
   lire:
     runs-on: ubuntu-latest
@@ -13,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Extraire des repères publics du PDF sans activer de règle
         run: |
-          node <<'JS'
+          node > diagnostic-public.txt <<'JS'
           const pdfjs = require('./app/src/main/assets/www/vendor/pdfjs/pdf.min.js');
           pdfjs.GlobalWorkerOptions.workerSrc = require.resolve('./app/src/main/assets/www/vendor/pdfjs/pdf.worker.min.js');
           const url = 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf';
@@ -35,3 +36,7 @@ jobs:
             await doc.destroy();
           })().catch(e => {console.error(e);process.exitCode=1});
           JS
+          # Le commentaire temporaire expose uniquement un passage public DGFiP,
+          # jamais des données du portefeuille ; supprimé après diagnostic.
+          GH_TOKEN="${{ github.token }}" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/22/comments" \
+            -f body="$(cat diagnostic-public.txt)" --jq '.id'
