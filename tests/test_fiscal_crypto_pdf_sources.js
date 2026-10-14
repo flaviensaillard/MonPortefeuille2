@@ -34,6 +34,8 @@ function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.fro
     assert.equal(lecteur.analyserNotice(notice).valeurs.psCrypto2025Attestes, false);
     assert.equal(lecteur.analyserNotice(notice).valeurs.annexeFoyerComplete, false);
     assert.equal(lecteur.analyserBrochure(brochure).valeurs.psCrypto2025Attestes, false);
+    assert.equal(lecteur.analyserBrochure('Sommaire plus-values de cession d’actifs numériques (150 VH bis) … ' + brochure).valeurs.psCrypto2025Attestes, false,
+        'la table des matières ne doit pas masquer la section réelle');
     assert.equal(lecteur.analyserNotice(notice.replace('réalisées en 2025', 'réalisées en 2024')).valeurs, undefined);
     assert.equal(lecteur.analyserNotice(notice.replace('inférieur ou égal à 305', 'inférieur ou égal à 306')).valeurs, undefined);
     assert.equal(lecteur.analyserNotice(notice.replace('ne viennent pas en diminution', 'viennent en diminution')).valeurs, undefined);

@@ -48,8 +48,9 @@
         var titres = /plus.values de cession d.actifs numeriques/ig, m, section = '';
         while ((m = titres.exec(t))) {
             if (/150\s*VH\s*bis/i.test(t.slice(m.index, m.index + 220))) {
+                // La table des matières reprend le même intitulé : garder
+                // la dernière rubrique accompagnée de « 150 VH bis ».
                 section = t.slice(m.index, m.index + 6500);
-                break;
             }
         }
         // Sur certaines pages PDF la colonne PEAC est dessinée avant la fin
