@@ -52,8 +52,9 @@
                 break;
             }
         }
-        var fin = section.search(/PLAN D.EPARGNE AVENIR CLIMAT/i);
-        if (fin > 0) section = section.slice(0, fin);
+        // Sur certaines pages PDF la colonne PEAC est dessinée avant la fin
+        // de la colonne crypto : ne pas couper au premier titre PEAC rencontré.
+        // Les preuves ci-dessous doivent elles-mêmes parler des cessions crypto.
         var annee = preuve(section, /l.ensemble des cessions imposables realisees par les membres du foyer fiscal en 2025/i);
         var seuil = preuve(section, /foyers fiscaux realisant des cessions d.actifs numeriques dont la somme des prix n.excede pas\s*305\s*€/i);
         var ir = preuve(section, /cette plus.value est imposee au taux de\s*12[,.]8\s*%\s*et soumise aux prelevements sociaux/i);

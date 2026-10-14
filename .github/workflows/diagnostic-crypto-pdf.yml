@@ -38,7 +38,7 @@ jobs:
               const a=type==='notice'?reader.analyserNotice(pages):reader.analyserBrochure(pages);
               console.log(type,'analyse',JSON.stringify({etat:a.etat,valeurs:a.valeurs||null}));
               const t=pages.join(' ').replace(/\s+/g,' ');
-              for(const motif of (type==='notice'?[/realisees en 2025/i,/51 total/i,/premier terme/i,/inferieur ou egal a 305/i,/3CN/i]:[/cession d.actifs numeriques/i,/en 2025/i,/12,8/i,/option expresse/i])){
+              for(const motif of (type==='notice'?[]:[/plus.values de cession d.actifs num/i,/l.ensemble des cessions imposables/i,/foyers fiscaux r/i,/cette plus.value est impos/i,/2086 doit etre jointe/i,/option expresse/i])){
                 const i=t.search(motif);
                 console.log(type,'repère',String(motif),i,JSON.stringify(t.slice(Math.max(0,i-40),Math.max(0,i-40)+450)));
               }
@@ -46,6 +46,6 @@ jobs:
           })().catch(e=>{console.error(e);process.exitCode=1});
           JS
           # 10 annotations max ; tout le texte est public DGFiP, aucun compte.
-          grep -E '^(notice|brochure) (HTTP|octets|pages|analyse)' diagnostic-public.txt | while IFS= read -r ligne; do
+          grep -E '^(notice analyse|brochure (analyse|repère))' diagnostic-public.txt | while IFS= read -r ligne; do
             echo "::warning::${ligne:0:950}"
           done
