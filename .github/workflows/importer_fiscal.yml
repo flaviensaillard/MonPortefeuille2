@@ -1,0 +1,39 @@
+# Reprise des barèmes intégrés à la 2.2.1 ; PAS une veille officielle.
+# PRÉREQUIS manuel : appliquer 009 puis 010 dans l'éditeur SQL de Supabase.
+# Toujours lancer d'abord en simulation et lire le résultat.
+name: Reprendre les millésimes fiscaux existants
+
+on:
+  workflow_dispatch:
+    inputs:
+      appliquer:
+        description: 'Écrire les années absentes ? Non = simulation en lecture seule'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  importer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Reprise idempotente par année, sans remplacer les années existantes
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+          APPLIQUER: ${{ inputs.appliquer }}
+        run: |
+          if [ "$APPLIQUER" = "true" ]; then
+            python jobs/importer_fiscal_existant.py --appliquer
+          else
+            python jobs/importer_fiscal_existant.py --dry-run
+          fi

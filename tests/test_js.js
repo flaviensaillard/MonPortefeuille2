@@ -124,7 +124,30 @@ test('points', () => U.points(0.015) === '+1,5 pt');
 console.log('\nModèle d’allocation');
 test('cible de l’or à 15 %', () => proche(PF.modele.cibleActif('IGLN.L'), 0.15));
 test('bitcoin dans rv_numerique', () => PF.modele.pocheDe('BTCUSDT').cle === 'rv_numerique');
-test('or dans rv_physique', () => PF.modele.pocheDe('IGLN.L').cle === 'rv_physique');
+test('clé historique rv_physique mais libellé ETC', () =>
+    PF.modele.pocheDe('IGLN.L').cle === 'rv_physique' && PF.modele.pocheDe('IGLN.L').nom === 'Exposition à l’or (ETC)');
+test('ETC IGLN.L ne peut être requalifié en lingot par une ancienne allocation', () => {
+    const cfg = PF.modele.allocationDefaut();
+    cfg.poches[0].nom = 'Réserve de valeur physique';
+    cfg.actifs[0].classe = 'or_physique';
+    try {
+        PF.modele.appliquer(cfg);
+        return PF.modele.classeDe('IGLN.L') === 'or' && PF.modele.pocheDe('IGLN.L').nom === 'Exposition à l’or (ETC)';
+    } finally { PF.modele.appliquer(PF.modele.allocationDefaut()); }
+});
+test('or_physique reste une classe distincte pour un autre actif, non certifiée ici', () => {
+    const cfg = PF.modele.allocationDefaut();
+    cfg.actifs.push({ ticker: 'LINGOT_TEST', classe: 'or_physique', poche: 'rv_physique',
+        cible_pct: 0, devise: 'EUR' });
+    try {
+        PF.modele.appliquer(cfg);
+        const r = PF.fiscal.detail2074([
+            { ticker: 'LINGOT_TEST', type: 'vente', date: '2025-06-10', quantite: 1,
+                cours: 5000, frais: 0, devise: 'EUR' }
+        ], 2025, {});
+        return PF.modele.classeDe('LINGOT_TEST') === 'or_physique' && r.operations.length === 0;
+    } finally { PF.modele.appliquer(PF.modele.allocationDefaut()); }
+});
 test('total des cibles = 100 %', () => proche(PF.modele.verifier({ actifs: PF.modele.etat.actifs }).total_pct, 100));
 test('bande de l’or = 3 pts', () => proche(PF.modele.bandeActif('IGLN.L'), 0.03));
 test('classe de XJSE.SW', () => PF.modele.classeDe('XJSE.SW') === 'obligation_etf');
@@ -152,19 +175,128 @@ test('rente mensuelle : on ne consomme que le réel', () => {
 
 console.log('\nFiscalité');
 test('barème 2025 disponible', () => PF.fiscal.annees().indexOf(2025) >= 0);
+test('IGLN.L vendu en 2025 va au 2074/3VG, ni au 2086 ni à 2091/2092', () => {
+    const txs = [
+        { ticker: 'IGLN.L', type: 'achat', date: '2025-01-10', quantite: 10, cours: 50, frais: 0, devise: 'EUR' },
+        { ticker: 'IGLN.L', type: 'vente', date: '2025-06-10', quantite: 10, cours: 70, frais: 0, devise: 'EUR' }
+    ];
+    const d = PF.fiscal.detail2074(txs, 2025, {});
+    const crypto = PF.fiscal.detail2086(txs, 2025, {}, {});
+    return d.operations.length === 1 && d.operations[0].actif === 'IGLN.L'
+        && proche(d.case_3vg, 200) && crypto.cessions.length === 0;
+});
 test('IR nul sous la décote', () => PF.fiscal.impotRevenu(10000, 3, 2025, 'Marié(e) / Pacsé(e)').impot_net === 0);
 test('TMI à 11 % dans la deuxième tranche', () => proche(PF.fiscal.impotRevenu(20000, 1, 2025, 'Célibataire').tmi, 0.11));
 test('TMI à 30 % au-delà de 29 579 €', () => proche(PF.fiscal.impotRevenu(40000, 1, 2025, 'Célibataire').tmi, 0.30));
 test('IR positif au-delà', () => PF.fiscal.impotRevenu(60000, 1, 2025, 'Célibataire').impot_net > 3000);
 test('abattement 10 % plancher', () => proche(PF.fiscal.abattement10(1000, 2025), 509));
 test('abattement 10 % plafond', () => proche(PF.fiscal.abattement10(200000, 2025), 14555));
+test('abattement : jamais de repli vers un autre millésime', () => {
+    for (const annee of [2021, 2027]) {
+        for (const salaire of [0, 30000]) {
+            try { PF.fiscal.abattement10(salaire, annee); return false; }
+            catch (e) { if (!/Aucun abattement/.test(e.message)) return false; }
+        }
+    }
+    return true;
+});
 test('PFU 2026 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2026), 0.314, 1e-9));
-test('PFU 2025 = 30,0 %', () => proche(PF.fiscal.tauxPFU(2025), 0.30, 1e-9));
+test('PFU titres 2025 = 31,4 %', () => proche(PF.fiscal.tauxPFU(2025), 0.314, 1e-9));
+test('décote 2025 DGFiP : célibataire 897/1982, couple 1483/3277', () => {
+    const b = PF.fiscal.BAREMES[2025];
+    return b.dc === 897 && b.dcPlafond === 1982 && b.dcCouple === 1483 && b.dcPlafondCouple === 3277
+        && proche(PF.fiscal.impotRevenu(11600 + 1000 / .11, 1, 2025, 'Célibataire').decote, 445);
+});
+test('quotient familial général 2025 = 1807 € par demi-part', () => {
+    const c = 'Marié(e) / Pacsé(e)';
+    return proche(PF.fiscal.impotRevenu(180000, 2, 2025, c).impot_brut
+        - PF.fiscal.impotRevenu(180000, 3, 2025, c).impot_brut, 3614);
+});
+test('PV titres + intérêts 2025 précomptés : PS 18,6 % + 17,2 %', () => {
+    const a = PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000, true);
+    return proche(a.pfu.total, 614) && proche(a.ps_deja_precomptes, 172)
+        && proche(a.bareme.csg_deductible, 68)
+        && proche(a.bareme.csg_deductible_apres_paiement_estimee, 68);
+});
+test('intérêts non précomptés : taux 18,6 % et CSG différée', () => {
+    const a = PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000, false);
+    return proche(a.pfu.total, 628) && proche(a.bareme.csg_deductible, 0)
+        && proche(a.bareme.csg_deductible_apres_paiement_estimee, 136);
+});
+test('intérêts sans statut de précompte : calcul refusé', () => {
+    try { PF.fiscal.comparerPfuBareme(1000, 60000, 1, 2025, 'Célibataire', 1000); }
+    catch (e) { return /précomptés/.test(e.message); }
+    return false;
+});
+test('statut de précompte Android local et distinct par année', () => {
+    PF.store.sauverReglages({ interetsPs2025: 'oui' });
+    const local = JSON.parse(localStorage.getItem('pf.reglages.v1'));
+    const ok = local.interetsPs2025 === 'oui' && PF.store.reglages().interetsPs2024 === null;
+    PF.store.sauverReglages({ interetsPs2025: null });
+    return ok;
+});
+test('seuil 61 € appliqué à l’IR global, barème et taux forfaitaire', () => {
+    const bareme = PF.fiscal.impotRevenu(17300, 1, 2025, 'Célibataire');
+    const o = PF.fiscal.comparerOptionsFoyer(17300, 1, 2025, 'Célibataire', 400, 0, null, 0);
+    const pfu = o.scenarios.find(s => !s.cocher_2op);
+    return bareme.impot_net === 0 && pfu.ir_bareme > 0 &&
+        pfu.ir_bareme + pfu.ir_forfaitaire >= 61;
+});
+test('couple marié : 2OP et 3CN sont indépendantes', () => {
+    // Pour 100 + 100 € sans autre IR, toutes les options passent sous le
+    // seuil GLOBAL de 61 € : égalité, pas de cases à cocher par défaut.
+    const cases = [[15000, 100, true, false], [100, 15000, false, true], [100, 100, false, false]];
+    return cases.every(([titres, crypto, op, cn]) => {
+        const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2025, 'Marié(e) / Pacsé(e)', titres, 0, null, crypto);
+        return o.scenarios.length === 4 && o.retenu.cocher_2op === op && o.retenu.cocher_3cn === cn;
+    });
+});
+test('couple marié : la somme de deux choix indépendants n’est pas le meilleur régime', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(20000, 2, 2025, 'Marié(e) / Pacsé(e)', 100, 0, null, 20000);
+    const [defaut, cn, op, ensemble] = o.scenarios;
+    return cn.impot_total_foyer < defaut.impot_total_foyer
+        && op.impot_total_foyer < defaut.impot_total_foyer
+        && ensemble.impot_total_foyer > cn.impot_total_foyer
+        && o.retenu === cn && proche(cn.impot_total_foyer, 4952.6);
+});
+test('2022 : la case 3CN n’était pas encore ouverte', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(18000, 2, 2022, 'Marié(e) / Pacsé(e)', 100, 0, null, 15000);
+    return o.scenarios.length === 2 && o.assiette_3cn === 0 &&
+        o.scenarios.every(s => !s.cocher_3cn && proche(s.ps_crypto, 15000 * .172));
+});
+test('couple marié : les PS des intérêts précomptés ne sont pas dus deux fois', () => {
+    const o = PF.fiscal.comparerOptionsFoyer(50000, 3, 2025, 'Marié(e) / Pacsé(e)', 1000, 1000, true, 1000);
+    return o.scenarios.length === 4 && o.scenarios.every(s =>
+        proche(s.ps_titres, 186) && proche(s.ps_interets, 172) && proche(s.ps_crypto, 186)
+        && proche(s.ps_total, 544) && proche(s.ps_deja_precomptes, 172)
+        && proche(s.ps_restants, 372) && proche(s.csg_deductible_annee, s.cocher_2op ? 68 : 0));
+});
+test('bilan du couple : 3CN et 2OP des cases suivent le scénario retenu', () => {
+    const sim = PF.fiscal.simulerFoyer({
+        annee: 2025, statut: 'Marié(e) / Pacsé(e)', parts: 2,
+        salaire1: 12000, salaire2: 8000,
+        bilanPvActions: 100, pvCryptoImposable: 15000,
+        interetsEtrangers: 500, interetsPrecomptes: true
+    });
+    const best = sim.options_fiscales.retenu;
+    return sim.options_fiscales.scenarios.length === 4
+        && sim.cocher_2op === best.cocher_2op && sim.cocher_3cn === best.cocher_3cn
+        && proche(sim.impot_total_foyer, best.impot_total_foyer)
+        && proche(best.ps_deja_precomptes, 86);
+});
 test('comparaison PFU / barème renvoie un choix', () => {
-    const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2026, 'Marié(e) / Pacsé(e)');
+    const c = PF.fiscal.comparerPfuBareme(5000, 40000, 3, 2025, 'Marié(e) / Pacsé(e)');
     return (c.choix === 'PFU' || c.choix === 'Barème progressif') && c.pfu.total > 0;
 });
-test('frais kilométriques 20 000 km / 5 CV', () => proche(PF.fiscal.fraisKilometriques(20000, 5).montant, 20000 * 0.357 + 1395, 0.01));
+test('frais kilométriques 20 000 km / 5 CV (revenus 2025)', () =>
+    proche(PF.fiscal.fraisKilometriques(20000, 5, false, 2025).montant, 20000 * 0.357 + 1395, 0.01));
+test('frais kilométriques : pas de millésime implicite', () => {
+    for (const annee of [undefined, 2027]) {
+        try { PF.fiscal.fraisKilometriques(100, 5, false, annee); return false; }
+        catch (e) { if (!/Aucun barème kilométrique/.test(e.message)) return false; }
+    }
+    return true;
+});
 
 console.log('\nRééquilibrage');
 function fauxContexte() {

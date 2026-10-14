@@ -750,6 +750,9 @@
 
         var fx = U.tauxValide(ctx.tauxEurUsd);
         var affiches = 0;
+        out += '<div class="astuce">Axe vertical ajusté aux valeurs de chaque période : il ne part pas '
+            + 'forcément de zéro et peut accentuer visuellement une variation. '
+            + 'Touchez une courbe pour lire sa valeur exacte.</div>';
 
         /* Sur la progression journalière, on écrit noir sur blanc la valeur de
            départ : c'est elle qu'on compare à la « variation journalière » du
@@ -794,7 +797,7 @@
                     valeurs: courbe.valeurs,
                     dates: courbe.dates,
                     couleur: hausse ? 'var(--up)' : 'var(--down)'
-                }], { hauteur: 128, tauxEurUsd: fx, unite: '$' })
+                }], { hauteur: 128, tauxEurUsd: fx, unite: '$', axeResserre: true })
                 + '</div>';
         });
 
@@ -803,7 +806,7 @@
         }
 
         out += '<div class="astuce">Chaque courbe montre tous les enregistrements de sa '
-            + 'p\u00e9riode, sans \u00e9chantillonnage. Touchez une courbe pour lire un point.</div>';
+            + 'période, sans échantillonnage.</div>';
 
         var valeursSerie = ctx.serie.lignes.map(function (l) {
             return U.num(l.ligne[perimetre === 'total' ? 'patrimoine_total_usd' : 'patrimoine_investi_usd'], 0);

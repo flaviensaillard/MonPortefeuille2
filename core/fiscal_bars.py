@@ -46,10 +46,9 @@ class Bareme:
 # ---------------------------------------------------------------------------
 # Table des barèmes.
 #
-# AVERTISSEMENT — à recouper avec le BOFiP avant mise en production.
-# Les montants 2025 et 2026 proviennent de sources publiques concordantes mais
-# seule la documentation administrative fait foi. La colonne `source` indique
-# le niveau de confiance.
+# Revenus 2025 : tranches et décote recoupées BOFiP (07/04/2026).
+# Revenus 2026 : hypothèses provisoires, NON validées pour la déclaration 2027.
+# Une concordance partielle ne certifie ni le calcul complet ni la base importée.
 # ---------------------------------------------------------------------------
 
 BAREMES: dict[int, Bareme] = {
@@ -84,10 +83,10 @@ BAREMES: dict[int, Bareme] = {
         annee=2025,
         tranches=(11_600.0, 29_579.0, 84_577.0, 181_917.0),
         taux=(0.11, 0.30, 0.41, 0.45),
-        decote_base_celibataire=898.0,
-        decote_plafond_celibataire=1_986.0,
-        decote_base_couple=1_486.0,
-        decote_plafond_couple=3_284.0,
+        decote_base_celibataire=897.0,
+        decote_plafond_celibataire=1_982.0,
+        decote_base_couple=1_483.0,
+        decote_plafond_couple=3_277.0,
     ),
     2026: Bareme(
         annee=2026,
@@ -101,111 +100,86 @@ BAREMES: dict[int, Bareme] = {
 }
 
 SOURCE_PAR_ANNEE: dict[int, str] = {
-    2022: "Vérifié — données historiques stables",
-    2023: "Vérifié — données historiques stables",
-    2024: "Vérifié — données historiques stables",
-    2025: "Sources publiques concordantes — à recouper BOFiP",
-    2026: "Sources publiques concordantes — à recouper BOFiP",
+    2022: "Constantes embarquées historiques non vérifiées",
+    2023: "Constantes embarquées historiques non vérifiées",
+    2024: "Constantes embarquées historiques non vérifiées",
+    2025: "Tranches et décote recoupées BOFiP — autres règles encore à valider",
+    2026: "Hypothèses provisoires — revenus 2026 non vérifiés",
 }
 
-# ===========================================================================
-# LE CHIFFRE QUI A CHANGÉ — prélèvements sociaux sur le capital mobilier
-# ===========================================================================
-#
-# DÉFAUT TROUVÉ À L'AUDIT. Le taux était figé à 30,8 % :
-#
-#     PFU_TAUX = 0.308
-#     PRELEVEMENTS_SOCIAUX = 0.172
-#     => IR calculé = 0,308 - 0,172 = 0,136, soit 13,6 % au lieu de 12,8 %
-#
-# Les DEUX composantes étaient fausses. L'IR forfaitaire est de 12,8 % depuis
-# 2018 (CGI art. 200 A) ; les 13,6 % sortaient d'une soustraction, jamais d'un
-# texte. Et les prélèvements sociaux ne sont plus à 17,2 %.
-#
-# La LFSS 2026 (loi n° 2025-1403 du 30 décembre 2025, art. 12) porte la CSG sur
-# le capital mobilier de 9,2 % à 10,6 %. Le total devient :
-#
-#     CSG 10,6 % + CRDS 0,5 % + prélèvement de solidarité 7,5 % = 18,6 %
-#     PFU = 12,8 % d'IR + 18,6 % de PS = 31,4 %
-#
-# L'assurance-vie, l'immobilier et l'épargne réglementée restent à 17,2 % —
-# vous n'en détenez pas dans ce portefeuille.
-#
-# ---------------------------------------------------------------------------
-# POURQUOI 2025 EST MARQUÉE « à confirmer »
-# ---------------------------------------------------------------------------
-# La loi distingue deux assiettes, et les sources secondaires divergent sur le
-# millésime des plus-values mobilières :
-#
-#   - art. L. 136-6 CSS (revenus du PATRIMOINE) : hausse dès les revenus 2025 ;
-#   - art. L. 136-7 CSS (produits de PLACEMENT, CSG précomptée par le payeur) :
-#     hausse à compter du 1er janvier 2026.
-#
-# Une plus-value chez un courtier FRANÇAIS relève du second cas : le courtier
-# précompte la CSG. Chez un courtier ÉTRANGER — Swissquote — rien n'est
-# précompté, l'assiette est celle du patrimoine, donc le premier cas : hausse
-# dès les cessions de 2025.
-#
-# Trois sources (DLA Piper sur la LFSS 2026, l'ANAFAGC, Legea Avocat) retiennent
-# la hausse dès 2025 pour les plus-values mobilières ; deux autres la datent du
-# 1er janvier 2026. Je ne tranche pas à votre place : le taux de 2025 est
-# affiché avec sa fourchette, et la page Fiscalité vous le montre.
-#
-# POUR VOTRE CAS CONCRET, la question est réglée : la déclaration des revenus
-# 2025 a été déposée au printemps 2026. Ce qui reste à déclarer, en 2027, ce sont
-# les revenus 2026 — pour lesquels toutes les sources s'accordent : 18,6 %.
-#
-# Source : LFSS 2026, loi n° 2025-1403 du 30/12/2025, art. 12 (JO du 31/12/2025).
+# Plafond général QF : seul 2025 a été recoupé pour ce correctif.
+# Les valeurs héritées 2022-2024 restent non auditées, 2026 est PROVISOIRE.
+# Les plafonds particuliers (parent isolé, etc.) exigent un modèle distinct.
+# https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407
+PLAFOND_QF_GENERAL_PAR_ANNEE: dict[int, float] = {
+    2022: 1_759.0, 2023: 1_759.0, 2024: 1_759.0,
+    2025: 1_807.0, 2026: 1_807.0,
+}
 
-IR_FORFAITAIRE = 0.128        # PFU, part IR (CGI art. 200 A). Jamais soustrait.
 
+def plafond_qf_general(annee: int) -> float:
+    if annee not in PLAFOND_QF_GENERAL_PAR_ANNEE:
+        raise ValueError(f"Aucun plafond de quotient familial pour {annee}.")
+    return PLAFOND_QF_GENERAL_PAR_ANNEE[annee]
+
+
+# ===========================================================================
+# Prélèvements sociaux : année des revenus ET nature/moment du prélèvement
+# ===========================================================================
+# PV de titres et gains crypto déclarés avec les revenus 2025 : 18,6 % de PS.
+# RCM effectivement précomptés lors du versement en 2025 : 17,2 % ; non
+# précomptés : 18,6 % lors de l'imposition en 2026. Ne jamais déduire le
+# précompte du pays du courtier.
+# DGFiP : https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm
+# https://www.impots.gouv.fr/particulier/les-revenus-mobiliers
+# https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques
+IR_FORFAITAIRE = 0.128
+
+# Revenus du patrimoine non précomptés (PV titres, crypto, RCM non précomptés).
 PS_PAR_ANNEE: dict[int, float] = {
     2018: 0.172, 2019: 0.172, 2020: 0.172, 2021: 0.172,
     2022: 0.172, 2023: 0.172, 2024: 0.172,
-    2025: 0.172,   # litige : 0,172 selon la CSG précomptée, 0,186 selon la LFSS
-    2026: 0.186,
+    2025: 0.186, 2026: 0.186,
 }
-
-# Années dont le taux est discuté. La page fiscalité le dit au lieu de trancher.
-PS_ANNEE_INCERTAINE: dict[int, str] = {
-    2025: (
-        "LFSS 2026 art. 12 : la hausse de CSG s'applique aux revenus du "
-        "patrimoine dès 2025, aux produits de placement à partir du 1er janvier "
-        "2026. Chez un courtier étranger, aucune CSG n'est précomptée : "
-        "l'assiette est celle du patrimoine, donc 18,6 %. Ce module retient "
-        "17,2 % par prudence — la fourchette vous est montrée."
-    ),
+# Produits de placement précomptés LORS DU VERSEMENT (sans double prélèvement).
+PS_PRECOMPTES_PAR_ANNEE: dict[int, float] = {
+    **{annee: 0.172 for annee in range(2018, 2026)},
+    2026: 0.186,  # Hors produits bénéficiant d'une exception propre.
 }
+# Compatibilité de lecture avec les anciennes métadonnées, plus d'alerte
+# affirmant à tort que les plus-values de titres 2025 seraient « discutées ».
+PS_ANNEE_INCERTAINE: dict[int, str] = {}
 
 
 def taux_ps(annee: int) -> float:
-    """Taux de prélèvements sociaux sur le capital mobilier pour `annee`.
-
-    Lève `ValueError` sur une année inconnue : un taux deviné produirait un
-    chiffre faux sans le moindre avertissement.
-    """
+    """Taux des PV mobilières/crypto et RCM non précomptés (pas tous les RCM)."""
     if annee not in PS_PAR_ANNEE:
-        raise ValueError(
-            f"Aucun taux de prélèvements sociaux enregistré pour {annee}. "
-            f"Années disponibles : {sorted(PS_PAR_ANNEE)}. "
-            "Renseignez-le dans core/fiscal_bars.py — ne devinez pas."
-        )
+        raise ValueError(f"Aucun taux de PS pour les revenus {annee}.")
     return PS_PAR_ANNEE[annee]
 
 
+def taux_ps_revenu_mobilier(annee: int, *, precompte: bool) -> float:
+    """RCM : taux selon prélèvement EFFECTIF, jamais selon pays du payeur."""
+    if not isinstance(precompte, bool):
+        raise ValueError("Préciser si les prélèvements sociaux ont déjà été précomptés.")
+    if not precompte:
+        return taux_ps(annee)
+    if annee not in PS_PRECOMPTES_PAR_ANNEE:
+        raise ValueError(f"Aucun taux de PS précomptés pour les revenus {annee}.")
+    return PS_PRECOMPTES_PAR_ANNEE[annee]
+
+
 def taux_pfu(annee: int) -> float:
-    """PFU global (IR + PS) de l'année."""
+    """PFU des plus-values mobilières (ne vaut pas pour tout revenu du capital)."""
     return IR_FORFAITAIRE + taux_ps(annee)
 
 
-# Conservés pour ne pas casser les appelants qui les lisent encore, mais
-# DÉRIVÉS de la table annuelle : ils ne peuvent plus diverger d'elle.
-PFU_TAUX = IR_FORFAITAIRE + PS_PAR_ANNEE[2026]
-PRELEVEMENTS_SOCIAUX = PS_PAR_ANNEE[2026]
+# Anciens alias utilisés par des appelants pour le taux du millésime 2026.
+PFU_TAUX = taux_pfu(2026)
+PRELEVEMENTS_SOCIAUX = taux_ps(2026)
 
-# CSG déductible du revenu imposable quand on opte pour le barème progressif.
-# Elle reste figée à 6,8 points (CGI art. 154 quinquies) : les 1,4 point
-# supplémentaires de la LFSS 2026 sont entièrement non déductibles.
+# CSG déductible, uniquement au barème, sur les revenus de son ANNÉE DE PAIEMENT.
+# https://www.impots.gouv.fr/particulier/les-autres-charges
 CSG_DEDUCTIBLE = 0.068
 
 # ---------------------------------------------------------------------------
@@ -227,6 +201,10 @@ CSG_DEDUCTIBLE = 0.068
 # d'abattement et n'imposait rien. C'est faux : le seuil est franchi, les 20 EUR
 # sont imposables.
 CRYPTO_FRANCHISE_CESSIONS = 305.0   # sur le total des prix de cession de l'année
+SEUIL_NON_RECOUVREMENT_IR = 61.0
+TAUX_ABATTEMENT_SALAIRES = 0.10
+SEUILS_KM_VOITURE = (5000, 20000)
+MAJORATION_VOITURE_ELECTRIQUE = 0.20
 
 # Ancien nom, conservé pour ne pas casser les appels existants. Même valeur,
 # mais c'est bien une franchise — voyez l'explication ci-dessus.
@@ -279,6 +257,14 @@ BAREME_KM_VOITURE: dict[int, tuple[float, float, float, float]] = {
     6: (0.665, 0.374, 1457.0, 0.447),
     7: (0.697, 0.394, 1515.0, 0.470),
 }
+# Copie de la constante historique pour chaque année prise en charge. Seul
+# 2025 est recoupé avec l'aide fiscale citée dans docs/AUDIT-FISCAL-2025-2026.md ;
+# les autres années conservent les hypothèses antérieures, NON homologuées.
+# Des dictionnaires distincts permettent une rectification sans écraser les
+# autres années. Une année absente ne reprend jamais celle de 2025/2026.
+BAREME_KM_VOITURE_PAR_ANNEE: dict[int, dict[int, tuple[float, float, float, float]]] = {
+    annee: dict(BAREME_KM_VOITURE) for annee in (2022, 2023, 2024, 2025, 2026)
+}
 
 FORFAIT_REPAS_PAR_ANNEE: dict[int, float] = {
     2022: 5.00,
@@ -308,24 +294,22 @@ PLAFOND_ABATTEMENT_10_PAR_ANNEE: dict[int, float] = {
 
 
 def forfait_repas_de(annee: int) -> float:
-    """Valeur forfaitaire d'un repas déductible aux frais réels pour `annee`."""
-    if annee in FORFAIT_REPAS_PAR_ANNEE:
-        return FORFAIT_REPAS_PAR_ANNEE[annee]
-    return FORFAIT_REPAS_PAR_ANNEE[max(FORFAIT_REPAS_PAR_ANNEE)]
+    """Valeur du millésime demandé ; jamais le forfait de la dernière année."""
+    if annee not in FORFAIT_REPAS_PAR_ANNEE:
+        raise ValueError(f"Aucun forfait repas pour les revenus {annee}.")
+    return FORFAIT_REPAS_PAR_ANNEE[annee]
 
 
 def abattement_10_salaire(salaire: float, annee: int) -> float:
-    """Abattement forfaitaire de 10 % sur un salaire net imposable."""
+    """Abattement pour l'année demandée, sans substitution d'un autre millésime."""
+    if annee not in PLANCHER_ABATTEMENT_10_PAR_ANNEE or annee not in PLAFOND_ABATTEMENT_10_PAR_ANNEE:
+        raise ValueError(f"Aucun abattement 10 % pour les revenus {annee}.")
     sal = max(0.0, float(salaire))
     if sal <= 0:
         return 0.0
-    plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE.get(
-        annee, PLANCHER_ABATTEMENT_10_PAR_ANNEE[max(PLANCHER_ABATTEMENT_10_PAR_ANNEE)]
-    )
-    plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE.get(
-        annee, PLAFOND_ABATTEMENT_10_PAR_ANNEE[max(PLAFOND_ABATTEMENT_10_PAR_ANNEE)]
-    )
-    brut = sal * 0.10
+    plancher = PLANCHER_ABATTEMENT_10_PAR_ANNEE[annee]
+    plafond = PLAFOND_ABATTEMENT_10_PAR_ANNEE[annee]
+    brut = sal * TAUX_ABATTEMENT_SALAIRES
     return min(max(brut, min(sal, plancher)), plafond)
 
 
@@ -333,21 +317,26 @@ def frais_kilometriques(
     km: float,
     cv: int = 5,
     electrique: bool = False,
+    *, annee: int,
 ) -> tuple[float, str]:
-    """Calcule les frais kilométriques selon le barème officiel URSSAF / DGFiP.
+    """Calcule les frais kilométriques du millésime demandé (hypothèses historiques).
+
+    La présence d'une année dans la table ne certifie pas ses coefficients.
 
     Retourne `(montant_eur, formule_explicative)` prête à copier dans la note
     jointe à la déclaration (case 1AK / 1BK).
     """
+    if annee not in BAREME_KM_VOITURE_PAR_ANNEE:
+        raise ValueError(f"Aucun barème kilométrique pour les revenus {annee}.")
     d = max(0.0, float(km))
     if d <= 0:
         return 0.0, "0 km"
     cv_cle = min(max(int(cv), 3), 7)
-    a1, a2, b2, a3 = BAREME_KM_VOITURE[cv_cle]
-    if d <= 5_000:
+    a1, a2, b2, a3 = BAREME_KM_VOITURE_PAR_ANNEE[annee][cv_cle]
+    if d <= SEUILS_KM_VOITURE[0]:
         montant = d * a1
         formule = f"{d:,.0f} km × {a1:.3f}".replace(",", " ").replace(".", ",")
-    elif d <= 20_000:
+    elif d <= SEUILS_KM_VOITURE[1]:
         montant = d * a2 + b2
         formule = (
             f"({d:,.0f} km × {a2:.3f}) + {b2:,.0f} €"
@@ -358,7 +347,7 @@ def frais_kilometriques(
         formule = f"{d:,.0f} km × {a3:.3f}".replace(",", " ").replace(".", ",")
 
     if electrique:
-        montant *= 1.20
+        montant *= 1 + MAJORATION_VOITURE_ELECTRIQUE
         formule += " × 1,20 (électrique +20 %)"
 
     s_m = f"{montant:,.2f}".replace(",", " ").replace(".", ",")
@@ -430,26 +419,26 @@ def verifier_maj_baremes_fiscaux(
         an_manquant = max(auj.year, cible)
         return {
             "disponible": True,
-        "etat": "nouvelle_version",
+            "etat": "verification_requise",
             "derniere_annee": derniere_annee,
             "url": URL_ASSISTANT_MAJ_BAREMES,
             "message": (
-                f"Les barèmes fiscaux pour les revenus {an_manquant} (Loi de Finances) "
-                f"sont publiés, alors que l'application s'arrête au millésime {derniere_annee}."
+                f"Les revenus {an_manquant} ne sont pas intégrés (dernier millésime : {derniere_annee}). "
+                "Vérifiez la publication officielle avant tout ajout."
             ),
         }
 
     # 2. Ouverture de la campagne déclarative de printemps (avril N+1) sur un barème non définitif
     source_cible = SOURCE_PAR_ANNEE.get(cible, "")
-    if "recouper" in source_cible.lower() and auj >= dt.date(cible + 1, 4, 1):
+    if any(m in source_cible.lower() for m in ("recouper", "provisoire")) and auj >= dt.date(cible + 1, 4, 1):
         return {
             "disponible": True,
-        "etat": "nouvelle_version",
+            "etat": "verification_requise",
             "derniere_annee": derniere_annee,
             "url": URL_ASSISTANT_MAJ_BAREMES,
             "message": (
-                f"La campagne de déclaration des revenus {cible} est ouverte au BOFiP : "
-                f"une vérification / consolidation officielle des seuils {cible} est disponible."
+                f"Les hypothèses des revenus {cible} doivent être vérifiées auprès des sources officielles. "
+                "L'ouverture de la campagne ne prouve pas leur publication ni leur exactitude."
             ),
         }
 
@@ -510,13 +499,13 @@ def verifier_maj_baremes_fiscaux(
 
     return {
         "disponible": False,
-        "etat": "a_jour",
+        "etat": "integre_non_verifie",
         "derniere_annee": derniere_annee,
         "url": URL_ASSISTANT_MAJ_BAREMES,
         "message": (
-            f"Aucune nouvelle version en attente — les barèmes fiscaux sont à jour "
-            f"jusqu'aux revenus {derniere_annee} (IR, décote, PFU {taux_pfu(derniere_annee)*100:.1f} %, "
-            f"barème kilométrique et forfait repas)."
+            f"Constantes intégrées jusqu'aux revenus {derniere_annee} "
+            f"(PFU titres : {taux_pfu(derniere_annee)*100:.1f} %). "
+            "La veille n'établit ni l'exactitude des règles, ni l'absence de rectification."
         ),
     }
 

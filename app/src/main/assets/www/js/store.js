@@ -25,11 +25,17 @@
         salaireNetImposable2: 0,
         interetsEtrangers: 0,
         paysEtranger: 'Lituanie',
+        // Option locale par année : PS réellement précomptés sur les intérêts.
+        // null = inconnu, jamais déduit du pays du courtier.
+        interetsPs2022: null, interetsPs2023: null, interetsPs2024: null,
+        interetsPs2025: null, interetsPs2026: null,
         nbEnfants: 2,
-        utiliserFraisReels1: true,
-        fraisKm1: 9120, cvFiscal1: 5, joursRepas1: 240, vehiculeElectrique1: false,
-        utiliserFraisReels2: true,
-        fraisKm2: 9120, cvFiscal2: 5, joursRepas2: 200, vehiculeElectrique2: false,
+        // Aucun trajet/repas professionnel n'est déduit par défaut : une
+        // ancienne valeur réellement enregistrée sur l'appareil est conservée.
+        utiliserFraisReels1: false,
+        fraisKm1: 0, cvFiscal1: 5, joursRepas1: 0, vehiculeElectrique1: false,
+        utiliserFraisReels2: false,
+        fraisKm2: 0, cvFiscal2: 5, joursRepas2: 0, vehiculeElectrique2: false,
 
         // Retraite — trois scénarios, chacun avec sa propre inflation
         anneeDepartRetraite: 2055,

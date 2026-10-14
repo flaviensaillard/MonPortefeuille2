@@ -7,8 +7,11 @@ Le workflow `.github/workflows/sauvegarde.yml` la restaure aussitôt (contrôle)
 puis la publie en artefact : c'est la copie hors ligne.
 
 Secrets requis (jamais écrits dans le code ni dans le journal) :
-- SUPABASE_URL, SUPABASE_KEY : lecture (comme les autres jobs) ;
+- SUPABASE_URL, SUPABASE_KEY : clé serveur service_role (secret GitHub) ;
 - SAUVEGARDE_CLE : phrase de chiffrement, 12 caractères minimum.
+La clé publique `anon` ne convient PAS : elle masquerait silencieusement les
+lignes des tables protégées par RLS. Ne jamais désactiver la RLS pour corriger
+un échec de sauvegarde.
 
 Sans phrase valable, le job s'arrête (code 2) : aucune sauvegarde en clair.
 """
@@ -25,6 +28,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import db, sauvegarde  # noqa: E402
+from jobs import cle_service  # noqa: E402
 
 log = logging.getLogger("sauvegarde")
 FUSEAU = ZoneInfo("Europe/Paris")
@@ -66,6 +70,11 @@ def main() -> int:
     phrase = os.environ.get("SAUVEGARDE_CLE", "")
     if len(phrase) < sauvegarde.PHRASE_MIN:
         log.error("SAUVEGARDE_CLE absente ou trop courte : aucune sauvegarde produite.")
+        return 2
+    try:
+        cle_service.configurer()
+    except cle_service.CleServiceManquante as exc:
+        log.error("%s", exc)
         return 2
     dossier = Path(os.environ.get("SAUVEGARDE_DOSSIER", "sauvegardes"))
     try:

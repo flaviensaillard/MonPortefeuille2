@@ -61,5 +61,6 @@ def test_les_etats_normaux_sont_nommes(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: Vide())
     derniere = max(fb.BAREMES)
     r = fb.verifier_maj_baremes_fiscaux(derniere, date_reference=dt.date(derniere, 10, 9))
-    assert r["etat"] == "a_jour"
+    assert r["etat"] == "integre_non_verifie"
     assert r["disponible"] is False
+    assert "à jour" not in r["message"]

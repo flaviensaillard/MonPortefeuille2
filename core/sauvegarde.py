@@ -49,7 +49,9 @@ PHRASE_MIN = 12
 
 # Tables sauvegardées (noms de la base). `Config` porte les versions fiscales.
 TABLES_OBLIGATOIRES = ("pf2_transactions", "pf2_apports", "pf2_snapshots", "Config")
-TABLES_OPTIONNELLES = ("pf2_operations_compte", "pf2_comptes")
+TABLES_OPTIONNELLES = (
+    "pf2_operations_compte", "pf2_comptes", "pf2_fiscal_annees", "pf2_fiscal_collectes",
+)
 
 # Colonnes dont on additionne les valeurs numériques pour la synthèse.
 COLONNES_SOMME = ("montant", "montant_eur", "valeur", "valeur_eur", "solde", "quantite")

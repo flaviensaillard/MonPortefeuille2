@@ -12,12 +12,13 @@ CORRECTIONS PAR RAPPORT À LA V1
    l'Épargne propose aussi l'or physique, qui relève de l'article 150 VI avec un
    régime très différent. Le moteur sait désormais faire la distinction.
 
-3. **L'abattement de 305 € sur la plus-value crypto manquait**, et les
-   prélèvements sociaux n'étaient pas isolés.
+3. Le seuil d'exonération crypto de 305 € porte sur le total des cessions,
+   sans abattement sur la plus-value.
 
-4. **La comparaison PFU / barème était incomplète** : pas de CSG déductible
-   (6,8 %), pas d'abattement pour durée, et l'affichage final abdiquait
-   (« À calculer ») en renvoyant la main à l'utilisateur.
+4. La comparaison PFU / barème distingue les PS des titres et les intérêts
+   précomptés ; la CSG n'est déduite que l'année de son paiement. Le bilan du
+   foyer compare conjointement 2OP et 3CN à partir des revenus saisis ; les
+   revenus absents et les cas particuliers restent hors de cette estimation.
 
 AVERTISSEMENT
 -------------
@@ -30,6 +31,7 @@ une estimation, pas une déclaration fiscale.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -55,7 +57,7 @@ class ResultatIR:
     bareme_annee: int
 
 
-def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> float:
+def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme) -> float:
     """Impôt sur un revenu par part, sans décote.
 
     `bareme.tranches` contient les plafonds des tranches 1 à 4 ; `bareme.taux`
@@ -63,8 +65,10 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> 
     donc préfixer les taux d'un zéro, sans quoi la première tranche est taxée au
     taux de la deuxième.
     """
+    # L'appelant doit fournir le barème exact de l'année demandée ; ne jamais
+    # appliquer implicitement le dernier millésime enregistré.
     if bareme is None:
-        bareme = fb.BAREMES[max(fb.BAREMES)]
+        raise ValueError("Barème annuel requis pour le calcul par part.")
     bornes = (0.0,) + bareme.tranches
     taux = (0.0,) + bareme.taux
     impot = 0.0
@@ -76,35 +80,9 @@ def _impot_par_part(revenu_par_part: float, bareme: fb.Bareme | None = None) -> 
     return impot
 
 
-def _quotient_plafonne(revenu: float, parts: float, parts_couple: float = 2.0) -> float:
-    """Plafonne le gain procuré par les parts au-delà de `parts_couple`.
-
-    Règle (CGI art. 197 I-2) : l'avantage en impôt procuré par chaque demi-part
-    supplémentaire est plafonné à 1 759 € par demi-part.
-    """
-    if parts <= parts_couple:
-        return revenu / parts
-    demi_parts = (parts - parts_couple) * 2.0
-    plafond_par_demi_part = 1_759.0
-    gain_max = demi_parts * plafond_par_demi_part
-
-    impot_sans = _impot_par_part(revenu / parts_couple) * parts_couple
-    impot_avec = _impot_par_part(revenu / parts) * parts
-    gain = impot_sans - impot_avec
-    if gain <= gain_max:
-        return revenu / parts
-
-    impot_cible = impot_sans - gain_max
-    if impot_cible <= 0:
-        return revenu / parts
-    bas, haut = revenu / parts_couple, revenu
-    for _ in range(80):
-        milieu = (bas + haut) / 2
-        if _impot_par_part(milieu) * parts_couple < impot_cible:
-            bas = milieu
-        else:
-            haut = milieu
-    return (bas + haut) / 2
+def _euro_2025(valeur: float, annee: int) -> float:
+    """Arrondi fiscal de 2025 : 0,50 € va à l'euro supérieur (pas round Python)."""
+    return float(math.floor(valeur + 0.5)) if annee == 2025 else valeur
 
 
 def _est_couple(statut: str) -> bool:
@@ -118,6 +96,7 @@ def impot_revenu(
     annee: int,
     statut: str = "Célibataire",
     avec_decote: bool = True,
+    appliquer_seuil: bool = True,
 ) -> ResultatIR:
     """Impôt sur le revenu selon le barème de `annee` (CGI art. 197).
 
@@ -125,7 +104,7 @@ def impot_revenu(
     par enfant à partir du troisième).
     """
     bareme = fb.bareme_de(annee)
-    revenu = max(0.0, float(revenu))
+    revenu = _euro_2025(max(0.0, float(revenu)), annee)
     parts = max(0.5, float(parts))
     couple = _est_couple(statut)
     parts_base = 2.0 if couple else 1.0
@@ -135,7 +114,7 @@ def impot_revenu(
     if parts > parts_base:
         impot_base = _impot_par_part(revenu / parts_base, bareme) * parts_base
         demi_parts_supp = (parts - parts_base) * 2.0
-        gain_max = demi_parts_supp * 1_759.0
+        gain_max = demi_parts_supp * fb.plafond_qf_general(annee)
         if (impot_base - impot_non_plafonne) > gain_max:
             impot = max(0.0, impot_base - gain_max)
             qf = revenu / parts_base
@@ -144,6 +123,7 @@ def impot_revenu(
     else:
         impot = impot_non_plafonne
 
+    impot = _euro_2025(impot, annee)
     tmi = 0.0
     for i, plafond in enumerate(bareme.tranches):
         if qf > plafond:
@@ -163,10 +143,11 @@ def impot_revenu(
         if impot <= plafond:
             decote = max(0.0, base - impot * bareme.decote_taux)
             decote = min(decote, impot)
+            decote = _euro_2025(decote, annee)
 
     net = impot - decote
     # Seuil de non-recouvrement : en dessous de 61 €, l'impôt n'est pas prélevé.
-    if net < 61.0:
+    if appliquer_seuil and net < fb.SEUIL_NON_RECOUVREMENT_IR:
         net = 0.0
 
     return ResultatIR(impot_brut=impot, decote=decote, impot_net=net, tmi=tmi, bareme_annee=annee)
@@ -269,10 +250,8 @@ def pv_crypto(lignes: list[dict], annee: int,
       - ligne 223 : fraction du capital correspondant (220-221) × 213/212
       - ligne 224 : plus-value = 213 - 223
 
-    La plus-value globale annuelle est ensuite réduite d'un abattement de 305 €.
-
-    CORRECTION : la v1 implémentait bien la mécanique des lignes, mais oubliait
-    l'abattement de 305 € et n'appliquait aucun taux.
+    Le seuil de 305 € porte sur le total des prix de cession du foyer :
+    au-delà, la plus-value entière est imposable (aucun abattement).
     """
     details: list[PlusValue] = []
     pv_globale = 0.0
@@ -374,10 +353,12 @@ def pv_or_physique(lignes: list[dict], annee: int) -> dict:
     plus-value, avec abattement de 5 %/an dès la 3ᵉ année, exonération totale à
     22 ans.
 
-    L'administration applique le régime le plus avantageux, sauf option
-    contraire du contribuable. On calcule les deux et on retient le moindre.
-
-    À VÉRIFIER auprès du BOFiP : le traitement de l'abattement sur la TFMP.
+    ATTENTION : le régime des plus-values n'est PAS appliqué automatiquement
+    parce qu'il coûte moins cher. Il exige une option expresse (2092) et une
+    preuve de la date et du prix d'acquisition, ou de la détention > 22 ans.
+    Le minimum calculé ci-dessous est uniquement illustratif et ne doit pas
+    être considéré comme l'impôt réellement dû. Modalités et taux PS 2025 à
+    valider pour chaque vente avant toute publication fiscale.
     """
     total_brut = 0.0
     total_pv = 0.0
@@ -421,8 +402,9 @@ def pv_or_physique(lignes: list[dict], annee: int) -> dict:
         "abattement_duree": abatt,
         "tfmp": tfmp,
         "regime_plus_value": regime_b,
-        "regime_retenu": retenu,
-        "total_du": min(tfmp, regime_b),
+        "regime_retenu": retenu,  # comparaison illustrative, PAS option exercée
+        "total_du": min(tfmp, regime_b),  # minimum théorique, PAS solde dû certifié
+        "avertissement": "Or physique : option 2092 non automatique, justificatifs requis ; montant indicatif non validé pour une déclaration.",
         "detail": f"{nb} cession(s) d'or physique.",
     }
 
@@ -437,45 +419,120 @@ def comparer_pfu_bareme(
     parts: float,
     annee: int,
     statut: str = "Célibataire",
+    *,
+    interets_eur: float = 0.0,
+    interets_ps_precomptes: bool | None = None,
 ) -> dict:
-    """Compare le PFU et le barème progressif sur une plus-value.
+    """Option globale 2OP : titres + intérêts, PS selon leur traitement réel.
 
-    CORRECTION : la v1 omettait la CSG déductible (6,8 % de la CSG), qui réduit
-    le revenu imposable quand on opte pour le barème. Elle appliquait aussi la
-    décote dans les deux branches de la soustraction, ce qui pouvait produire un
-    écart négatif.
+    La CSG sur les PV et les RCM non précomptés, payée sur l'avis N+1,
+    n'est PAS déductible des revenus N. Le futur avantage n'est pas chiffré
+    dans l'arbitrage N (les revenus et le paiement futurs sont inconnus).
     """
-    if plus_value_nette <= 0:
-        return {"choix": "PFU", "gain": 0.0, "detail": "Aucune plus-value imposable."}
+    pv = max(0.0, float(plus_value_nette))
+    interets = max(0.0, float(interets_eur))
+    if interets > 0 and not isinstance(interets_ps_precomptes, bool):
+        raise ValueError("Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays du courtier ne suffit pas.")
+    if pv + interets <= 0:
+        return {"choix": "PFU", "gain": 0.0, "detail": "Aucun revenu mobilier imposable."}
 
-    # --- Option PFU : 12,8 % d'IR + les PS de l'annee de cession.
-    # Le taux de PS depend de l'annee (LFSS 2026, art. 12) : 17,2 % jusqu'en
-    # 2025, 18,6 % en 2026. Un taux fige comparait deux regimes sur des bases
-    # differentes selon l'exercice.
-    pfu_ir = plus_value_nette * fb.IR_FORFAITAIRE
-    pfu_ps = plus_value_nette * fb.taux_ps(annee)
-    pfu_total = pfu_ir + pfu_ps
-
-    # --- Option barème : la PV s'ajoute au revenu, PS dus par ailleurs.
-    csg_deductible = plus_value_nette * fb.CSG_DEDUCTIBLE
-    revenu_imposable_supp = plus_value_nette - csg_deductible
-
-    ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut)
+    ps_pv = pv * fb.taux_ps(annee)
+    ps_interets = interets * fb.taux_ps_revenu_mobilier(
+        annee, precompte=interets_ps_precomptes,
+    ) if interets else 0.0
+    ps = ps_pv + ps_interets  # dette totale, déjà versée en partie si précomptée
     ir_sans = impot_revenu(autres_revenus, parts, annee, statut)
-    ir_marginal = max(0.0, ir_avec.impot_net - ir_sans.impot_net)
-    ps = plus_value_nette * fb.taux_ps(annee)
+    ir_sans_brut = impot_revenu(autres_revenus, parts, annee, statut, appliquer_seuil=False).impot_net
+    pfu_ir_brut = _euro_2025((pv + interets) * fb.IR_FORFAITAIRE, annee)
+    # 61 € s'apprécie sur la cotisation globale (barème + taux proportionnel),
+    # pas sur la composante au barème prise isolément.
+    pfu_global = ir_sans_brut + pfu_ir_brut
+    pfu_ir = pfu_ir_brut if pfu_global >= fb.SEUIL_NON_RECOUVREMENT_IR else 0.0
+    ir_bareme_debloque = (ir_sans_brut - ir_sans.impot_net) if pfu_ir else 0.0
+    pfu_total = pfu_ir + ir_bareme_debloque + ps
+
+    csg_annee = interets * fb.CSG_DEDUCTIBLE if interets_ps_precomptes else 0.0
+    csg_ulterieure = (pv + (0.0 if interets_ps_precomptes else interets)) * fb.CSG_DEDUCTIBLE
+    revenu_imposable_supp = pv + interets - csg_annee
+    ir_avec = impot_revenu(autres_revenus + revenu_imposable_supp, parts, annee, statut, appliquer_seuil=False)
+    ir_marginal = max(0.0, (ir_avec.impot_net if ir_avec.impot_net >= fb.SEUIL_NON_RECOUVREMENT_IR else 0.0) - ir_sans.impot_net)
     bareme_total = ir_marginal + ps
 
     avantage = pfu_total - bareme_total
     return {
         "annee": annee,
-        "plus_value_nette": plus_value_nette,
-        "pfu": {"ir": pfu_ir, "ps": pfu_ps, "total": pfu_total},
+        "plus_value_nette": pv + interets,
+        "pfu": {"ir": pfu_ir, "ir_bareme_debloque": ir_bareme_debloque,
+                "ps": ps, "total": pfu_total},
         "bareme": {"ir_marginal": ir_marginal, "ps": ps, "total": bareme_total,
-                   "csg_deductible": csg_deductible},
+                   "csg_deductible": csg_annee,
+                   "csg_deductible_apres_paiement_estimee": csg_ulterieure},
+        "ps_titres": ps_pv, "ps_interets": ps_interets,
+        "ps_deja_precomptes": ps_interets if interets_ps_precomptes else 0.0,
         "choix": "Barème progressif" if bareme_total < pfu_total else "PFU",
         "gain": abs(avantage),
         "tmi": ir_avec.tmi,
+    }
+
+
+def comparer_options_foyer(
+    revenu_salaires: float, parts: float, annee: int, statut: str,
+    pv_titres: float = 0.0, interets: float = 0.0,
+    interets_ps_precomptes: bool | None = None, pv_crypto: float = 0.0,
+) -> dict:
+    """Compare conjointement les options *indépendantes* 2OP et 3CN.
+
+    L'option 2OP concerne globalement les titres et revenus mobiliers saisis ;
+    3CN concerne tous les gains crypto privés du foyer. Tester les quatre
+    combinaisons évite de comparer deux marges IR séparées à tort : le barème,
+    la décote et le QF portent sur l'assiette totale. Résultat indicatif sur
+    les seules assiettes connues, sans déduction future de CSG ni crédit d'impôt.
+    3CN n'est ouverte qu'à partir des cessions réalisées en 2023.
+    Sources : DGFiP, notice 2086 revenus 2025 et page « revenus mobiliers ».
+    """
+    pv = max(0.0, float(pv_titres))
+    rcm = max(0.0, float(interets))
+    crypto = max(0.0, float(pv_crypto))
+    if rcm > 0 and not isinstance(interets_ps_precomptes, bool):
+        raise ValueError("Indiquez si les prélèvements sociaux des intérêts ont déjà été précomptés lors du versement ; le pays du courtier ne suffit pas.")
+    ir_salaires = impot_revenu(revenu_salaires, parts, annee, statut).impot_net
+    ps_titres = pv * fb.taux_ps(annee)
+    ps_interets = (rcm * fb.taux_ps_revenu_mobilier(annee, precompte=interets_ps_precomptes)
+                   if rcm else 0.0)
+    ps_crypto = crypto * fb.taux_ps(annee)
+    ps_total = ps_titres + ps_interets + ps_crypto
+    ps_deja_precomptes = ps_interets if interets_ps_precomptes else 0.0
+    scenarios = []
+    for op in (False, True) if pv + rcm > 0 else (False,):
+        for cn in (False, True) if crypto > 0 and annee >= 2023 else (False,):
+            csg_payee_annee = rcm * fb.CSG_DEDUCTIBLE if op and interets_ps_precomptes else 0.0
+            revenu_au_bareme = (revenu_salaires + (pv + rcm if op else 0.0)
+                                + (crypto if cn else 0.0) - csg_payee_annee)
+            ir_bareme = impot_revenu(revenu_au_bareme, parts, annee, statut,
+                                     appliquer_seuil=False).impot_net
+            ir_forfaitaire = _euro_2025(fb.IR_FORFAITAIRE * ((0.0 if op else pv + rcm)
+                                                 + (0.0 if cn else crypto)), annee)
+            if ir_bareme + ir_forfaitaire < fb.SEUIL_NON_RECOUVREMENT_IR:
+                ir_bareme = ir_forfaitaire = 0.0
+            total = ir_bareme + ir_forfaitaire + ps_total
+            scenarios.append({
+                "cocher_2op": op, "cocher_3cn": cn,
+                "ir_bareme": ir_bareme, "ir_forfaitaire": ir_forfaitaire,
+                "ps_titres": ps_titres, "ps_interets": ps_interets,
+                "ps_crypto": ps_crypto, "ps_total": ps_total,
+                "ps_deja_precomptes": ps_deja_precomptes,
+                "ps_restants": ps_total - ps_deja_precomptes,
+                "csg_deductible_annee": csg_payee_annee,
+                "impot_total_foyer": total,
+                "cout_capital": total - ir_salaires,
+            })
+    retenu = min(scenarios, key=lambda s: s["impot_total_foyer"])
+    defaut = scenarios[0]  # pas d'option 2OP ni 3CN
+    return {
+        "scenarios": scenarios, "retenu": retenu,
+        "economie_vs_pfu": defaut["impot_total_foyer"] - retenu["impot_total_foyer"],
+        "assiette_2op": pv + rcm, "assiette_3cn": crypto if annee >= 2023 else 0.0,
+        "limite": "Estimation sur les seuls revenus saisis ; 2OP est globale pour tous les RCM et gains mobiliers du foyer. Vérifier les autres revenus et la déclaration officielle.",
     }
 
 
@@ -910,9 +967,10 @@ def detail_2086_de_lannee(
     annee: int,
     inventaire: list[dict] | None = None,
 ) -> dict:
-    """Calcule l'intégralité du Formulaire 2086 (cryptomonnaies, art. 150 VH bis)
-    en suivant les achats et les fractions de capital déduites (ligne 221) depuis
-    l'origine du portefeuille jusqu'à la fin de `annee`.
+    """Estime les lignes 2086 (cryptomonnaies, art. 150 VH bis) à partir des
+    opérations connues, en suivant les achats et les fractions de capital
+    déduites (ligne 221) jusqu'à la fin de `annee`. Les autres cessions du
+    foyer, soultes et conditions de l'option restent à vérifier séparément.
 
     `inventaire` (2.1.0, revue T-02) : crypto-actifs détenus HORS des transactions
     suivies, une ligne par solde de référence :
@@ -957,7 +1015,10 @@ def detail_2086_de_lannee(
             cout_total_brut_eur += net_eur
             quantites[t.ticker] = quantites.get(t.ticker, 0.0) + t.quantite
         elif t.est_vente:
-            prix_cession_eur = net_eur
+            # 2086 revenus 2025 : 213/217 avant frais dans le quotient de
+            # capital ; 218 net des frais dans la plus-value et le seuil (51).
+            frais_eur = _montant_eur(t.frais, t.devise, iso, t.ticker, t.date, indisponible)
+            prix_cession_eur = net_eur + frais_eur
             prix_unitaire_implicite_eur = (
                 prix_cession_eur / t.quantite if t.quantite > 0 else 0.0
             )
@@ -1021,7 +1082,7 @@ def detail_2086_de_lannee(
                 ligne_223 * (prix_cession_eur / valeur_globale_eur)
                 if valeur_globale_eur > 0 else 0.0
             )
-            ligne_224 = prix_cession_eur - fraction_capital
+            ligne_224 = net_eur - fraction_capital
 
             somme_fractions_deduites += fraction_capital
             quantites[t.ticker] = max(0.0, quantites.get(t.ticker, 0.0) - t.quantite)
@@ -1034,11 +1095,11 @@ def detail_2086_de_lannee(
                     "ligne_211": t.date.strftime("%d/%m/%Y"),
                     "ligne_212": round(valeur_globale_eur, 2),
                     "ligne_213": round(prix_cession_eur, 2),
-                    "ligne_214": 0.0,
-                    "ligne_215": round(prix_cession_eur, 2),
+                    "ligne_214": round(frais_eur, 2),
+                    "ligne_215": round(net_eur, 2),
                     "ligne_216": 0.0,
                     "ligne_217": round(prix_cession_eur, 2),
-                    "ligne_218": round(prix_cession_eur, 2),
+                    "ligne_218": round(net_eur, 2),
                     "ligne_220": round(ligne_220, 2),
                     "ligne_221": round(ligne_221, 2),
                     "ligne_222": 0.0,
@@ -1048,8 +1109,9 @@ def detail_2086_de_lannee(
                 })
 
     total_213 = round(sum(c["ligne_213"] for c in cessions_annee), 2)
+    total_218 = round(sum(c["ligne_218"] for c in cessions_annee), 2)
     total_224 = round(sum(c["ligne_224"] for c in cessions_annee), 2)
-    exonere_305 = bool(cessions_annee) and total_213 <= fb.CRYPTO_FRANCHISE_CESSIONS
+    exonere_305 = bool(cessions_annee) and total_218 <= fb.CRYPTO_FRANCHISE_CESSIONS
 
     if not cessions_annee or exonere_305:
         case_3an = 0.0
@@ -1065,6 +1127,7 @@ def detail_2086_de_lannee(
         "annee": annee,
         "cessions": cessions_annee,
         "total_cessions_213": total_213,
+        "total_cessions_218": total_218,
         "plus_value_globale_224": total_224,
         "exonere_305": exonere_305,
         "case_3an": round(case_3an, 2),
@@ -1096,6 +1159,7 @@ def simuler_foyer_complet(
     electrique_2: bool = False,
     interets_etrangers_eur: float = 0.0,
     pays_interets_etrangers: str = "Lituanie",
+    interets_ps_precomptes: bool | None = None,
     bilan_pv_actions_eur: float = 0.0,
     bilan_pv_crypto_imposable_eur: float = 0.0,
 ) -> dict:
@@ -1107,24 +1171,24 @@ def simuler_foyer_complet(
     sal2 = max(0.0, float(salaire_2)) if couple else 0.0
 
     # --- Déclarant 1 ---
-    abatt1 = fb.abattement_10_salaire(sal1, annee)
-    km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1)
+    abatt1 = _euro_2025(fb.abattement_10_salaire(sal1, annee), annee)
+    km1_val, km1_txt = fb.frais_kilometriques(km_1, cv_1, electrique_1, annee=annee)
     rep1_val, rep1_txt = fb.frais_repas(jours_repas_1, annee)
     frais_reels_1 = round(km1_val + rep1_val, 2) if utiliser_frais_reels_1 else 0.0
     retenir_reels_1 = bool(utiliser_frais_reels_1 and frais_reels_1 > abatt1)
-    deduction_1 = frais_reels_1 if retenir_reels_1 else abatt1
+    deduction_1 = _euro_2025(frais_reels_1, annee) if retenir_reels_1 else abatt1
     note_1ak = (
         f"Déclarant 1 ({annee}) — {km1_txt} ; {rep1_txt} ; Total frais réels (case 1AK) = " + f"{round(frais_reels_1):,} €".replace(",", " ")
         if utiliser_frais_reels_1 else ""
     )
 
     # --- Déclarant 2 ---
-    abatt2 = fb.abattement_10_salaire(sal2, annee) if couple else 0.0
-    km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2) if couple else (0.0, "")
+    abatt2 = _euro_2025(fb.abattement_10_salaire(sal2, annee), annee) if couple else 0.0
+    km2_val, km2_txt = fb.frais_kilometriques(km_2, cv_2, electrique_2, annee=annee) if couple else (0.0, "")
     rep2_val, rep2_txt = fb.frais_repas(jours_repas_2, annee) if couple else (0.0, "")
     frais_reels_2 = round(km2_val + rep2_val, 2) if (couple and utiliser_frais_reels_2) else 0.0
     retenir_reels_2 = bool(couple and utiliser_frais_reels_2 and frais_reels_2 > abatt2)
-    deduction_2 = frais_reels_2 if retenir_reels_2 else abatt2
+    deduction_2 = _euro_2025(frais_reels_2, annee) if retenir_reels_2 else abatt2
     note_1bk = (
         f"Déclarant 2 ({annee}) — {km2_txt} ; {rep2_txt} ; Total frais réels (case 1BK) = " + f"{round(frais_reels_2):,} €".replace(",", " ")
         if (couple and utiliser_frais_reels_2) else ""
@@ -1144,33 +1208,35 @@ def simuler_foyer_complet(
 
     if assiette_2op > 0:
         arbitrage = comparer_pfu_bareme(
-            assiette_2op, revenu_net_salaires, parts, annee, statut
+            pv_actions_pos, revenu_net_salaires, parts, annee, statut,
+            interets_eur=interets_pos,
+            interets_ps_precomptes=interets_ps_precomptes,
         )
     else:
         arbitrage = None
 
-    # Plus-value crypto imposable (> 305 € de cessions) : PFU 30 % / 31,4 %
+    # 3CN est indépendante de 2OP : tester aussi les combinaisons croisées.
     pv_crypto_pos = max(0.0, float(bilan_pv_crypto_imposable_eur))
-    impot_crypto = pv_crypto_pos * fb.taux_pfu(annee)
-
-    impot_capital_retenu = (
-        min(arbitrage["pfu"]["total"], arbitrage["bareme"]["total"])
-        if arbitrage else 0.0
-    ) + impot_crypto
-
-    impot_total_foyer = ir_salaires.impot_net + impot_capital_retenu
+    options = comparer_options_foyer(
+        revenu_net_salaires, parts, annee, statut,
+        pv_titres=pv_actions_pos, interets=interets_pos,
+        interets_ps_precomptes=interets_ps_precomptes, pv_crypto=pv_crypto_pos,
+    )
+    retenu = options["retenu"]
+    impot_crypto = pv_crypto_pos * fb.taux_pfu(annee)  # référence PFU, pas coût retenu si 3CN
+    impot_capital_retenu = retenu["cout_capital"]
+    impot_total_foyer = retenu["impot_total_foyer"]
     revenu_brut_global = sal1 + sal2 + interets_pos + pv_actions_pos + pv_crypto_pos
     taux_moyen_salaires = (
         ir_salaires.impot_net / (sal1 + sal2) if (sal1 + sal2) > 0 else 0.0
     )
 
-    # Taux de prélèvement à la source (PAS) individualisés (CGI art. 204 M) :
-    # - Le conjoint au revenu le plus faible se voit appliquer les règles d'un
-    #   célibataire avec la moitié des parts du foyer (`parts / 2`, incluant la
-    #   moitié des parts des personnes à charge) et la décote d'un célibataire.
-    # - Le conjoint au revenu le plus élevé supporte le solde de l'impôt du foyer
-    #   (`ir_foyer - ir_faible`), garantissant que la somme des prélèvements
-    #   égale exactement l'impôt du foyer.
+    # PAS : approximation sur les seuls salaires saisis, PAS le taux transmis
+    # par la DGFiP. Les formules de l'art. 204 M prennent également en compte
+    # les revenus communs, revenus hors PAS, crédits étrangers et arrondis ;
+    # l'individualisation de droit commun s'applique depuis septembre 2025.
+    # Ici, on répartit seulement l'IR simulé sur les salaires entre conjoints :
+    # la somme correspond à cet IR, pas nécessairement au PAS officiel.
     if couple and sal1 > 0 and sal2 > 0:
         demi_parts_foyer = max(1.0, parts / 2.0)
         if rev_net_1 <= rev_net_2:
@@ -1223,9 +1289,11 @@ def simuler_foyer_complet(
         "revenu_net_imposable_salaires": round(revenu_net_salaires, 2),
         "revenu_brut_global": round(revenu_brut_global, 2),
         "ir_salaires": ir_salaires,
-        "arbitrage": arbitrage,
-        "cocher_2op": bool(arbitrage and arbitrage["choix"] == "Barème progressif"),
-        "impot_crypto": round(impot_crypto, 2),
+        "arbitrage": arbitrage,  # comparaison 2OP isolée, affichée uniquement sans crypto
+        "options_fiscales": options,
+        "cocher_2op": retenu["cocher_2op"],
+        "cocher_3cn": retenu["cocher_3cn"],
+        "impot_crypto": round(impot_crypto, 2),  # scénario PFU de référence
         "impot_capital_retenu": round(impot_capital_retenu, 2),
         "impot_total_foyer": round(impot_total_foyer, 2),
         "taux_moyen_salaires": taux_moyen_salaires,

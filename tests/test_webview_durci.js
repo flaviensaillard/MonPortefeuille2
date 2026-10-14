@@ -7,7 +7,7 @@
    - le WebView n'accorde plus l'accès universel ni l'accès fichier-fichier
      depuis file://, ni l'accès contenu, et Safe Browsing n'est plus désactivé ;
    - le pont réseau n'ouvre QUE des URL HTTPS vers une allowlist d'hôtes
-     (Supabase, Yahoo Finance, INSEE) et refuse les autres ;
+     (Supabase, Yahoo Finance, INSEE, OpenFisca exact) et refuse les autres ;
    - les méthodes HTTP du pont sont limitées à GET/POST/PATCH/DELETE ;
    - les en-têtes sont validés (pas d'injection CR/LF) ;
    - les redirections automatiques sont coupées (un hôte autorisé ne peut pas
@@ -57,6 +57,15 @@ verifier('allowlist HTTPS : Supabase', /supabase\.co/.test(pont));
 verifier('allowlist HTTPS : Yahoo Finance', /query1\.finance\.yahoo\.com/.test(pont)
     && /query2\.finance\.yahoo\.com/.test(pont));
 verifier('allowlist HTTPS : INSEE', /api\.insee\.fr/.test(pont));
+const listeHotes = pont.match(/HOTES_AUTORISES\s*=\s*\{([^}]+)\}/);
+verifier('collecte DGFiP autorisée par hôtes exacts, OpenFisca absent',
+    !!listeHotes && ['bofip.impots.gouv.fr', 'www.impots.gouv.fr',
+        'simulateur-ir-ifi.impots.gouv.fr'].every(h => listeHotes[1].includes('"' + h + '"'))
+    && !listeHotes[1].includes('openfisca.org') && /h\.equals\(a\)/.test(pont));
+verifier('redirection BOFiP unique vers même hôte, pas de suivi général',
+    /doctrine\/BOI-IR-LIQ-20-/.test(pont)
+    && /cible\.getHost\(\)/.test(pont)
+    && /setInstanceFollowRedirects\(false\)/.test(pont));
 verifier('les URL non HTTPS sont refusées par le pont',
     /!"https"\.equalsIgnoreCase/.test(pont) || /https.*equalsIgnoreCase.*getProtocol/.test(pont),
     'executer() doit rejeter tout ce qui n’est pas https');
@@ -80,7 +89,19 @@ const exposees = [...pont.matchAll(/@JavascriptInterface\s+public\s+\S+\s+(\w+)\
 // que les jetons de session chiffrés (Keystore) et un retour de biométrie ;
 // elles ne reçoivent jamais de mot de passe (verrouillé par
 // tests/test_empreinte_cableage.py).
-const ADMISES = ['http', 'httpAsync', 'telechargerInflationInsee', 'isOnline',
+verifier('pont PDF borné au document DGFiP, sans redirection et sans décodage UTF-8',
+    /www\.impots\.gouv\.fr"\.equalsIgnoreCase\(u\.getHost\(\)\)/.test(pont)
+    && /ir_2026\/pdf_som\/nouveautes/.test(pont)
+    && /ir_2026\/pdf_som\/09-plus_values_137a156/.test(pont)
+    && /ir_2026\/pdf_som\/08-RCM_121a136/.test(pont)
+    && /ir_2026\/pdf_som\/12-charges_ded_rev_225a236/.test(pont)
+    && /formulaires\/2086\/2026\/2086_5515/.test(pont)
+    && /u\.getPath\(\)\.equals/.test(pont)
+    && /final int maximum = 2 \* 1024 \* 1024/.test(pont)
+    && pont.includes("pdf[0] != '%'")
+    && /setInstanceFollowRedirects\(false\)/.test(pont)
+    && /binary_b64/.test(pont));
+const ADMISES = ['http', 'httpAsync', 'httpPdfAsync', 'telechargerInflationInsee', 'isOnline',
     'haptic', 'toast', 'openExternal', 'share', 'versionCode', 'versionName',
     'empreinteEtat', 'empreinteSessionGardee', 'empreinteMajSession',
     'empreinteActiver', 'empreinteOuvrir', 'empreinteEffacer'];

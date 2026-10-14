@@ -1,0 +1,191 @@
+{
+  "simulation_uniquement": true,
+  "ecriture_autorisee": false,
+  "action_exigee": "Sauvegarde restaurée et lecture indépendante post-011 à jour, APK compatible, accord distinct du propriétaire sur cette ligne.",
+  "colonnes_proposees_sans_user_id": {
+    "annee_revenus": 2025,
+    "revision": 2,
+    "origine": "nouvelle_publication",
+    "source_ref": "https://github.com/flaviensaillard/MonPortefeuille2/blob/b99df7b65253726b8d64f34a76a9ec61528947ea/docs/AUDIT-R2-2025.md",
+    "parametres": {
+      "bareme": {
+        "annee": 2025,
+        "tranches": [
+          11600.0,
+          29579.0,
+          84577.0,
+          181917.0
+        ],
+        "taux": [
+          0.11,
+          0.3,
+          0.41,
+          0.45
+        ],
+        "decote_base_celibataire": 897.0,
+        "decote_plafond_celibataire": 1982.0,
+        "decote_base_couple": 1483.0,
+        "decote_plafond_couple": 3277.0,
+        "decote_taux": 0.4525
+      },
+      "prelevements_sociaux": 0.186,
+      "prelevements_sociaux_par_categorie": {
+        "plus_values_titres": 0.186,
+        "plus_values_crypto_privees": 0.186,
+        "rcm_precomptes_en_2025": 0.172,
+        "rcm_non_precomptes": 0.186
+      },
+      "quotient_familial": {
+        "plafond_general_par_demi_part": 1807.0,
+        "plafonds_particuliers_modelises": false
+      },
+      "ir_forfaitaire": 0.128,
+      "seuil_non_recouvrement_ir": 61.0,
+      "csg_deductible": 0.068,
+      "calendrier_csg": {
+        "deduction_selon_annee_paiement": true,
+        "rcm_precomptes_deduction_possible_en_2025_si_bareme": true,
+        "csg_payee_ulterieurement_non_deduite_du_revenu_2025": true
+      },
+      "options_fiscales": {
+        "deux_op_globale_titres_et_rcm": true,
+        "trois_cn_crypto_independante": true,
+        "trois_cn_disponible_pour_cessions_depuis": 2023
+      },
+      "abattement_10": {
+        "taux": 0.1,
+        "plancher": 509.0,
+        "plafond": 14555.0
+      },
+      "forfait_repas": 5.45,
+      "bareme_km": {
+        "3": [
+          0.529,
+          0.316,
+          1065.0,
+          0.37
+        ],
+        "4": [
+          0.606,
+          0.34,
+          1330.0,
+          0.407
+        ],
+        "5": [
+          0.636,
+          0.357,
+          1395.0,
+          0.427
+        ],
+        "6": [
+          0.665,
+          0.374,
+          1457.0,
+          0.447
+        ],
+        "7": [
+          0.697,
+          0.394,
+          1515.0,
+          0.47
+        ]
+      },
+      "regles_km": {
+        "seuils_distance_km": [
+          5000,
+          20000
+        ],
+        "majoration_electrique": 0.2
+      },
+      "franchise_crypto": 305.0
+    },
+    "statut_validation": "valide_pour_perimetre",
+    "perimetre_validation": {
+      "couverture": "integrale_parametres_utilises",
+      "annee_revenus": 2025,
+      "regles_exclues": [],
+      "parametres_utilises": [
+        "abattement_10.plafond",
+        "abattement_10.plancher",
+        "abattement_10.taux",
+        "bareme.annee",
+        "bareme.decote_base_celibataire",
+        "bareme.decote_base_couple",
+        "bareme.decote_plafond_celibataire",
+        "bareme.decote_plafond_couple",
+        "bareme.decote_taux",
+        "bareme.taux",
+        "bareme.tranches",
+        "bareme_km.3",
+        "bareme_km.4",
+        "bareme_km.5",
+        "bareme_km.6",
+        "bareme_km.7",
+        "calendrier_csg.csg_payee_ulterieurement_non_deduite_du_revenu_2025",
+        "calendrier_csg.deduction_selon_annee_paiement",
+        "calendrier_csg.rcm_precomptes_deduction_possible_en_2025_si_bareme",
+        "csg_deductible",
+        "forfait_repas",
+        "franchise_crypto",
+        "ir_forfaitaire",
+        "options_fiscales.deux_op_globale_titres_et_rcm",
+        "options_fiscales.trois_cn_crypto_independante",
+        "options_fiscales.trois_cn_disponible_pour_cessions_depuis",
+        "prelevements_sociaux",
+        "prelevements_sociaux_par_categorie.plus_values_crypto_privees",
+        "prelevements_sociaux_par_categorie.plus_values_titres",
+        "prelevements_sociaux_par_categorie.rcm_non_precomptes",
+        "prelevements_sociaux_par_categorie.rcm_precomptes_en_2025",
+        "quotient_familial.plafond_general_par_demi_part",
+        "quotient_familial.plafonds_particuliers_modelises",
+        "regles_km.majoration_electrique",
+        "regles_km.seuils_distance_km",
+        "seuil_non_recouvrement_ir"
+      ],
+      "sources_par_parametre": {
+        "abattement_10.plafond": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "abattement_10.plancher": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "abattement_10.taux": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "bareme.annee": "https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407",
+        "bareme.decote_base_celibataire": "https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407",
+        "bareme.decote_base_couple": "https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407",
+        "bareme.decote_plafond_celibataire": "https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407",
+        "bareme.decote_plafond_couple": "https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407",
+        "bareme.decote_taux": "https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20260407",
+        "bareme.taux": "https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407",
+        "bareme.tranches": "https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407",
+        "bareme_km.3": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "bareme_km.4": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "bareme_km.5": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "bareme_km.6": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "bareme_km.7": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "calendrier_csg.csg_payee_ulterieurement_non_deduite_du_revenu_2025": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
+        "calendrier_csg.deduction_selon_annee_paiement": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
+        "calendrier_csg.rcm_precomptes_deduction_possible_en_2025_si_bareme": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
+        "csg_deductible": "https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf",
+        "forfait_repas": "https://www.impots.gouv.fr/particulier/frais-de-repas",
+        "franchise_crypto": "https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf",
+        "ir_forfaitaire": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
+        "options_fiscales.deux_op_globale_titres_et_rcm": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
+        "options_fiscales.trois_cn_crypto_independante": "https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf",
+        "options_fiscales.trois_cn_disponible_pour_cessions_depuis": "https://bofip.impots.gouv.fr/bofip/14201-PGP.html/ACTU-2024-00078",
+        "prelevements_sociaux": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
+        "prelevements_sociaux_par_categorie.plus_values_crypto_privees": "https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques",
+        "prelevements_sociaux_par_categorie.plus_values_titres": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm",
+        "prelevements_sociaux_par_categorie.rcm_non_precomptes": "https://www.impots.gouv.fr/particulier/les-revenus-mobiliers",
+        "prelevements_sociaux_par_categorie.rcm_precomptes_en_2025": "https://www.impots.gouv.fr/particulier/les-revenus-mobiliers",
+        "quotient_familial.plafond_general_par_demi_part": "https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407",
+        "quotient_familial.plafonds_particuliers_modelises": "https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407",
+        "regles_km.majoration_electrique": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "regles_km.seuils_distance_km": "https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/frais.htm",
+        "seuil_non_recouvrement_ir": "https://bofip.impots.gouv.fr/bofip/2496-PGP.html/identifiant=BOI-IR-LIQ-20-20-40-20180704"
+      }
+    },
+    "actif": true
+  },
+  "limites_hors_parametres": [
+    "PAS officiel et montants personnels de frais réels non certifiés.",
+    "Assiettes 2OP/2086 et cas particuliers non certifiés par les seuls taux.",
+    "Or physique hors périmètre : l'APK refuse la R2 si une opération est classée métal physique."
+  ]
+}

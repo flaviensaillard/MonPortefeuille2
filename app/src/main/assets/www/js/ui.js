@@ -129,14 +129,25 @@
     var nbGraphiques = 0;
 
     /* Étiquettes d'axe : 12 k$, 1,25 M$ — jamais « 1234567.89 $ ». */
-    function montantCourt(x, unite) {
+    function montantCourt(x, unite, pas) {
         var u = unite || '$';
         var a = Math.abs(x);
         if (!isFinite(x)) return '—';
-        if (a >= 1e9) return U.nombre(x / 1e9, 2) + ' Md' + u;
-        if (a >= 1e6) return U.nombre(x / 1e6, 2) + ' M' + u;
-        if (a >= 1e3) return U.nombre(x / 1e3, 0) + ' k' + u;
-        return U.nombre(x, 0) + ' ' + u;
+        // Les petites graduations ne doivent pas toutes s'arrondir au même
+        // libellé (p. ex. 42,25 k$ et 42,5 k$ sur un axe resserré).
+        function decimales(echelle, minimum) {
+            if (!(pas > 0)) return minimum;
+            var p = pas / echelle;
+            for (var d = 0; d <= 6; d++) {
+                if (Math.abs(p * Math.pow(10, d) - Math.round(p * Math.pow(10, d))) < 1e-6)
+                    return Math.max(minimum, d);
+            }
+            return 6;
+        }
+        if (a >= 1e9) return U.nombre(x / 1e9, decimales(1e9, 2)) + ' Md' + u;
+        if (a >= 1e6) return U.nombre(x / 1e6, decimales(1e6, 2)) + ' M' + u;
+        if (a >= 1e3) return U.nombre(x / 1e3, decimales(1e3, 0)) + ' k' + u;
+        return U.nombre(x, decimales(1, 0)) + ' ' + u;
     }
 
     /* Enregistre un graphique ; le tracé est fait par `lierGraphiques`, une fois
@@ -185,6 +196,27 @@
         return palier * base;
     }
 
+    /* Performance : l'axe épouse les valeurs effectivement présentes sur la
+       période. Plusieurs séries partagent la même échelle, sans inventer un
+       point à zéro. Le pas et les bornes restent des montants lisibles. */
+    function echelleResserree(minimum, maximum) {
+        if (!isFinite(minimum) || !isFinite(maximum) || minimum > maximum) return null;
+        var minObserve = minimum;
+        if (minimum === maximum) {
+            var marge = Math.max(Math.abs(minimum) * 0.02, 1);
+            minimum -= marge;
+            maximum += marge;
+        }
+        var pas = echelleHaute((maximum - minimum) / 3);
+        var bas = Math.floor(minimum / pas) * pas;
+        var haut = Math.ceil(maximum / pas) * pas;
+        if (minObserve >= 0) bas = Math.max(0, bas);
+        // Au moins deux intervalles, notamment pour une série plate ou à zéro.
+        if (haut - bas < 2 * pas) haut = bas + 2 * pas;
+        var graduations = Math.round((haut - bas) / pas);
+        return { min: bas, max: haut, pas: pas, graduations: graduations };
+    }
+
     function couleurSerie(i) {
         var pal = ['var(--gold)', 'var(--up)', 'var(--flat)', 'var(--down)'];
         return pal[i % pal.length];
@@ -215,15 +247,22 @@
             });
         });
         if (!isFinite(min) || !isFinite(max)) return;
-        if (max === min) { var ec = Math.abs(max) * 0.02 + 1; max += ec; min -= ec; }
-        if (min >= 0) {
-            // Un capital ne descend pas sous zéro : l'axe part de zéro et
-            // s'arrête à une borne ronde, sinon la courbe est écrasée.
-            min = 0;
-            max = echelleHaute(max * 1.02);
+        var graduations = 3, pas = null;
+        if (options.axeResserre) {
+            var echelle = echelleResserree(min, max);
+            min = echelle.min;
+            max = echelle.max;
+            pas = echelle.pas;
+            graduations = echelle.graduations;
         } else {
-            var marge = (max - min) * 0.10;
-            min -= marge; max += marge;
+            if (max === min) { var ec = Math.abs(max) * 0.02 + 1; max += ec; min -= ec; }
+            if (min >= 0) {
+                min = 0;
+                max = echelleHaute(max * 1.02);
+            } else {
+                var marge = (max - min) * 0.10;
+                min -= marge; max += marge;
+            }
         }
 
         var couleurs = series.map(function (s, i) { return s.couleur || couleurSerie(i); });
@@ -238,15 +277,15 @@
             + '<stop offset="100%" stop-color="' + couleurs[0] + '" stop-opacity="0"/>'
             + '</linearGradient></defs>';
 
-        // --- axe des ordonnates : quatre graduations, étiquetées
+        // --- axe des ordonnates : graduations lisibles, y compris en zoom.
         var unite = options.unite || '$';
-        for (var g = 0; g <= 3; g++) {
-            var gy = padT + (g / 3) * hZone;
-            var val = max - (g / 3) * (max - min);
+        for (var g = 0; g <= graduations; g++) {
+            var gy = padT + (g / graduations) * hZone;
+            var val = pas ? min + (graduations - g) * pas : max - (g / graduations) * (max - min);
             svg += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (padL + w) + '" y2="' + gy.toFixed(1)
                 + '" stroke="rgba(255,255,255,.08)" stroke-width="1"/>'
                 + '<text x="' + (padL - 7) + '" y="' + (gy + 3.4).toFixed(1) + '" text-anchor="end" '
-                + 'font-size="9.5" fill="rgba(226,232,240,.55)">' + h(montantCourt(val, unite)) + '</text>';
+                + 'font-size="9.5" fill="rgba(226,232,240,.55)">' + h(montantCourt(val, unite, pas)) + '</text>';
         }
 
         // --- courbes

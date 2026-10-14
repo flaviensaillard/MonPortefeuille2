@@ -342,7 +342,7 @@
 
     function contexteVide() {
         return {
-            transactions: [], positions: {}, actifs: [], etats: {},
+            transactions: [], transactionsChargees: false, positions: {}, actifs: [], etats: {},
             snapshots: [], apports: [], inflation: {},
             totalInvestiEur: 0, totalPrecautionEur: 0, totalCourantEur: 0, patrimoineTotalEur: 0,
             totalInvestiUsd: 0, totalPrecautionUsd: 0, totalCourantUsd: 0, patrimoineTotalUsd: 0,
@@ -369,7 +369,11 @@
 
         return Promise.all([
             lireConfig(),
-            lireTable('pf2_transactions', 'select=*'),
+            // Une panne de cette table ne doit jamais se faire passer pour un
+            // portefeuille vide : sans ses transactions, la R2 est non évaluée.
+            PF.net.supabase.selectTout('pf2_transactions', 'select=*').then(function (rows) {
+                return { lignes: Array.isArray(rows) ? rows : [], chargees: Array.isArray(rows) };
+            }).catch(function () { return { lignes: [], chargees: false }; }),
             lireTable('pf2_apports', 'select=*'),
             lireTable('pf2_snapshots', 'select=*'),
             lireTable('pf2_inflation', 'select=*'),
@@ -378,7 +382,10 @@
             lireTable('Historique', 'select=*'),
             lireComptes()
         ]).then(function (r) {
-            var config = r[0], txRows = r[1], apRows = r[2], snRows = r[3], infRows = r[4];
+            var config = r[0], txRows = r[1].lignes, apRows = r[2], snRows = r[3], infRows = r[4];
+            ctx.transactionsChargees = r[1].chargees;
+            if (!ctx.transactionsChargees)
+                ctx.erreurs.push('Transactions indisponibles : portefeuille et priorité R2 non évalués. Réessayer la synchronisation.');
             ctx.donneesV1 = r[5] || [];
             ctx.projections = r[6] || [];
             ctx.historiqueV1 = r[7] || [];

@@ -73,14 +73,18 @@ public class NativeBridge {
        vers cette liste d'hôtes. Une entrée commençant par « . » autorise le
        domaine et ses sous-domaines. Le projet Supabase du porteur est toujours
        un sous-domaine de supabase.co ; les cours viennent de Yahoo Finance ;
-       l'inflation de l'INSEE ; le service IA du porteur, s'il en configure un,
-       vit sur un worker Cloudflare (.workers.dev). Toute autre destination est
+       l'inflation de l'INSEE ; les documents fiscaux viennent exclusivement de la DGFiP ;
+       le service IA du porteur, s'il en configure un, vit sur un worker
+       Cloudflare (.workers.dev). Toute autre destination est
        refusée, même si le JavaScript la demande. */
     private static final String[] HOTES_AUTORISES = {
             ".supabase.co",
             "query1.finance.yahoo.com",
             "query2.finance.yahoo.com",
             "api.insee.fr",
+            "www.impots.gouv.fr", // frais repas des salariés, hôte exact
+            "simulateur-ir-ifi.impots.gouv.fr", // barème km officiel, hôte exact
+            "bofip.impots.gouv.fr", // doctrine fiscale DGFiP, hôte exact
             ".workers.dev"
     };
 
@@ -160,6 +164,70 @@ public class NativeBridge {
         });
     }
 
+    /** PDF DGFiP uniquement : octets bruts, distincts du transport texte UTF-8.
+     * Pas de redirection, taille bornée, signature PDF vérifiée avant retour JS. */
+    @JavascriptInterface
+    public void httpPdfAsync(final String url, final String callbackId) {
+        if (callbackId == null || !callbackId.matches("cb[0-9]{1,12}")) return;
+        pool.execute(new Runnable() {
+            @Override public void run() {
+                JSONObject res = lirePdfDgfip(url);
+                if (js != null) js.eval("PF.net._fin('" + callbackId + "', " + res.toString() + ")");
+            }
+        });
+    }
+
+    private JSONObject lirePdfDgfip(String url) {
+        HttpURLConnection conn = null;
+        try {
+            URL u = new URL(url);
+            if (!"https".equalsIgnoreCase(u.getProtocol())
+                    || !"www.impots.gouv.fr".equalsIgnoreCase(u.getHost())
+                    || u.getPort() != -1 || u.getUserInfo() != null || u.getQuery() != null
+                    || u.getRef() != null
+                    || !(u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/09-plus_values_137a156.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/08-RCM_121a136.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf")
+                         || u.getPath().equals("/sites/default/files/formulaires/2086/2026/2086_5515.pdf")))
+                return erreur("PDF DGFiP non autorisé");
+            conn = (HttpURLConnection) u.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(TIMEOUT_MS);
+            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Accept", "application/pdf");
+            int status = conn.getResponseCode();
+            if (status != 200) return erreur("PDF DGFiP : HTTP " + status);
+            final int maximum = 2 * 1024 * 1024;
+            if (conn.getContentLengthLong() > maximum) return erreur("PDF DGFiP trop volumineux");
+            ByteArrayOutputStream octets = new ByteArrayOutputStream();
+            try (InputStream in = conn.getInputStream()) {
+                byte[] tampon = new byte[8192];
+                int n;
+                while ((n = in.read(tampon)) != -1) {
+                    if (octets.size() + n > maximum) return erreur("PDF DGFiP trop volumineux");
+                    octets.write(tampon, 0, n);
+                }
+            }
+            byte[] pdf = octets.toByteArray();
+            if (pdf.length < 8 || pdf[0] != '%' || pdf[1] != 'P' || pdf[2] != 'D'
+                    || pdf[3] != 'F' || pdf[4] != '-')
+                return erreur("Réponse DGFiP non PDF");
+            JSONObject res = new JSONObject();
+            res.put("ok", true);
+            res.put("status", 200);
+            res.put("binary_b64", Base64.encodeToString(pdf, Base64.NO_WRAP));
+            return res;
+        } catch (Exception e) {
+            Log.w(TAG, "PDF DGFiP inaccessible : " + e.getMessage());
+            return erreur("PDF DGFiP inaccessible");
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     @JavascriptInterface
     public String http(String method, String url, String headersJson, String body) {
         return executer(method, url, headersJson, body).toString();
@@ -218,8 +286,38 @@ public class NativeBridge {
             }
 
             int status = conn.getResponseCode();
+            // Seuls les liens stables de la doctrine DGFiP sont résolus ; jamais
+            // de redirection générique (notamment avec jeton Supabase). Un saut,
+            // strictement sur le même hôte HTTPS et vers un document BOFiP.
+            if ("GET".equals(m) && url.startsWith("https://bofip.impots.gouv.fr/doctrine/BOI-IR-LIQ-20-")
+                    && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)) {
+                String location = conn.getHeaderField("Location");
+                if (location != null) {
+                    URL cible = new URL(u, location);
+                    String chemin = cible.getPath();
+                    if ("https".equalsIgnoreCase(cible.getProtocol())
+                            && "bofip.impots.gouv.fr".equalsIgnoreCase(cible.getHost())
+                            && (cible.getPort() == -1 || cible.getPort() == 443)
+                            && chemin.matches("/bofip/(2491|2494|2495)-PGP\\.html/identifiant=BOI-IR-LIQ-20-.*")) {
+                        return executer("GET", cible.toString(), null, null);
+                    }
+                }
+            }
             InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String payload = is == null ? "" : readAll(is);
+            // Les aides du simulateur sont des pages historiques : leur jeu de
+            // caractères peut ne pas correspondre à l'UTF-8 par défaut. Ne
+            // changer le décodage QUE sur cet hôte public (pas sur Supabase).
+            String contentType = conn.getContentType();
+            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+            boolean aideDgfip = "simulateur-ir-ifi.impots.gouv.fr".equalsIgnoreCase(u.getHost());
+            if (aideDgfip && contentType != null) {
+                String ct = contentType.toLowerCase(Locale.US);
+                if (ct.contains("iso-8859-15"))
+                    charset = java.nio.charset.Charset.forName("ISO-8859-15");
+                else if (ct.contains("iso-8859-1") || ct.contains("latin1") || ct.contains("windows-1252"))
+                    charset = java.nio.charset.Charset.forName("windows-1252");
+            }
+            String payload = is == null ? "" : readAll(is, charset, aideDgfip);
             JSONObject res = new JSONObject();
             res.put("ok", status >= 200 && status < 300);
             res.put("status", status);
@@ -506,15 +604,30 @@ public class NativeBridge {
         return -1;
     }
 
-    private static String readAll(InputStream is) throws Exception {
-        BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = r.readLine()) != null) {
-            sb.append(line).append('\n');
+    private static String readAll(InputStream is, java.nio.charset.Charset charset,
+                                  boolean aideDgfip) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] bloc = new byte[8192];
+        int n;
+        try {
+            while ((n = is.read(bloc)) != -1) bytes.write(bloc, 0, n);
+        } finally {
+            is.close();
         }
-        r.close();
-        return sb.toString();
+        byte[] brut = bytes.toByteArray();
+        String texte = new String(brut, charset);
+        // Un serveur historique peut omettre son charset. L'UTF-8 invalide
+        // remplace alors les accents/€ par U+FFFD et détruit les preuves de
+        // millésime : relecture Windows-1252, seulement sur l'aide DGFiP.
+        if (aideDgfip && charset.equals(StandardCharsets.UTF_8) && texte.indexOf('\uFFFD') >= 0)
+            texte = new String(brut, java.nio.charset.Charset.forName("windows-1252"));
+        else if (aideDgfip && !charset.equals(StandardCharsets.UTF_8) && texte.contains("Ã")) {
+            // En cas d'en-tête latin erroné sur du vrai UTF-8, ne pas
+            // conserver le mojibake « perÃ§us / â‚¬ ».
+            String utf8 = new String(brut, StandardCharsets.UTF_8);
+            if (utf8.indexOf('\uFFFD') < 0) texte = utf8;
+        }
+        return texte;
     }
 
     @JavascriptInterface

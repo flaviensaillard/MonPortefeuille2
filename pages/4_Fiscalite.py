@@ -1,4 +1,4 @@
-"""Fiscalité — Simulateur complet & déclaration pré-remplie case par case.\n\nRestaure l'intégralité des fonctionnalités de la v1 (situation familiale,\nsalaires 1AJ/1BJ, frais réels kilométriques et repas 1AK/1BK mémorisés dans\n`Config`, intérêts étrangers 2047/2TR, formulaires 2042, 3916-bis, 2047, 2074\nlignes 511-524 / 905 / 913 / Cadres 11-12 et 2086 lignes 211-224, taux de PAS\nfoyer et individualisés) tout en sélectionnant automatiquement les barèmes\nofficiels de l'année des revenus (IR, décote, barème kilométrique URSSAF,\nforfait repas URSSAF, PFU & prélèvements sociaux, CSG déductible à 6,8 %).\n"""
+"""Fiscalité — Simulateur complet & déclaration pré-remplie case par case.\n\nRestaure l'intégralité des fonctionnalités de la v1 (situation familiale,\nsalaires 1AJ/1BJ, frais réels kilométriques et repas 1AK/1BK mémorisés dans\n`Config`, intérêts étrangers 2047/2TR, formulaires 2042, 3916-bis, 2047, 2074\nlignes 511-524 / 905 / 913 / Cadres 11-12 et 2086 lignes 211-224, taux de PAS\nfoyer et individualisés) tout en sélectionnant automatiquement les barèmes\nintégrés de l'année des revenus (IR, décote, frais, PFU des titres et PS selon\ncatégorie). Les millésimes et les cas particuliers ne sont pas tous certifiés.\n"""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ except ValueError as exc:
     st.stop()
 
 st.markdown(
-    f"""<div style="background-color:rgba(30,41,59,0.75);color:#ffffff;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #2ecc71;font-size:0.93rem;">\n    <strong>🟢 Barèmes fiscaux automatiques — Revenus {annee} (déclaration {annee + 1})</strong><br>\n    <span style="font-size:0.86rem;opacity:0.9;">\n    • <b>Tranches IR {annee}</b> : 0 % jusqu'à {bareme_ir.tranches[0]:,.0f} € · 11 % jusqu'à {bareme_ir.tranches[1]:,.0f} € · 30 % jusqu'à {bareme_ir.tranches[2]:,.0f} € · 41 % jusqu'à {bareme_ir.tranches[3]:,.0f} € · 45 % au-delà<br>\n    • <b>Décote {annee}</b> : Célibataire (base {bareme_ir.decote_base_celibataire:,.0f} €, plafond {bareme_ir.decote_plafond_celibataire:,.0f} €) · Couple (base {bareme_ir.decote_base_couple:,.0f} €, plafond {bareme_ir.decote_plafond_couple:,.0f} €)<br>\n    • <b>PFU (Flat Tax) {annee}</b> : {fb.IR_FORFAITAIRE * 100:.1f} % IR + {ps_taux * 100:.1f} % PS = <b>{pfu_taux * 100:.1f} %</b> (CSG déductible au barème : 6,8 %)<br>\n    • <b>Frais professionnels {annee}</b> : Barème kilométrique officiel URSSAF/DGFiP (3 à 7+ CV) · Forfait repas : <b>{repas_unit:.2f} €/repas</b>\n    </span>\n    </div>""".replace(",", " "),
+    f"""<div style="background-color:rgba(30,41,59,0.75);color:#ffffff;border-radius:10px;padding:12px 16px;margin-bottom:14px;border-left:5px solid #2ecc71;font-size:0.93rem;">\n    <strong>Barèmes intégrés — Revenus {annee} (déclaration {annee + 1})</strong><br>\n    <span style="font-size:0.86rem;opacity:0.9;">\n    • <b>Tranches IR {annee}</b> : 0 % jusqu'à {bareme_ir.tranches[0]:,.0f} € · 11 % jusqu'à {bareme_ir.tranches[1]:,.0f} € · 30 % jusqu'à {bareme_ir.tranches[2]:,.0f} € · 41 % jusqu'à {bareme_ir.tranches[3]:,.0f} € · 45 % au-delà<br>\n    • <b>Décote {annee}</b> : Célibataire (base {bareme_ir.decote_base_celibataire:,.0f} €, plafond {bareme_ir.decote_plafond_celibataire:,.0f} €) · Couple (base {bareme_ir.decote_base_couple:,.0f} €, plafond {bareme_ir.decote_plafond_couple:,.0f} €)<br>\n    • <b>PFU des plus-values mobilières {annee}</b> : {fb.IR_FORFAITAIRE * 100:.1f} % IR + {ps_taux * 100:.1f} % PS = <b>{pfu_taux * 100:.1f} %</b> (revenus précomptés : taux distinct)<br>\n    • <b>Frais professionnels {annee}</b> : Barème kilométrique officiel URSSAF/DGFiP (3 à 7+ CV) · Forfait repas : <b>{repas_unit:.2f} €/repas</b>\n    </span>\n    </div>""".replace(",", " "),
     unsafe_allow_html=True,
 )
 
@@ -113,7 +113,7 @@ elif etat_maj_baremes["disponible"]:
     st.markdown(
         f"""<a href="{etat_maj_baremes['url']}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
         <div style="background-color:rgba(245,158,11,0.18);color:#fbbf24;border-radius:10px;padding:12px 16px;margin-bottom:10px;border-left:5px solid #f59e0b;font-size:0.93rem;cursor:pointer;">
-        <strong>🔔 Nouvelle version des barèmes fiscaux disponible !</strong><br>
+        <strong>🔔 Vérification fiscale requise</strong><br>
         <span style="font-size:0.88rem;color:#ffffff;">{etat_maj_baremes['message']}</span><br>
         <span style="text-decoration:underline;font-weight:600;color:#38bdf8;">👉 Cliquez ici pour ouvrir votre assistant Arena et mettre à jour les barèmes fiscaux ↗</span>
         </div></a>""",
@@ -134,8 +134,17 @@ with st.expander("🤖 Prompt à copier-coller dans l'IA pour générer le nouve
     )
     st.code(fb.generer_prompt_maj_baremes(annee), language="markdown")
 
-if annee in fb.PS_ANNEE_INCERTAINE:
-    st.info("ℹ️ " + fb.PS_ANNEE_INCERTAINE[annee])
+if annee == 2026:
+    st.warning("Les barèmes et la décote pour les revenus 2026 sont provisoires : déclaration 2027 à revérifier.")
+st.warning("Le quotient familial ne couvre que le plafonnement général. Si vous êtes parent isolé ou bénéficiez d'une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP de ce simulateur.")
+st.info(
+    "**Périmètres distincts :** les titres et cessions chargés ici sont ceux de votre "
+    "portefeuille personnel, dont vous êtes le seul propriétaire. Votre mariage ne rend "
+    "pas votre épouse codétentrice de ces titres. Le calcul de l'IR utilise en revanche "
+    "les salaires saisis pour les deux déclarants du foyer. Les options 2OP/3CN et le "
+    "seuil de cessions crypto s'apprécient à l'échelle du foyer : vérifiez séparément "
+    "tout autre revenu ou toute autre cession éventuels du conjoint, sans en présumer l'existence."
+)
 
 # ---------------------------------------------------------------------------
 # 1. Paramètres du foyer : Situation familiale & Déclaration de base (repliables)
@@ -268,6 +277,14 @@ with st.expander(
             "Intérêts nets encaissés à l'étranger (€) → 2047 Ligne 250 & 2042 Case 2TR ✍️",
             min_value=0.0, value=int_def, step=10.0,
         ))
+        statut_ps_interets = (st.selectbox(
+            f"PS des intérêts {annee} déjà précomptés lors du versement ?",
+            ["À préciser", "Oui — déjà précomptés", "Non — pas précomptés"],
+            key=f"ps_interets_{annee}",
+            help="Vérifiez le justificatif du versement : le pays de l'établissement ne permet pas de déduire le précompte.",
+        ) if interets_etrangers > 0 else "À préciser")
+        interets_ps_precomptes = {"Oui — déjà précomptés": True,
+                                  "Non — pas précomptés": False}.get(statut_ps_interets)
     with ce2:
         st.markdown("**Comptes à l'étranger à déclarer (Formulaire 3916 / 3916-bis & Case 8UU)**")
         defauts_comptes = guide.comptes_par_defaut()
@@ -437,6 +454,10 @@ if not (d2074["calcul_complet"] and d2086["calcul_complet"]):
     )
     st.stop()
 
+if interets_etrangers > 0 and interets_ps_precomptes is None:
+    st.error("Bilan indisponible : indiquez si les PS de vos intérêts ont réellement été précomptés. Le pays du courtier ne suffit pas.")
+    st.stop()
+
 sim = tax.simuler_foyer_complet(
     annee=annee,
     statut=statut,
@@ -456,38 +477,48 @@ sim = tax.simuler_foyer_complet(
     electrique_2=elec_2,
     interets_etrangers_eur=interets_etrangers,
     pays_interets_etrangers=pays_etranger,
+    interets_ps_precomptes=interets_ps_precomptes,
     bilan_pv_actions_eur=d2074["bilan_net"],
     bilan_pv_crypto_imposable_eur=d2086["case_3an"],
 )
 
 with cont_frais_reels:
+    if use_frais_1 or use_frais_2:
+        st.warning(
+            "Frais réels : simulation non certifiée. Vérifiez que les trajets sont professionnels "
+            "et la règle des 40 km, ainsi que les conditions des repas (hors domicile imposé, "
+            "cantine, justificatifs, participation employeur). Le forfait de repas ne s'applique "
+            "pas automatiquement à tous les repas ; ne recopiez pas ces montants sans contrôle."
+        )
     res_f1, res_f2 = st.columns(2)
     with res_f1:
         if sim["retenir_frais_reels_1"]:
-            st.success(
-                f"✅ **Vous — Frais réels retenus : {ui.eur(sim['frais_reels_1'], 0)}** "
+            st.warning(
+                f"⚠️ **Vous — Frais réels estimés : {ui.eur(sim['frais_reels_1'], 0)}** "
                 f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_1'], 0)}, "
                 f"soit **+{ui.eur(sim['frais_reels_1'] - sim['abattement_10_1'], 0)}** de déduction supplémentaire).\n\n"
-                f"👉 **Inscrivez `{sim['case_1ak']} €` en case `1AK`** ({sim['frais_km_formule_1']} · {sim['frais_repas_formule_1']})."
+                f"Montant indicatif `{sim['case_1ak']} €` pour la case `1AK`, à contrôler avant déclaration "
+                f"({sim['frais_km_formule_1']} · {sim['frais_repas_formule_1']})."
             )
         else:
             st.info(
                 f"ℹ️ **Vous — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_1'], 0)}** "
-                f"(frais réels : {ui.eur(sim['frais_reels_1'], 0)}). **Laissez la case `1AK` vide.**"
+                    f"(frais réels estimés : {ui.eur(sim['frais_reels_1'], 0)}). **Vérifiez la case `1AK` avant déclaration.**"
             )
     with res_f2:
         if couple and salaire_2 > 0:
             if sim["retenir_frais_reels_2"]:
-                st.success(
-                    f"✅ **Conjoint — Frais réels retenus : {ui.eur(sim['frais_reels_2'], 0)}** "
+                st.warning(
+                    f"⚠️ **Conjoint — Frais réels estimés : {ui.eur(sim['frais_reels_2'], 0)}** "
                     f"(plus avantageux que l'abattement 10 % de {ui.eur(sim['abattement_10_2'], 0)}, "
                     f"soit **+{ui.eur(sim['frais_reels_2'] - sim['abattement_10_2'], 0)}** de déduction supplémentaire).\n\n"
-                    f"👉 **Inscrivez `{sim['case_1bk']} €` en case `1BK`** ({sim['frais_km_formule_2']} · {sim['frais_repas_formule_2']})."
+                    f"Montant indicatif `{sim['case_1bk']} €` pour la case `1BK`, à contrôler avant déclaration "
+                    f"({sim['frais_km_formule_2']} · {sim['frais_repas_formule_2']})."
                 )
             else:
                 st.info(
                     f"ℹ️ **Conjoint — Abattement automatique de 10 % retenu : {ui.eur(sim['abattement_10_2'], 0)}** "
-                    f"(frais réels : {ui.eur(sim['frais_reels_2'], 0)}). **Laissez la case `1BK` vide.**"
+                        f"(frais réels estimés : {ui.eur(sim['frais_reels_2'], 0)}). **Vérifiez la case `1BK` avant déclaration.**"
                 )
 
 # ---------------------------------------------------------------------------
@@ -548,12 +579,20 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             "À inscrire": f"{sim['case_2tr']:,} €".replace(",", " "),
             "Indication": "Reporté depuis la ligne 252 du formulaire 2047.",
         })
-    if sim["arbitrage"] is not None:
+    options_calc = sim["options_fiscales"]
+    if options_calc["assiette_2op"] > 0:
         cases_2042.append({
             "Case": "2OP",
-            "Rubrique": "Option globale pour le barème progressif",
-            "À inscrire": "☑️ À COCHER ABSOLUMENT" if sim["cocher_2op"] else "⬜ LAISSER DÉCOCHÉE",
-            "Indication": f"{sim['arbitrage']['choix']} plus avantageux (économie : {ui.eur(sim['arbitrage']['gain'])}).",
+            "Rubrique": "Option globale titres et revenus mobiliers (indépendante de 3CN)",
+            "À inscrire": "☑️ À ENVISAGER" if sim["cocher_2op"] else "⬜ À LAISSER DÉCOCHÉE selon simulation",
+            "Indication": "Estimation sur les seules assiettes saisies ; vérifier tous les revenus mobiliers du foyer.",
+        })
+    if options_calc["assiette_3cn"] > 0:
+        cases_2042.append({
+            "Case": "3CN",
+            "Rubrique": "Option pour le barème des gains crypto privés (indépendante de 2OP)",
+            "À inscrire": "☑️ À ENVISAGER" if sim["cocher_3cn"] else "⬜ À LAISSER DÉCOCHÉE selon simulation",
+            "Indication": "Option sur tous les gains crypto privés du foyer ; vérifier la déclaration 2086.",
         })
     if d2074["case_3vg"] > 0:
         cases_2042.append({
@@ -574,8 +613,8 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             cases_2042.append({
                 "Case": "3AN / 3BN",
                 "Rubrique": "Plus ou moins-value sur actifs numériques",
-                "À inscrire": "LAISSER VIDE (Exonéré ≤ 305 €)",
-                "Indication": f"Total des cessions = {ui.eur(d2086['total_cessions_213'])} ≤ 305 €.",
+                "À inscrire": "À vérifier : vide seulement si toutes les cessions du foyer ≤ 305 €",
+                "Indication": f"Cessions de ce portefeuille = {ui.eur(d2086['total_cessions_213'])} ; autres cessions éventuelles du foyer inconnues du simulateur.",
             })
         elif d2086["case_3an"] > 0:
             cases_2042.append({
@@ -729,10 +768,13 @@ with st.expander(f"📁 Formulaire 2086 (Cryptomonnaies — Art. 150 VH bis — 
             f"Résultat net global (cumul lignes `224`) = **`{ui.eur(d2086['plus_value_globale_224'])}`**."
         )
         if d2086["exonere_305"]:
-            st.success(
-                f"✅ **Franchise de 305 € (CGI art. 150 VH bis) :** Le total de vos prix de cession en {annee} "
-                f"(`{ui.eur(d2086['total_cessions_213'])}`) ne dépasse pas **305 €**. Vous êtes **exonéré** : "
-                "laissez les cases `3AN` et `3BN` vides, mais remplissez quand même l'annexe **2086** ci-dessous."
+            st.warning(
+                f"**Franchise de 305 € à confirmer sur tout le foyer :** les cessions de ce "
+                f"portefeuille en {annee} (`{ui.eur(d2086['total_cessions_213'])}`) ne dépassent "
+                "pas 305 €. Ce seul total ne prouve pas l'exonération du foyer fiscal : "
+                "vérifiez d'éventuelles cessions extérieures au portefeuille, y compris du "
+                "conjoint. Ne laissez 3AN/3BN vides que si le seuil du foyer est bien respecté ; "
+                "vérifiez également l'annexe 2086."
             )
         elif d2086["case_3an"] > 0:
             st.info(
@@ -789,40 +831,74 @@ st.divider()
 st.subheader("💡 3. Arbitrage PFU vs Barème, Bilan de votre Impôt & Taux de Prélèvement à la Source")
 
 arb = sim["arbitrage"]
-if arb is not None:
+options_calc = sim["options_fiscales"]
+if options_calc["assiette_3cn"] > 0:
+    st.markdown("#### ⚖️ Options distinctes 2OP (titres/intérêts) et 3CN (crypto)")
+    st.caption("La 3CN est une option expresse et irrévocable sur la totalité des gains crypto privés du foyer, indépendante de la 2OP. L'impôt progressif est recalculé pour chaque combinaison, pas en additionnant deux simulations isolées.")
+    st.table([{
+        "2OP": "☑" if s["cocher_2op"] else "☐",
+        "3CN": "☑" if s["cocher_3cn"] else "☐",
+        "IR barème": ui.eur(s["ir_bareme"]),
+        "IR forfaitaire": ui.eur(s["ir_forfaitaire"]),
+        "PS annuels": ui.eur(s["ps_total"]),
+        "Total annuel": ui.eur(s["impot_total_foyer"]),
+    } for s in options_calc["scenarios"]])
+    st.info(
+        f"Sur les revenus saisis : 2OP {'à envisager' if sim['cocher_2op'] else 'non retenue'}, "
+        f"3CN {'à envisager' if sim['cocher_3cn'] else 'non retenue'} ; "
+        f"écart contre les deux régimes forfaitaires : {ui.eur(options_calc['economie_vs_pfu'])}. "
+        + options_calc["limite"]
+    )
+    st.caption(
+        "PS déjà précomptés sur intérêts : " + ui.eur(options_calc["retenu"]["ps_deja_precomptes"])
+        + " (PS restant à acquitter : " + ui.eur(options_calc["retenu"]["ps_restants"])
+        + "). Aucun acompte d'IR déjà retenu ni déduction future de CSG n'est reconstitué."
+    )
+elif arb is not None:
     st.markdown("#### ⚖️ Flat Tax (PFU) ou Barème Progressif (Case `2OP`) ?")
+    if annee < 2023 and sim["impot_crypto"] > 0:
+        st.caption("Pour les cessions de 2022, 3CN n'existait pas encore : les gains crypto restent au PFU dans ce bilan.")
     ca1, ca2 = st.columns(2)
     with ca1:
-        st.markdown(f"**Option 1 — Flat Tax (PFU {pfu_taux * 100:.1f} %)**")
+        st.markdown(f"**Option 1 — PFU (titres : {pfu_taux * 100:.1f} % ; intérêts selon précompte)**")
         st.metric(f"Impôt sur le revenu ({fb.IR_FORFAITAIRE * 100:.1f} %)", ui.eur(arb["pfu"]["ir"]))
-        st.metric(f"Prélèvements sociaux ({ps_taux * 100:.1f} %)", ui.eur(arb["pfu"]["ps"]))
+        if arb["pfu"]["ir_bareme_debloque"]:
+            st.metric("IR au barème rétabli (seuil global)", ui.eur(arb["pfu"]["ir_bareme_debloque"]))
+        st.metric("PS (titres + intérêts, selon précompte)", ui.eur(arb["pfu"]["ps"]))
         st.metric("Coût total avec la Flat Tax", ui.eur(arb["pfu"]["total"]))
     with ca2:
         st.markdown("**Option 2 — Barème Progressif (Case `2OP` cochée)**")
         st.metric("Supplément d'IR au barème (après décote)", ui.eur(arb["bareme"]["ir_marginal"]))
-        st.metric(f"Prélèvements sociaux ({ps_taux * 100:.1f} %)", ui.eur(arb["bareme"]["ps"]))
+        st.metric("PS (titres + intérêts, selon précompte)", ui.eur(arb["bareme"]["ps"]))
         st.metric(
-            "Dont abattement CSG déductible (6,8 %)",
+            "CSG déductible cette année (intérêts précomptés)",
             ui.eur(arb["bareme"]["csg_deductible"]),
-            help="Réduction de votre base imposable au barème (l'économie d'IR correspondante est déjà intégrée dans le supplément d'IR ci-dessus).",
+            help="Seule la CSG payée cette année entre dans la comparaison IR de cette année.",
+        )
+        st.caption(
+            "CSG potentiellement déductible après paiement, non comptée dans cet arbitrage : "
+            + ui.eur(arb["bareme"]["csg_deductible_apres_paiement_estimee"])
+            + ". PS déjà précomptés sur intérêts : " + ui.eur(arb["ps_deja_precomptes"])
+            + " (ne pas les payer une seconde fois)."
         )
         st.metric("Coût total avec le Barème", ui.eur(arb["bareme"]["total"]))
 
+    st.caption("Comparaison sur les seuls revenus saisis : 2OP s'applique globalement à tous les revenus mobiliers et titres du foyer. Elle n'anticipe pas la déduction éventuelle de CSG lors d'un paiement ultérieur. Les PS déjà précomptés sont inclus dans le coût annuel, pas à reverser.")
     if sim["cocher_2op"]:
         st.success(
-            f"✅ **Recommandation : COCHEZ la case `2OP` (Barème Progressif) !** "
+            f"ℹ️ **Sur les revenus saisis, option `2OP` à envisager (Barème Progressif).** "
             f"Le barème vous coûte **{ui.eur(arb['bareme']['total'])}** contre **{ui.eur(arb['pfu']['total'])}** "
             f"au PFU, soit une économie nette de **{ui.eur(arb['gain'])}** "
-            f"(grâce à votre quotient familial de `{parts}` parts et à la CSG déductible de 6,8 %)."
+            f"(pour votre situation modélisée à `{parts}` parts ; ne tient pas compte de la CSG déductible à une date ultérieure)."
         )
     else:
         explication_decote = (
-            " *(Note : bien que votre TMI soit à 11 %, votre foyer bénéficie de la **décote** : chaque euro ajouté au barème réduit votre décote de 45,25 %, ce qui porte le taux marginal réel d'IR au barème à 14,89 % après CSG déductible, contre 12,80 % au PFU.)*"
+            " *(La décote peut augmenter l'impôt marginal au barème ; le calcul tient compte du millésime et de la CSG payée cette année seulement.)*"
             if (sim["ir_salaires"].decote > 0 and abs(sim["ir_salaires"].tmi - 0.11) < 1e-4)
             else ""
         )
         st.success(
-            f"✅ **Recommandation : NE COCHEZ PAS la case `2OP` (conservez la Flat Tax / PFU) !** "
+            f"ℹ️ **Sur les revenus saisis, option `2OP` non retenue (PFU).** "
             f"La Flat Tax vous coûte **{ui.eur(arb['pfu']['total'])}** contre **{ui.eur(arb['bareme']['total'])}** "
             f"au barème, soit une économie de **{ui.eur(arb['gain'])}**.{explication_decote}"
         )
@@ -850,11 +926,12 @@ b4.metric(
     delta=f"TMI : {sim['ir_salaires'].tmi * 100:.0f} %",
 )
 
-st.markdown("#### 👨‍👩‍👧‍👦 Taux de Prélèvement à la Source (PAS — CGI art. 204 H & 204 M)")
+st.markdown("#### 👨‍👩‍👧‍👦 Prélèvement à la source — estimation simplifiée")
+st.caption("Calcul indicatif sur les seuls salaires saisis : les revenus communs, crédits et arrondis des articles 204 H et 204 M ne sont pas tous reconstitués. Pour un couple, le taux individualisé est le régime par défaut depuis septembre 2025, sauf option pour le taux foyer. Vérifiez les taux transmis par la DGFiP sur impots.gouv.fr.")
 p1, p2, p3 = st.columns(3)
-p1.info(f"👨‍👩‍👧‍👦 **Taux de PAS du foyer (taux non personnalisé) :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
+p1.info(f"👨‍👩‍👧‍👦 **Taux du foyer estimé sur salaires :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
 if couple:
-    p2.info(f"👤 **Taux individualisé (Vous — CGI art. 204 M) :** **{sim['taux_pas_1'] * 100:.2f} %**")
-    p3.info(f"👤 **Taux individualisé (Conjoint — CGI art. 204 M, {parts/2:g} part(s)) :** **{sim['taux_pas_2'] * 100:.2f} %**")
+    p2.info(f"👤 **Taux individualisé estimé (Vous) :** **{sim['taux_pas_1'] * 100:.2f} %**")
+    p3.info(f"👤 **Taux individualisé estimé (Conjoint) :** **{sim['taux_pas_2'] * 100:.2f} %**")
 else:
-    p2.info(f"👤 **Taux personnalisé estimé :** **{sim['taux_pas_foyer'] * 100:.2f} %**")
+    p2.info(f"👤 **Taux estimé :** **{sim['taux_pas_foyer'] * 100:.2f} %**")

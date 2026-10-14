@@ -225,6 +225,9 @@ ORDRE_PAGINATION = {
     T_ALERTES: "id",
     T_COMPTES: "id",
     T_OPERATIONS_COMPTE: "id",
+    # Sauvegarde paginée des millésimes et de toutes leurs révisions.
+    "pf2_fiscal_annees": "user_id,annee_revenus,revision",
+    "pf2_fiscal_collectes": "user_id,annee_revenus,source,revision",
     # Tables v1 encore lues par l'application.
     "Donnees": "id",
     "Transaction": "id",

@@ -152,11 +152,13 @@ class TestCrypto:
                           exonere_par_franchise=True)
         etapes = _guide(resultats={"pv_crypto": r})
         assert any(e.formulaire == "2086" for e in etapes), "la 2086 a disparu"
-        # Le gain existe mais reste exonere : la case 3AN est citee pour dire
-        # qu'il n'y a RIEN a y mettre, et elle n'est pas obligatoire.
+        # Sur ce portefeuille le seuil n'est pas franchi, mais le foyer peut
+        # avoir d'autres cessions : aucune exonération globale n'est affirmée.
         case = next(c for c in _cases(etapes, "2042-C") if c.numero == "3AN")
         assert case.montant is None
         assert case.obligatoire is False
+        assert "foyer" in case.comment and "conjoint" in case.comment
+        assert "seulement si" in case.comment
 
     def test_moins_value_va_en_3bn_en_positif(self):
         r = _FauxResultat(-300.0, 0.0, total_cessions=900.0,
@@ -174,8 +176,8 @@ class TestTaux:
         """LFSS 2026, art. 12 : CSG capital a 10,6 %, donc PS a 18,6 %."""
         assert fb.taux_pfu(2026) == pytest.approx(0.314)
 
-    def test_2025_est_a_30_pour_cent(self):
-        assert fb.taux_pfu(2025) == pytest.approx(0.300)
+    def test_2025_pv_titres_est_a_31_4_pour_cent(self):
+        assert fb.taux_pfu(2025) == pytest.approx(0.314)
 
 
     def test_l_ir_n_est_pas_une_soustraction(self):
@@ -247,7 +249,7 @@ class TestInvariants:
 
 def test_frais_kilometriques_et_repas_et_simulation_foyer():
     from core import fiscal_bars as fb, tax
-    km_val, km_txt = fb.frais_kilometriques(9120, 5)
+    km_val, km_txt = fb.frais_kilometriques(9120, 5, annee=2025)
     assert km_val == pytest.approx(9120 * 0.357 + 1395.0)
     assert "5 CV" in km_txt and "4 650,84 €" in km_txt
 
@@ -271,6 +273,7 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
         jours_repas_2=200,
         interets_etrangers_eur=200.0,
         pays_interets_etrangers="Lituanie",
+        interets_ps_precomptes=False,
         bilan_pv_actions_eur=651.48,
         bilan_pv_crypto_imposable_eur=0.0,
     )
@@ -281,7 +284,7 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
     assert sim["case_2tr"] == 200
     # Avec 50 545 € de revenu imposable et 3 parts, le foyer est dans la zone de
     # décote (IR brut = 1 731,95 € < plafond couple), où le taux marginal effectif
-    # au barème est de 11 % × 1,4525 × (1 - 0,068) = 14,89 % > 12,8 % (PFU).
+    # au barème de 11 % × 1,4525 = 15,98 % > 12,8 % (PFU) pour les titres.
     assert sim["cocher_2op"] is False
 
 
@@ -346,3 +349,16 @@ def test_calculer_rente_mensuelle_reelle():
     assert abs(res["impot_usd"] - impot_attendu) < 1e-6
     assert abs(res["rente_nette_usd"] - nette_attendue) < 1e-6
     assert abs(res["rente_nette_eur"] - nette_attendue / 1.15) < 1e-6
+
+
+def test_or_physique_option_2092_non_automatique_et_aucun_montant_a_recopier():
+    """Le minimum simulé ne prouve pas que l'option 2092 a été exercée."""
+    etapes = _guide(annee=2025, resultats={"pv_or_physique": {
+        "total_du": 0.0, "regime_retenu": "Plus-value dégressive",
+    }})
+    or_etapes = [e for e in etapes if "2091" in e.formulaire]
+    assert len(or_etapes) == 1
+    assert all(case.montant is None and "2092" in case.comment
+               for case in or_etapes[0].cases)
+    assert not any(case.numero in ("3VP", "3VQ", "3VP / 3VQ")
+                   for e in etapes for case in e.cases)

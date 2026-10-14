@@ -82,6 +82,7 @@ def construire_guide(
     resultats: dict,
     comptes_etrangers: list[str],
     comparaison: dict | None = None,
+    options_fiscales: dict | None = None,
 ) -> list[Etape]:
     """Construit la liste des formulaires à remplir, dans l'ordre du parcours.
 
@@ -278,13 +279,16 @@ def construire_guide(
             cases.append(Case(
                 formulaire="2042-C",
                 numero="3AN",
-                libelle="Plus-value — mais le seuil de 305 € n'est pas franchi",
+                libelle="Plus-value — seuil de 305 € à vérifier sur tout le foyer",
                 montant=None,
                 comment=(
                     f"Vous avez cédé {total_cessions:,.2f} € et dégagé "
                     f"{crypto.plus_value_brute:,.2f} € de gain, mais le total "
                     f"cédé ne dépasse pas {fb.CRYPTO_FRANCHISE_CESSIONS:.0f} € : "
-                    "la plus-value est exonérée. La 2086 se dépose quand même."
+                    "exonération POSSIBLE seulement si le total des cessions "
+                    "du foyer reste sous ce seuil. Vérifiez aussi les cessions "
+                    "éventuelles du conjoint hors de ce portefeuille avant de "
+                    "laisser 3AN vide ; la 2086 reste à vérifier."
                     .replace(",", " ")
                 ),
                 obligatoire=False,
@@ -293,18 +297,32 @@ def construire_guide(
             cases.append(Case(
                 formulaire="2042-C",
                 numero="3AN / 3BN",
-                libelle="Rien à reporter — seuil de 305 € non franchi",
+                libelle="Report conditionnel — vérifier le seuil de 305 € du foyer",
                 montant=None,
                 comment=(
                     f"Le total de vos prix de cession ({total_cessions:,.2f} €) "
                     f"ne dépasse pas {fb.CRYPTO_FRANCHISE_CESSIONS:.0f} € : la "
-                    "plus-value est exonérée et les cases 3AN/3BN restent vides. "
-                    "La 2086 se dépose quand même — c'est elle qui prouve que "
-                    "vous êtes sous le seuil.".replace(",", " ")
+                    "les cases 3AN/3BN restent vides seulement si toutes les "
+                    "cessions du foyer, y compris éventuelles hors de ce "
+                    "portefeuille, restent sous ce seuil. Vérifier la 2086."
+                    .replace(",", " ")
                 ),
                 obligatoire=False,
             ))
 
+        if annee >= 2023 and getattr(crypto, "plus_value_imposable", 0) > 0:
+            option_calculee = bool(options_fiscales and options_fiscales["assiette_3cn"] > 0)
+            cn = bool(option_calculee and options_fiscales["retenu"]["cocher_3cn"])
+            cases.append(Case(
+                formulaire="2042-C", numero="3CN",
+                libelle="Option globale barème pour les gains crypto privés",
+                montant=None,
+                comment=("À envisager sur les revenus saisis" if cn else
+                         "Non retenue sur les revenus saisis" if option_calculee else
+                         "Option à évaluer conjointement avec 2OP avant de choisir")
+                        + ". Option expresse distincte de 2OP ; vérifier toutes les cessions du foyer.",
+                obligatoire=cn,
+            ))
         etapes.append(Etape(
             ordre=ordre,
             formulaire="2086",
@@ -377,7 +395,26 @@ def construire_guide(
     # -----------------------------------------------------------------------
     # Choix du régime : 2OP
     # -----------------------------------------------------------------------
-    if comparaison and comparaison.get("plus_value_nette", 0) > 0:
+    if options_fiscales and options_fiscales["assiette_2op"] > 0:
+        ordre += 1
+        op = options_fiscales["retenu"]["cocher_2op"]
+        etapes.append(Etape(
+            ordre=ordre, formulaire="2042", titre="Option pour le barème progressif",
+            obligatoire=False,
+            raison="Estimation conjointe 2OP / 3CN sur les revenus saisis seulement.",
+            ou="impots.gouv.fr → étape 3 → option pour le barème (case 2OP).",
+            cases=[Case(
+                formulaire="2042", numero="2OP",
+                libelle="Option globale pour les gains mobiliers et revenus de capitaux mobiliers",
+                montant=None,
+                comment=("À envisager" if op else "Non retenue")
+                        + " sur les revenus saisis ; vérifier tous les RCM et gains mobiliers du foyer. Indépendante de 3CN.",
+                obligatoire=op,
+            )], reference="CGI art. 200 A",
+        ))
+    elif comparaison and comparaison.get("plus_value_nette", 0) > 0 and not (
+        crypto is not None and getattr(crypto, "plus_value_imposable", 0) > 0
+    ):
         ordre += 1
         retenu = comparaison["choix"]
         etapes.append(Etape(
@@ -414,32 +451,34 @@ def construire_guide(
         ))
 
     # -----------------------------------------------------------------------
-    # Or physique — 150 VI. Vous n'en détenez pas, mais le régime est piégeux.
+    # Or physique : l'option 2092 n'est JAMAIS automatique, même si le calcul
+    # théorique est inférieur à la taxe de plein droit 2091. Ne pas reporter
+    # le minimum simulé comme un montant ou une case à remplir.
     # -----------------------------------------------------------------------
     or_physique = resultats.get("pv_or_physique")
     if or_physique:
         ordre += 1
         etapes.append(Etape(
             ordre=ordre,
-            formulaire="2042-C",
-            titre="Cessions de métaux précieux — article 150 VI",
+            formulaire="2091-SD / 2092-SD",
+            titre="Cessions de métaux précieux — régime à vérifier",
             obligatoire=True,
-            raison="Vous avez cédé de l'or ou des métaux précieux sous forme physique.",
-            ou="impots.gouv.fr → étape 3 → « Plus-values et gains assimilés ».",
+            raison="Cession d'or physique : l'impôt calculé automatiquement n'est pas un montant déclaratif certifié.",
+            ou="impots.gouv.fr → formulaires 2091-SD (taxe de plein droit) ou 2092-SD (option explicite sous conditions) ; vérifier le dépôt lié à la cession.",
             cases=[Case(
-                formulaire="2042-C",
-                numero="3VP / 3VQ",
-                libelle="Cessions de métaux précieux et d'objets d'art",
-                montant=or_physique.get("total_du"),
+                formulaire="2091-SD / 2092-SD", numero="—",
+                libelle="Déterminer le régime applicable avec justificatifs",
+                montant=None,
                 comment=(
-                    "Régime distinct des valeurs mobilières : taxe forfaitaire "
-                    "de 11,5 % sur le prix de cession, OU impôt sur la "
-                    "plus-value réelle avec abattement de 5 % par année de "
-                    "détention au-delà de la deuxième, exonération totale à "
-                    "22 ans. Le choix se fait case par case."
+                    "La taxe sur métaux précieux est due par défaut. Le régime des "
+                    "plus-values nécessite l'option 2092 et la preuve de la date et "
+                    "du prix d'acquisition, ou de la détention de plus de 22 ans. "
+                    "Ne recopiez PAS le minimum théorique calculé par l'application ; "
+                    "vérifiez le taux PS 2025 et les éventuelles mentions sur 2042-C."
                 ),
+                obligatoire=False,
             )],
-            reference="CGI art. 150 VI et 150 VK",
+            reference="CGI art. 150 VI et 150 VL ; BOI-RPPM-PVBMC-20-20",
         ))
 
     return etapes

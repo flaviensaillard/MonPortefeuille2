@@ -55,6 +55,16 @@ def _donnees_realistes() -> dict[str, list[dict]]:
         "pf2_comptes": [{"id": 1, "nom": "Livret", "solde": 1000.0}],
         "pf2_snapshots": snapshots,
         "Config": [{"Clé": "f_parts", "Valeur": "2.0"}, {"Clé": "f_enf", "Valeur": "1"}],
+        "pf2_fiscal_annees": [
+            {"user_id": "proprietaire", "annee_revenus": 2025, "revision": 1,
+             "parametres": {"bareme": [[0, 0.0]]}, "origine": "reprise_code_non_verifiee"},
+        ],
+        "pf2_fiscal_collectes": [
+            {"user_id": "proprietaire", "annee_revenus": 2025, "revision": 1,
+             "source": "openfisca", "bareme": [[0, 0.0]]},
+            {"user_id": "proprietaire", "annee_revenus": 2025, "revision": 2,
+             "source": "openfisca", "bareme": [[0, 0.11]]},
+        ],
     }
 
 
@@ -69,6 +79,8 @@ def test_restauration_rend_exactement_les_lignes():
     blob = sauvegarde.chiffrer(sauvegarde.construire(tables, genere_le="2026-10-10T22:00:00+02:00"), PHRASE)
     restaure = sauvegarde.restaurer(sauvegarde.dechiffrer(blob, PHRASE))
     assert restaure == _normalise(tables)
+    assert [l["revision"] for l in restaure["pf2_fiscal_collectes"]] == [1, 2]
+    assert restaure["pf2_fiscal_annees"][0]["parametres"]["bareme"] == [[0, 0.0]]
 
 
 def test_comptes_de_lignes_et_soldes_sont_conserves():

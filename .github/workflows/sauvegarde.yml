@@ -9,7 +9,8 @@
 #    copie hors ligne. Télécharger l'artefact depuis l'onglet « Actions ».
 #
 # Secrets requis (Settings > Secrets and variables > Actions) :
-#   SUPABASE_URL, SUPABASE_KEY : lecture ;
+#   SUPABASE_URL, SUPABASE_KEY : lecture avec clé serveur service_role ;
+#   surtout PAS la clé publique/anon, qui masquerait silencieusement des lignes.
 #   SAUVEGARDE_CLE : phrase de chiffrement, 12 caractères minimum. Sans elle,
 #   le job s'arrête : aucune sauvegarde en clair n'est produite.
 #
@@ -21,10 +22,11 @@ name: Sauvegarde chiffrée
 on:
   schedule:
     - cron: "0 20 * * 0"   # chaque dimanche, 20 h UTC
-  workflow_dispatch: {}
+  workflow_dispatch: {}  # sur la branche de la PR : sauvegarde puis lecture fiscale 2025
 
 permissions:
   contents: read
+  actions: read  # rapport anonymisé du run pré-écriture 38380145781, jamais les secrets
 
 jobs:
   sauvegarde:
@@ -49,9 +51,89 @@ jobs:
           fichier=$(ls sauvegardes/*.pf2)
           python jobs/restauration.py "$fichier" --csv /tmp/controle-csv
           (cd sauvegardes && sha256sum -c "$(basename "$fichier").sha256")
+      # Le contrôle général accepte les tables optionnelles absentes. Depuis
+      # 011, la table fiscale doit exister ; R1 seule ou R1+R2 ont des contrôles
+      # différents. Ni cette étape ni les suivantes n'écrivent dans Supabase.
+      - name: Orienter le contrôle fiscal de la sauvegarde restaurée
+        id: etat_fiscal
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/etat_archive_fiscale.py "$fichier" --sortie-gh "$GITHUB_OUTPUT"
+      - name: Vérifier les cinq révisions fiscales dans la sauvegarde restaurée
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'avant'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_011.py "$fichier"
+      # À la première vérification post-R2 : le rapport du run 38380145781
+      # contient les 5 empreintes R1 pré-écriture et expire le 20/10/2026.
+      # Après expiration, ce contrôle historique exige une nouvelle voie sûre :
+      # ne PAS remplacer le rapport pré-écriture par une lecture post-écriture.
+      - name: Récupérer le rapport anonymisé pré-écriture
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'apres'
+        uses: actions/download-artifact@v4
+        with:
+          name: rapport-fiscal-2025-38380145781
+          run-id: 38380145781
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/avant-r2
+      - name: Vérifier la R2 et les R1 dans la sauvegarde restaurée
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'apres'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_r2.py "$fichier" --rapport-avant "$RUNNER_TEMP/avant-r2/rapport-fiscal-2025.json"
       - uses: actions/upload-artifact@v4
         with:
           name: sauvegarde-pf2-${{ github.run_id }}
           path: sauvegardes/
           retention-days: 90
           if-no-files-found: error
+      # Sur lancement manuel DE CETTE BRANCHE : aucune écriture Supabase.
+      # La sauvegarde chiffrée et
+      # son contrôle sont déjà publiés avant cette lecture fiscale facultative.
+      - name: Comparer la révision 2025 en lecture seule
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'avant'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+        run: |
+          python jobs/verifier_revision_fiscale_2025.py --lire-supabase > "$RUNNER_TEMP/rapport-fiscal-2025.json"
+          python -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/rapport-fiscal-2025.json")); print("Révisions 2025 confirmables sous réserve :", r["revision_2_confirmable_sous_reserve"], "| écarts :", len(r["ecarts_code_2025_brouillon_vs_base"]), "| problèmes :", len(r["problemes"]), "| écriture autorisée :", r["ecriture_autorisee"])'
+      - name: Comparer la table fiscale sauvegardée à la lecture distante
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'avant'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_011.py "$fichier" --rapport "$RUNNER_TEMP/rapport-fiscal-2025.json"
+      - name: Contrôler la R2 dans Supabase en lecture seule
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'apres'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_USER_ID: ${{ secrets.SUPABASE_USER_ID }}
+        run: |
+          python jobs/verifier_r2_2025_apres_ecriture.py --rapport-avant "$RUNNER_TEMP/avant-r2/rapport-fiscal-2025.json" --lire-supabase > "$RUNNER_TEMP/rapport-fiscal-2025.json"
+          python -c 'import json,os; r=json.load(open(os.environ["RUNNER_TEMP"]+"/rapport-fiscal-2025.json")); print("R2 conforme :", r["ligne_r2_2025_conforme"], "| problèmes :", len(r["problemes"]), "| lecture seule :", r["lecture_seule"])'
+      - name: Comparer la R2 et les R1 sauvegardées à la lecture distante
+        if: github.event_name == 'workflow_dispatch' && steps.etat_fiscal.outputs.mode == 'apres'
+        env:
+          SAUVEGARDE_CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          fichier=$(ls sauvegardes/*.pf2)
+          python jobs/verifier_archive_fiscale_r2.py "$fichier" --rapport-avant "$RUNNER_TEMP/avant-r2/rapport-fiscal-2025.json" --rapport-distant "$RUNNER_TEMP/rapport-fiscal-2025.json"
+      - name: Joindre le rapport anonymisé de lecture fiscale
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-fiscal-2025-${{ github.run_id }}
+          path: ${{ runner.temp }}/rapport-fiscal-2025.json
+          retention-days: 7
+          if-no-files-found: warn
