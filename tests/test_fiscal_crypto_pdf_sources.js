@@ -34,6 +34,9 @@ function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.fro
     assert.equal(lecteur.analyserNotice(notice).valeurs.psCrypto2025Attestes, false);
     assert.equal(lecteur.analyserNotice(notice).valeurs.annexeFoyerComplete, false);
     assert.equal(lecteur.analyserBrochure(brochure).valeurs.psCrypto2025Attestes, false);
+    assert.equal(lecteur.analyserBrochure(brochure.replace('Cette plus-value', 'Cette plus- value')
+        .replace('prélèvements sociaux', 'prélève - ments sociaux')).valeurs.psCrypto2025Attestes, false,
+    'césures typographiques du vrai PDF reconnues sans inventer les PS');
     assert.equal(lecteur.analyserBrochure('Sommaire plus-values de cession d’actifs numériques (150 VH bis) … ' + brochure).valeurs.psCrypto2025Attestes, false,
         'la table des matières ne doit pas masquer la section réelle');
     assert.equal(lecteur.analyserNotice(notice.replace('réalisées en 2025', 'réalisées en 2024')).valeurs, undefined);

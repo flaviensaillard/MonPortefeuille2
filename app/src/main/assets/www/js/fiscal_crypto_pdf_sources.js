@@ -53,7 +53,7 @@
         var section = repere ? t.slice(Math.max(0, repere.index - 2200), repere.index + 2800) : '';
         var annee = preuve(section, /l.ensemble des cessions imposables realisees par les membres du foyer fiscal en 2025/i);
         var seuil = preuve(section, seuilRx);
-        var ir = preuve(section, /cette plus\s*-?\s*value est imposee au taux de\s*12[,.]8\s*%\s*et soumise aux prelevements sociaux/i);
+        var ir = preuve(section, /cette plus\s*-?\s*value est imposee au taux de\s*12[,.]8\s*%\s*et soumise aux preleve\s*-?\s*ments sociaux/i);
         var annexe = preuve(section, /2086 doit etre jointe a la declaration de revenus y compris lorsque le montant des cessions est inferieur a\s*305\s*€/i);
         var option = preuve(section, /option expresse et irrevocable est globale[\s\S]{0,160}?foyer fiscal[\s\S]{0,340}?independante de celle pouvant etre exercee pour la taxation des revenus de capitaux mobiliers/i);
         var morceaux = { millesime: annee, seuilFoyer: seuil, ir: ir,
