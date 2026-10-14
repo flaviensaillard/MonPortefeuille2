@@ -1,5 +1,11 @@
 # RCM et CSG — brochures DGFiP, revenus 2025
 
+> État actualisé le 14/10/2026, après PR #22 / APK 2.2.2 : l'utilisateur a
+> confirmé la lecture Android des **cinq PDF**. Les mentions « reste à vérifier »
+> ci-dessous décrivent les étapes historiques, pas une demande de nouvel essai.
+> Suite et limites actuelles : [matrice 2023–2026](COUVERTURE-FISCALE-2023-2026.md).
+
+
 Le bouton lit séparément deux PDF officiels de la déclaration 2026 **dont les passages mentionnent explicitement les revenus 2025** :
 
 - [Brochure revenus de valeurs et capitaux mobiliers](https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/08-RCM_121a136.pdf) : la ligne **2CG** regroupe notamment les revenus dont la CSG a été acquittée antérieurement au retrait et **n'ouvre pas droit** à déduction même en cas d'option au barème ; **2BH** vise des revenus soumis aux PS en 2025 et ouvre droit à **6,8 % de CSG déductible** si l'option globale **2OP** est exercée ; **2DF** vise notamment des produits d'assurance-vie afférents à des versements antérieurs au 27 septembre 2017 soumis aux PS en 2025, avec CSG déductible **même sans 2OP**. L'exonération éventuelle de l'acompte d'IR ne dispense pas des PS. Il faut connaître la nature du produit, la date des versements, l'année et la réalité du précompte, l'option du foyer et l'imprimé fiscal unique : ces données ne sont pas déduites du seul portefeuille.

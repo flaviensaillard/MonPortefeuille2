@@ -29,32 +29,50 @@
     }
     function montant(s) { return Number(String(s).replace(/\s/g, '').replace(',', '.')); }
     function borne(x) { return Number.isInteger(x) && x > 1000 && x < 1000000; }
-    function tableauIr(html, annee) {
-        var t = texte(html), marque = new RegExp('barème pour l.imposition des revenus de l.année\\s+' + annee
-            + '\\s+est présenté dans le tableau suivant', 'i');
-        if (!marque.test(t) || !/Identifiant juridique\s*:\s*BOI-IR-LIQ-20-10/i.test(t)) return null;
-        // Le titre peut être fragmenté par des balises HTML ; le texte normalisé
-        // prouve l'année, puis chaque tableau est contrôlé indépendamment.
-        var tables = String(html).match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) || [];
-        for (var k = 0; k < tables.length; k++) {
-            var rows = tables[k].match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
-            var seuils = [], taux = [];
-            rows.forEach(function (r) {
-                var cellules = [], m, re = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
-                while ((m = re.exec(r))) cellules.push(texte(m[1]));
-                if (cellules.length !== 2) return;
-                var percent = cellules[1].match(/^\s*(0|11|30|41|45)\s*%\s*$/);
-                if (!percent) return;
-                var montants = cellules[0].match(/[\d\s]{4,10}\s*€/g) || [];
-                var borneLigne = montants.length ? montant(montants[montants.length - 1].replace('€', '')) : null;
-                if (Number(percent[1]) === 45) { if (/Supérieure à/i.test(cellules[0])) taux.push(.45); }
-                else if (borne(borneLigne)) { seuils.push(borneLigne); taux.push(Number(percent[1]) / 100); }
-            });
-            if (seuils.length === 4 && taux.join(',') === '0,0.11,0.3,0.41,0.45' &&
-                seuils.every(function (x, i) { return !i || x > seuils[i - 1]; }))
-                return { tranches: seuils, taux: taux.slice(1) };
+    // Associer le tableau à SON annonce millésimée, pas à une année trouvée
+    // ailleurs dans la page. Refuser les tableaux ambigus ou un nouveau régime.
+    function preuveIr(html, annee) {
+        var propre = String(html || '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+        if (!/Identifiant juridique\s*:\s*BOI-IR-LIQ-20-10/i.test(texte(propre))) return null;
+        var annonce = /barème pour l.imposition des revenus de l.année\s+(\d{4})\s+est présenté dans le tableau suivant\s*:?\s*$/i;
+        var re = /<table\b[^>]*>[\s\S]*?<\/table>/gi, m, fin = 0, candidats = [];
+        while ((m = re.exec(propre))) {
+            var titre = texte(propre.slice(fin, m.index)).match(annonce);
+            fin = re.lastIndex;
+            if (titre && Number(titre[1]) === annee) candidats.push({ titre: titre[0], table: m[0] });
         }
-        return null;
+        if (candidats.length !== 1) return null;
+        var candidat = candidats[0], rows = candidat.table.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+        var seuils = [], taux = [], invalide = false;
+        rows.forEach(function (r) {
+            var cellules = [], cellule, rx = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
+            while ((cellule = rx.exec(r))) cellules.push(texte(cellule[1]));
+            // Ne pas ignorer une sixième tranche ou un taux incompatible.
+            if (!/%/.test(cellules.join(' '))) return;
+            if (cellules.length !== 2) { invalide = true; return; }
+            var percent = cellules[1].match(/^\s*(0|11|30|41|45)\s*%\s*$/);
+            if (!percent) { invalide = true; return; }
+            var montants = cellules[0].match(/[\d\s]{4,10}\s*€/g) || [];
+            var bornes = montants.map(function (v) { return montant(v.replace('€', '')); });
+            var n = Number(percent[1]);
+            if (!bornes.length || bornes.some(function (x) { return !borne(x); })) { invalide = true; return; }
+            if (n === 45) {
+                if (!/Supérieure à/i.test(cellules[0]) || bornes.length !== 1 || bornes[0] !== seuils[3]) invalide = true;
+            } else {
+                if (bornes.length > 2 || (bornes.length === 2 && bornes[0] !== seuils[seuils.length - 1])) invalide = true;
+                seuils.push(bornes[bornes.length - 1]);
+            }
+            taux.push(n / 100);
+        });
+        if (invalide || seuils.length !== 4 || taux.join(',') !== '0,0.11,0.3,0.41,0.45' ||
+            !seuils.every(function (x, i) { return !i || x > seuils[i - 1]; })) return null;
+        return { valeurs: { tranches: seuils, taux: taux.slice(1) },
+            extrait: 'Identifiant juridique : BOI-IR-LIQ-20-10. ' + candidat.titre + ' ' + candidat.table };
+    }
+    function tableauIr(html, annee) {
+        var preuve = preuveIr(html, annee);
+        return preuve ? preuve.valeurs : null;
     }
     function decote(html, annee) {
         var t = texte(html);
@@ -93,7 +111,8 @@
             Object.keys(DOCS).forEach(function (nom) {
                 var p = r[nom];
                 if (p && p.url === url(nom, annee)) {
-                    valeurs[nom] = PARSE[nom](p.extrait, annee);
+                    valeurs[nom] = annee >= 2026 && !/Date de début de publication du BOI\s*:\s*\d{2}\/\d{2}\/\d{4}/i.test(texte(p.extrait))
+                        ? null : PARSE[nom](p.extrait, annee);
                     if (valeurs[nom] !== null) valeurs.sources[nom] = { url: p.permalien || p.url, datePublication: p.datePublication };
                 }
             });
@@ -116,11 +135,7 @@
                 // Conserver seulement l'extrait utile, jamais le HTML complet.
                 var t = texte(rep.body), fragment;
                 if (nom === 'ir') {
-                    var m = String(rep.body).match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
-                    fragment = 'Identifiant juridique : BOI-IR-LIQ-20-10. Le barème pour l’imposition des revenus de l’année '
-                        + annee + ' est présenté dans le tableau suivant : <table>' + m.filter(function (row) {
-                            return /(?:N.exc.dant|Supérieure)/i.test(texte(row));
-                        }).join(' ') + '</table>';
+                    fragment = preuveIr(rep.body, annee).extrait;
                 } else {
                     var re = nom === 'decote' ? new RegExp('Pour l.imposition des revenus de\\s+' + annee + '[^.]{0,620}', 'i')
                         : new RegExp('Son montant est fixé à\\s+[\\d\\s]+€\\s+par demi-part supplémentaire à compter de l.imposition des revenus de l.année\\s+' + annee, 'i');
@@ -129,11 +144,14 @@
                 }
                 var pub = t.match(/Date de début de publication du BOI\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
                 var dateBoi = pub ? pub[1].split('/').reverse().join('') : DATES[annee];
-                donnees[nom] = { url: url(nom, annee), extrait: fragment,
+                donnees[nom] = { url: url(nom, annee), extrait: (pub ? 'Date de début de publication du BOI : ' + pub[1] + '. ' : '') + fragment,
                     permalien: dateBoi ? BASE + '/bofip/' + DOCS[nom][0] + '-PGP.html/identifiant='
                         + DOCS[nom][1] + '-' + dateBoi : url(nom, annee),
                     datePublication: pub ? pub[1] : DATES[annee] ? DATES[annee].slice(6, 8) + '/'
                         + DATES[annee].slice(4, 6) + '/' + DATES[annee].slice(0, 4) : 'date non vérifiée' };
+                if (PARSE[nom](donnees[nom].extrait, annee) === null) {
+                    delete donnees[nom]; etats[nom] = 'preuve impossible à relire'; return;
+                }
                 etats[nom] += ' (' + donnees[nom].datePublication + ')';
             }).catch(function () { etats[nom] = 'document inaccessible'; });
         })).then(function () {
