@@ -128,14 +128,46 @@ IR forfaitaire 12,8 %**, avec la page DGFiP de la déclaration 2026 et le
 contrôle explicite de l'année. Cela valide la lecture des gains de titres sur
 cet appareil, pas les autres revenus du capital ni la situation du foyer.
 
+**Écart entre documents officiels pour les titres 2025 (repéré le 14/10/2026) :**
+la [notice générale 2042 des revenus 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2042/2026/2042_5477.pdf)
+indique **17,2 %** de PS sur les plus-values de valeurs mobilières 2025.
+À l'inverse, la [notice dédiée 2074 des revenus 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2074/2026/2074_5500.pdf)
+indique **18,60 %** de PS au titre des revenus du patrimoine sur les plus-values
+2025 ; l'aide du simulateur **déclaration 2026 / revenus 2025** et la
+[page DGFiP « cessions mobilières »](https://www.impots.gouv.fr/particulier/les-cessions-mobilieres)
+(modifiée le 08/04/2026) affichent elles aussi **18,6 %**. La page
+[DGFiP « revenus mobiliers »](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers)
+distingue explicitement les PS **précomptés en 2025 (17,2 %)** de ceux payés
+sur l'**avis 2026** pour les revenus du patrimoine 2025 **non précomptés
+(18,6 %)**. Cela peut expliquer la différence selon la date de paiement,
+mais **ne corrige pas** le chiffre contradictoire de la notice générale 2042
+sur les *plus-values de titres* : ce conflit documentaire demeure. Le lecteur
+conserve le taux de l'aide du simulateur confirmé sur Android (18,6 %) et
+la R2 2025 déjà active **garde priorité** ; le rapport du bouton avertit de
+l'écart. Ce recoupement n'est ni une certification juridique universelle ni
+une autorisation d'appliquer 18,6 % à tous les RCM, à la crypto ou à 2026.
+
 ### Audit des autres régimes avant toute bascule (14/10/2026)
 
 | Domaine | Ce que la DGFiP publie | Pourquoi la simulation ne peut pas encore l'activer automatiquement comme régime complet |
 | --- | --- | --- |
 | RCM et précompte | La [page DGFiP « revenus mobiliers »](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers), **modifiée le 08/04/2026**, indique que les produits de placement **versés en 2025** ont supporté **17,2 % de PS** lors du versement ; les RCM **non précomptés lors de l'encaissement en 2025** peuvent être soumis à **18,6 % sur l'avis 2026 des revenus 2025**. À partir de 2026 le taux change, avec des produits qui restent à 17,2 % (assurance-vie/capitalisation, certains CEL/PEL/PEP). | Il faut distinguer produit, encaissement, date, précompte effectif, dispense/acompte IR et exceptions. La page actuelle n'atteste pas toute la situation du foyer ni les millésimes 2023–2024 ; **ne pas y appliquer le PS des titres**. Pas de révision RCM complète par simple lecture de deux taux. |
 | CSG déductible et calendrier | La même [page DGFiP](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers) mentionne la fraction de **6,8 %** des RCM imposés au barème, **déductible l'année du paiement de la CSG**, sous exception des fonds en euros d'assurance-vie/capitalisation ; au PFU, pas de CSG déductible au titre des RCM. Le [BOFiP CSG](https://bofip.impots.gouv.fr/bofip/887-PGP.html/identifiant=BOI-IR-BASE-20-20-20170724) précise aussi les règles d'assiette et d'imputation, mais sa version affichée est datée **24/07/2017**. | La fraction, son éligibilité, la date de paiement et le rattachement au bon foyer/avis doivent être croisés avec les millésimes applicables. Une page actuelle et un BOFiP ancien ne valident pas à eux seuls toutes les années ni tous les arrondis de l'APK. |
-| Crypto privée et 2086 | La [FAQ DGFiP](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques), modifiée le **17/07/2026**, indique actuellement **31,4 %**, l'option **3CN indépendante de 2OP**, la franchise de **305 € sur les prix bruts annuels de cession**, l'annexe **2086** et la non-reportabilité des moins-values ; le [BOFiP du 23/04/2024](https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423) indiquait **30 %** à sa date. | Ne pas appliquer rétroactivement le taux de la FAQ courante ; établir la date d'effet de chaque taux, le portefeuille crypto **global** du foyer et l'intégralité des cessions/comptes externes, puis vérifier la formule 2086 et ses arrondis. La seule application ne certifie pas une 2086 complète. |
+| Crypto privée et 2086 | La [FAQ DGFiP](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques), modifiée le **17/07/2026**, indique actuellement **31,4 %**, l'option **3CN indépendante de 2OP**, la franchise de **305 € sur les prix de cession du foyer**, l'annexe **2086** et la non-reportabilité des moins-values ; le [BOFiP du 23/04/2024](https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423) indiquait **30 %** à sa date. La [2086 et sa notice, revenus 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf), confirment la formule par cession, les lignes 51/52 (foyer), la franchise **≤ 305 €**, la 3CN indépendante de 2OP et la nécessité de valoriser **tous** les actifs détenus au moment de chaque cession ; elles ne chiffrent pas le taux PS 2025. | Ne pas appliquer rétroactivement le taux de la FAQ courante ; établir la date d'effet de chaque taux, le portefeuille crypto **global** du foyer et l'intégralité des cessions/comptes externes, puis vérifier la formule 2086 (frais exclus du quotient, fractions de capital déjà utilisées, soultes) et ses arrondis. La seule application ne certifie pas une 2086 complète. |
 | QF et calcul complet | Le [BOFiP QF du 07/04/2026](https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407) contient le plafond général **1 807 €/demi-part pour 2025**, une double liquidation et des plafonds spécifiques. | Le bouton ne lit que le plafond général ; les situations spéciales et la concordance de toutes les formules/arrondis avec le millésime restent non testées. Les cas personnels non documentés ne peuvent pas être déclarés vérifiés à partir du BOFiP. |
+
+**Contrôle 2086 sur la notice des revenus 2025 (sans bascule du taux crypto) :**
+les lignes 213/217 sont le prix de cession **avant frais** ; la fraction de
+capital utilise `223 × 217 / 212`. Le résultat ligne 224 déduit les frais via
+la ligne **218** (`218 − fraction de capital`), et la ligne **51** compare la
+somme des **218 du foyer**, *pas* la somme des 213, à **305 €**. La lecture
+des frais par l'ancien calcul JS/Python confondait brut et net : elle utilisait
+le prix après frais dans le quotient, n'indiquait pas la ligne 214 et testait
+le seuil sur un total improprement nommé 213. Correction de ces deux moteurs
+et tests hors réseau ajoutés, sans valider pour autant les soultes, tous les
+avoirs du foyer, la date d'effet du taux PS crypto ni l'ensemble des arrondis.
+Une 2086 générée par l'application demeure une **estimation non exhaustive**.
+Source : [formulaire et notice DGFiP 2086, revenus 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf).
 
 **Lecteur RCM partiel (étape suivante) :** le bouton consulte désormais la
 page DGFiP des revenus mobiliers **uniquement pour les revenus encaissés en
@@ -154,7 +186,7 @@ connaît pas le produit précis ni le précompte effectif des éventuels revenus
 externes du foyer. La mention de CSG 6,8 % est un indice conditionnel de la
 page courante, non une vérification millésimée du calcul. R2 2025 reste
 prioritaire ; « RCM par produit, précompte et date » demeure manquant dans
-`couvertureDgfip`. **Validation mobile de ce nouveau lecteur nécessaire.**
+`couvertureDgfip`. **Contrôle sur téléphone confirmé avec l'APK `adc63f5` (14/10/2026)** : revenus 2025, les deux taux RCM et les dates distinctes sont lus et affichés comme preuve partielle ; aucune activation des taux RCM, R2 2025 toujours prioritaire. Ce retour ne renseigne pas le précompte personnel du foyer.
 
 Ces textes constituent une **cartographie de travail**, pas des paramètres
 activés. Les taux RCM/crypto et la CSG du code déjà embarqué restent signalés

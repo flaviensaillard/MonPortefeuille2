@@ -25,6 +25,9 @@ for (const nom of ['util.js', 'fiscal.js', 'fiscal_rcm_sources.js'])
     const bilan = f.bilanMiseAJour(2025, { boi: {}, frais: {}, rcm: r });
     assert.match(bilan, /18,7 % sur avis 2026 si non précomptés en 2025/);
     assert.match(bilan, /Produit, exception et précompte du foyer non déterminés ; taux non activés/);
+    assert.doesNotMatch(bilan, /activés\.\./);
+    assert.match(bilan, /notice 2042 \(17,2 % de PS\) contre notice dédiée 2074 et aide du simulateur 2026 \(18,6 %\)/);
+    assert.match(bilan, /divergence non levée, R2 prioritaire/);
     assert.match(bilan, /Bascule DGFiP totale : non/);
     assert.equal(f.couvertureDgfip(2025).feuilles['RCM par produit, précompte et date'], false);
     const opts = f.comparerOptionsFoyer(42000, 2, 2025, 'Marié(e) / Pacsé(e)', 0, 100, false, 0);

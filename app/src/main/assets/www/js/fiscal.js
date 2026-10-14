@@ -667,8 +667,8 @@
     }
 
     function vide2086(annee) {
-        return { annee: annee, cessions: [], total_cessions_213: 0, plus_value_globale_224: 0,
-            exonere_305: false, case_3an: 0, case_3bn: 0 };
+        return { annee: annee, cessions: [], total_cessions_213: 0, total_cessions_218: 0,
+            plus_value_globale_224: 0, exonere_305: false, case_3an: 0, case_3bn: 0 };
     }
 
     /* Formulaire 2074 : synthèse 905/913, cadre 5 ligne par ligne et cadre 11
@@ -825,7 +825,13 @@
             if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: iso }]); return; }
             if (estAchat(t)) { coutTotal += net; qtes[t.ticker] = (qtes[t.ticker] || 0) + q; return; }
 
-            var prixUnitaire = q > 0 ? net / q : 0;
+            // 2086 : 213/217 (brut hors frais) sert au quotient de capital ;
+            // 218 (net des frais) sert au premier terme de la plus-value et
+            // à la ligne 51 du foyer. Ne jamais déduire les frais deux fois.
+            var tx = tauxTransaction(t, taux);
+            var brut = q * U.num(t.cours, 0) * tx;
+            var frais = U.num(t.frais, 0) * tx;
+            var prixUnitaire = q > 0 ? brut / q : 0;
             var valeurGlobale = 0;
             Object.keys(qtes).forEach(function (tk) {
                 var qte = qtes[tk] || 0;
@@ -843,10 +849,10 @@
                     }
                 }
             });
-            if (valeurGlobale < net) valeurGlobale = net;      // garde-fou de la v2
+            if (valeurGlobale < brut) valeurGlobale = brut;   // garde-fou de la v2
 
             var l220 = coutTotal, l221 = fractions, l223 = Math.max(0, l220 - l221);
-            var fraction = valeurGlobale > 0 ? l223 * (net / valeurGlobale) : 0;
+            var fraction = valeurGlobale > 0 ? l223 * (brut / valeurGlobale) : 0;
             var l224 = net - fraction;
             fractions += fraction;
             qtes[t.ticker] = Math.max(0, (qtes[t.ticker] || 0) - q);
@@ -854,8 +860,11 @@
             if (Number(iso.slice(0, 4)) === annee) {
                 cessions.push({
                     actif: t.ticker, date: iso, quantite: q,
-                    ligne_213: U.arrondi(net, 2), ligne_220: U.arrondi(l220, 2),
-                    ligne_221: U.arrondi(l221, 2), ligne_223: U.arrondi(l223, 2),
+                    ligne_212: U.arrondi(valeurGlobale, 2),
+                    ligne_213: U.arrondi(brut, 2), ligne_214: U.arrondi(frais, 2),
+                    ligne_217: U.arrondi(brut, 2), ligne_218: U.arrondi(net, 2),
+                    ligne_220: U.arrondi(l220, 2), ligne_221: U.arrondi(l221, 2),
+                    ligne_223: U.arrondi(l223, 2),
                     fraction_capital: U.arrondi(fraction, 2), ligne_224: U.arrondi(l224, 2)
                 });
             }
@@ -864,15 +873,16 @@
         if (manquants.length) return Object.assign(vide2086(annee), { indisponible: manquants });
 
         var total213 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_213; }, 0), 2);
+        var total218 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_218; }, 0), 2);
         var total224 = U.arrondi(cessions.reduce(function (s, c) { return s + c.ligne_224; }, 0), 2);
-        var exonere = cessions.length > 0 && total213 <= franchiseCrypto(annee);
+        var exonere = cessions.length > 0 && total218 <= franchiseCrypto(annee);
         var case3an = 0, case3bn = 0;
         if (!exonere && cessions.length) {
             if (total224 > 0) case3an = total224; else case3bn = Math.abs(total224);
         }
         return {
             annee: annee, cessions: cessions, total_cessions_213: total213,
-            plus_value_globale_224: total224, exonere_305: exonere,
+            total_cessions_218: total218, plus_value_globale_224: total224, exonere_305: exonere,
             case_3an: U.arrondi(case3an, 2), case_3bn: U.arrondi(case3bn, 2), indisponible: []
         };
     }
@@ -1438,7 +1448,7 @@
         if (t2086.cessions.length) {
             if (t2086.exonere_305) cases2042.push(['3AN / 3BN', 'Plus ou moins-value sur actifs numériques',
                 'À VÉRIFIER (seuil du foyer ≤ 305 €)',
-                'Cessions de ce portefeuille : ' + U.eur(t2086.total_cessions_213, { dec: 0 })
+                'Cessions de ce portefeuille (ligne 51, nets de frais) : ' + U.eur(t2086.total_cessions_218, { dec: 0 })
                 + ' ; vérifier aussi toute autre cession du foyer avant de laisser les cases vides.']);
             else if (t2086.case_3an > 0) cases2042.push(['3AN', 'Plus-value imposable sur actifs numériques',
                 U.eur(t2086.case_3an, { dec: 0 }),
@@ -1494,7 +1504,7 @@
                 : '<div class="info">Aucune cession de cryptomonnaie détectée en ' + annee + '.</div>',
             false,
             t2086.cessions.length
-                ? t2086.cessions.length + ' cession(s) · cédé ' + U.eur(t2086.total_cessions_213, { dec: 0 })
+                ? t2086.cessions.length + ' cession(s) · cédé net de frais ' + U.eur(t2086.total_cessions_218, { dec: 0 })
                     + ' · bilan ' + U.eur(t2086.plus_value_globale_224, { dec: 0 })
                 : 'Aucune cession en ' + annee);
 
@@ -1596,13 +1606,14 @@
 
     function bloc2086(annee, t) {
         var out = '<div style="font-size:12.5px;color:var(--txt-2);margin-bottom:8px">' + t.cessions.length
-            + ' cession(s) · total des prix de cession (cumul des lignes 213) : <b>'
-            + U.eur(t.total_cessions_213, { dec: 0 }) + '</b> · résultat net global (cumul des lignes 224) : <b>'
+            + ' cession(s) · prix de cession brut (213) : <b>'
+            + U.eur(t.total_cessions_213, { dec: 0 }) + '</b> · part connue de la ligne 51 du foyer (218 nets de frais) : <b>'
+            + U.eur(t.total_cessions_218, { dec: 0 }) + '</b> · résultat net global (cumul des lignes 224) : <b>'
             + U.eur(t.plus_value_globale_224, { dec: 0 }) + '</b>.</div>';
 
         if (t.exonere_305) {
             out += '<div class="info">Franchise de 305 € à confirmer sur tout le foyer : les cessions de '
-                + 'ce portefeuille (' + U.eur(t.total_cessions_213, { dec: 0 }) + ') restent sous le seuil. '
+                + 'ce portefeuille (' + U.eur(t.total_cessions_218, { dec: 0 }) + ' nets de frais) restent sous le seuil. '
                 + 'Ce total ne suffit pas à prouver l’exonération du foyer fiscal : vérifiez aussi les cessions '
                 + 'éventuelles du conjoint hors de ce portefeuille. Laissez 3AN/3BN vides seulement si le '
                 + 'seuil du foyer est respecté ; vérifiez également l’annexe 2086.</div>';
@@ -1614,11 +1625,13 @@
         }
 
         out += '<table class="tableau compact" style="margin-top:10px"><tr><th>Actif</th><th>Date</th>'
-            + '<th>213 cession</th><th>220 coût total</th><th>221 déjà déduit</th><th>223</th>'
-            + '<th>224 résultat</th></tr>'
+            + '<th>212 valeur globale</th><th>213 brut</th><th>214 frais</th><th>218 net</th>'
+            + '<th>220 coût total</th><th>221 déjà déduit</th><th>223</th><th>224 résultat</th></tr>'
             + t.cessions.map(function (c) {
                 return '<tr><td><b>' + UI.h(c.actif) + '</b></td><td>' + U.jourMoisAnneeISO(c.date) + '</td>'
-                    + '<td>' + U.eur(c.ligne_213, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_220, { dec: 0 }) + '</td>'
+                    + '<td>' + U.eur(c.ligne_212, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_213, { dec: 0 }) + '</td>'
+                    + '<td>' + U.eur(c.ligne_214, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_218, { dec: 0 }) + '</td>'
+                    + '<td>' + U.eur(c.ligne_220, { dec: 0 }) + '</td>'
                     + '<td>' + U.eur(c.ligne_221, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_223, { dec: 0 }) + '</td>'
                     + '<td class="' + (c.ligne_224 >= 0 ? 'up' : 'down') + '">'
                     + U.eur(c.ligne_224, { dec: 0, signe: true }) + '</td></tr>';
@@ -1817,13 +1830,16 @@
                 ? (titres.valeurs.ps * 100).toFixed(1).replace('.', ',') + ' % (IR forfaitaire '
                     + (titres.valeurs.ir * 100).toFixed(1).replace('.', ',') + ' %, DGFiP ' + titres.url + ')'
                 : 'non vérifié (' + (titres.etat || 'non recherché') + ')') + '. '
+            + (annee === 2025
+                ? 'Écart documentaire DGFiP pour les titres 2025 : notice 2042 (17,2 % de PS) contre notice dédiée 2074 et aide du simulateur 2026 (18,6 %). Le lecteur utilise l’aide du simulateur ; divergence non levée, R2 prioritaire. '
+                : '')
             + 'RCM — preuve partielle : ' + (rcm.valeurs
                 ? 'revenus encaissés en 2025 : ' + (rcm.valeurs.precompte2025 * 100).toFixed(1).replace('.', ',')
                     + ' % si PS précomptés lors du versement ; '
                     + (rcm.valeurs.nonPrecompteAvis2026 * 100).toFixed(1).replace('.', ',')
                     + ' % sur avis 2026 si non précomptés en 2025 (page modifiée le '
-                    + rcm.valeurs.dateModification + ', ' + rcm.url + '). Produit, exception et précompte du foyer non déterminés ; taux non activés.'
-                    + (rcm.valeurs.csgConditionnelle ? ' CSG de 6,8 % au barème et dans l’année du paiement mentionnée sur la page courante, non millésimée ni activée.' : '')
+                    + rcm.valeurs.dateModification + ', ' + rcm.url + '). Produit, exception et précompte du foyer non déterminés ; taux non activés'
+                    + (rcm.valeurs.csgConditionnelle ? '. CSG de 6,8 % au barème et dans l’année du paiement mentionnée sur la page courante, non millésimée ni activée' : '')
                 : 'non disponible (' + (rcm.etat || 'non recherché') + ')') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '

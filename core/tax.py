@@ -967,9 +967,10 @@ def detail_2086_de_lannee(
     annee: int,
     inventaire: list[dict] | None = None,
 ) -> dict:
-    """Calcule l'intégralité du Formulaire 2086 (cryptomonnaies, art. 150 VH bis)
-    en suivant les achats et les fractions de capital déduites (ligne 221) depuis
-    l'origine du portefeuille jusqu'à la fin de `annee`.
+    """Estime les lignes 2086 (cryptomonnaies, art. 150 VH bis) à partir des
+    opérations connues, en suivant les achats et les fractions de capital
+    déduites (ligne 221) jusqu'à la fin de `annee`. Les autres cessions du
+    foyer, soultes et conditions de l'option restent à vérifier séparément.
 
     `inventaire` (2.1.0, revue T-02) : crypto-actifs détenus HORS des transactions
     suivies, une ligne par solde de référence :
@@ -1014,7 +1015,10 @@ def detail_2086_de_lannee(
             cout_total_brut_eur += net_eur
             quantites[t.ticker] = quantites.get(t.ticker, 0.0) + t.quantite
         elif t.est_vente:
-            prix_cession_eur = net_eur
+            # 2086 revenus 2025 : 213/217 avant frais dans le quotient de
+            # capital ; 218 net des frais dans la plus-value et le seuil (51).
+            frais_eur = _montant_eur(t.frais, t.devise, iso, t.ticker, t.date, indisponible)
+            prix_cession_eur = net_eur + frais_eur
             prix_unitaire_implicite_eur = (
                 prix_cession_eur / t.quantite if t.quantite > 0 else 0.0
             )
@@ -1078,7 +1082,7 @@ def detail_2086_de_lannee(
                 ligne_223 * (prix_cession_eur / valeur_globale_eur)
                 if valeur_globale_eur > 0 else 0.0
             )
-            ligne_224 = prix_cession_eur - fraction_capital
+            ligne_224 = net_eur - fraction_capital
 
             somme_fractions_deduites += fraction_capital
             quantites[t.ticker] = max(0.0, quantites.get(t.ticker, 0.0) - t.quantite)
@@ -1091,11 +1095,11 @@ def detail_2086_de_lannee(
                     "ligne_211": t.date.strftime("%d/%m/%Y"),
                     "ligne_212": round(valeur_globale_eur, 2),
                     "ligne_213": round(prix_cession_eur, 2),
-                    "ligne_214": 0.0,
-                    "ligne_215": round(prix_cession_eur, 2),
+                    "ligne_214": round(frais_eur, 2),
+                    "ligne_215": round(net_eur, 2),
                     "ligne_216": 0.0,
                     "ligne_217": round(prix_cession_eur, 2),
-                    "ligne_218": round(prix_cession_eur, 2),
+                    "ligne_218": round(net_eur, 2),
                     "ligne_220": round(ligne_220, 2),
                     "ligne_221": round(ligne_221, 2),
                     "ligne_222": 0.0,
@@ -1105,8 +1109,9 @@ def detail_2086_de_lannee(
                 })
 
     total_213 = round(sum(c["ligne_213"] for c in cessions_annee), 2)
+    total_218 = round(sum(c["ligne_218"] for c in cessions_annee), 2)
     total_224 = round(sum(c["ligne_224"] for c in cessions_annee), 2)
-    exonere_305 = bool(cessions_annee) and total_213 <= fb.CRYPTO_FRANCHISE_CESSIONS
+    exonere_305 = bool(cessions_annee) and total_218 <= fb.CRYPTO_FRANCHISE_CESSIONS
 
     if not cessions_annee or exonere_305:
         case_3an = 0.0
@@ -1122,6 +1127,7 @@ def detail_2086_de_lannee(
         "annee": annee,
         "cessions": cessions_annee,
         "total_cessions_213": total_213,
+        "total_cessions_218": total_218,
         "plus_value_globale_224": total_224,
         "exonere_305": exonere_305,
         "case_3an": round(case_3an, 2),
