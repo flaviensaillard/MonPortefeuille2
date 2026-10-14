@@ -1858,11 +1858,13 @@
                 ? 'CSG patrimoine de 9,2 % à 10,6 % sur revenus 2025 déclarés en 2026 ; produits de placement à compter du 1.1.2026 ; exceptions à 9,2 % et CSG déductible 6,8 % mentionnées ('
                     + brochure.url + '). Cette lecture ne prouve ni le taux global PS crypto 2025, ni la CSG personnelle déductible ; aucun taux activé'
                 : 'non disponible (' + (brochure.etat || 'non recherchée') + ')') + '. '
-            + 'Notice 2086 DGFiP revenus 2025 (PDF, preuve partielle) : ' + (notice2086.valeurs
+            + (annee === 2025 ? 'Notice 2086 DGFiP revenus 2025 (PDF, preuve partielle) : '
+                : 'Notice 2086 PDF de ce millésime : ') + (notice2086.valeurs
                 ? 'quotient sur prix avant frais et valeur globale du portefeuille ; frais dans le premier terme du gain ; ligne 51 et seuil du foyer 305 €, 3AN/3BN et option 3CN ('
-                    + notice2086.url + '). La formule et les cases du formulaire sont relues, mais ni toutes les cessions du foyer, ni un taux PS crypto 2025 ne sont attestés ; aucun paramètre activé'
+                    + notice2086.url + '). Formulaire : « inférieur ou égal à 305 € » ; un paragraphe de la notice écrit « inférieur à 305 € » (égalité non résolue par cette lecture). La formule et les cases du formulaire sont relues, mais la complétude des cessions du foyer et le taux PS crypto 2025 ne sont pas attestés ; aucun paramètre activé'
                 : 'non disponible (' + (notice2086.etat || 'non recherchée') + ')') + '. '
-            + 'Brochure plus-values crypto DGFiP revenus 2025 (PDF, preuve partielle) : ' + (brochureCrypto.valeurs
+            + (annee === 2025 ? 'Brochure plus-values crypto DGFiP revenus 2025 (PDF, preuve partielle) : '
+                : 'Brochure crypto PDF de ce millésime : ') + (brochureCrypto.valeurs
                 ? 'IR forfaitaire 12,8 %, seuil du foyer 305 €, 2086 même en dessous du seuil, 3CN distincte de l’option RCM ('
                     + brochureCrypto.url + '). Taux global PS crypto 2025 non déterminé par ce lecteur ; aucune activation'
                 : 'non disponible (' + (brochureCrypto.etat || 'non recherchée') + ')') + '. '

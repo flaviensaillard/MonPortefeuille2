@@ -70,7 +70,7 @@ function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.fro
     const rapport = ctx.PF.fiscal.bilanMiseAJour(2025, { cryptoPdf: premier });
     assert.match(rapport, /Notice 2086 DGFiP revenus 2025/);
     assert.match(rapport, /Brochure plus-values crypto DGFiP revenus 2025/);
-    assert.match(rapport, /PS crypto 2025 ne sont attestés/);
+    assert.match(rapport, /taux PS crypto 2025 ne sont pas attestés/);
     assert.match(rapport, /Bascule DGFiP totale : non/);
     assert.equal(ctx.PF.fiscal.couvertureDgfip(2025).feuilles['PS crypto privés'], false);
     assert.equal(ctx.PF.fiscal.couvertureDgfip(2025).feuilles['crypto et 2086 complets'], false);

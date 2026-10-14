@@ -8,6 +8,10 @@ ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
 Le bouton lit désormais aussi la [brochure DGFiP de déclaration 2026](https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf) pour les **revenus 2025** : hausse de CSG sur revenus du patrimoine, calendrier distinct des produits de placement et exceptions. Cette lecture est **partielle et non activante** ; elle ne permet pas d'attribuer un taux global de PS aux cessions crypto 2025. La première APK PDF a refusé l'en-tête sur Android (titre dessiné après la section). Le nouveau parseur a été vérifié sur le PDF officiel dans [un diagnostic CI ponctuel](https://github.com/flaviensaillard/MonPortefeuille2/actions/runs/38532107467), et sa correction a désormais été **confirmée sur téléphone** : CSG patrimoine 9,2 → 10,6 % pour les revenus 2025 déclarés en 2026, effet placement dès le 1.1.2026, exceptions et CSG déductible 6,8 % seulement mentionnée, sans application personnelle. R2 2025 reste prioritaire, bascule totale toujours « non ». Voir [méthode, limites et test Android](LECTURE-PDF-DGFIP.md).
 
+## Étape suivante : notice 2086 et brochure crypto revenus 2025 (14/10/2026)
+
+Le bouton lit deux PDF DGFiP millésimés de la déclaration 2026 : notice 2086 et brochure des plus-values crypto. La formule (prix avant frais dans le quotient, prix net dans le résultat), la ligne 51 du foyer, le seuil 305 €, l'IR 12,8 %, les cases 3AN/3BN et l'option 3CN sont vérifiés **par passages officiels**, avec révisions locales séparées. Le diagnostic ponctuel des deux PDF réels et de la relecture des extraits a réussi ; l'APK reste à vérifier sur Android. **Les PS crypto 2025 chiffrés et l'annexe complète du foyer ne sont pas prouvés : aucun taux n'est activé, R2 2025 demeure prioritaire, bascule totale « non ».** Voir [preuves, divergence sur « égal à 305 » et limites](LECTURE-PDF-CRYPTO-DGFIP.md).
+
 ## Politique de collecte DGFiP (branche, 13/10/2026)
 
 Le bouton « Vérifier cette année (DGFiP) » ou « Vérifier 2023 à 2026 »
