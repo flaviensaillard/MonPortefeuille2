@@ -61,7 +61,7 @@
     // Collectes BOFiP / frais DGFiP par année et compte. Les anciennes
     // collectes OpenFisca restent en base mais ne sont plus relues ni appliquées.
     var revisionsActives = Object.create(null), officiels = Object.create(null),
-        fraisOfficiels = Object.create(null);
+        fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
@@ -86,6 +86,7 @@
         revisionsActives = Object.create(null);
         officiels = Object.create(null);
         fraisOfficiels = Object.create(null);
+        titresOfficiels = Object.create(null);
     }
     function actualiserRevisions(ctx) {
         effacerRevisions();
@@ -100,6 +101,11 @@
         if (compte && compte.id && PF.fiscalDgfipSources) {
             annees().forEach(function (an) {
                 if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
+            });
+        }
+        if (compte && compte.id && PF.fiscalRegimesSources) {
+            annees().forEach(function (an) {
+                if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
             });
         }
         // L'or détenu en métal relève d'un régime DISTINCT non publié par R2.
@@ -154,6 +160,7 @@
     function tauxPS(annee) {
         var p = paramsActifs(annee);
         if (p) return p.prelevements_sociaux_par_categorie.plus_values_titres;
+        if (titresOfficiels[annee]) return titresOfficiels[annee].ps;
         if (PS_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de prélèvements sociaux pour ' + annee + '.');
         return PS_PAR_ANNEE[annee];
     }
@@ -163,7 +170,13 @@
         var p = paramsActifs(annee);
         if (p) return precompte ? p.prelevements_sociaux_par_categorie.rcm_precomptes_en_2025
             : p.prelevements_sociaux_par_categorie.rcm_non_precomptes;
-        if (!precompte) return tauxPS(annee);
+        // Un taux DGFiP des plus-values de titres n'est PAS le taux RCM
+        // (précompte, date de paiement et exceptions propres au produit).
+        if (!precompte) {
+            if (PS_PAR_ANNEE[annee] === undefined)
+                throw new Error('Aucun taux de PS pour les revenus mobiliers de ' + annee + '.');
+            return PS_PAR_ANNEE[annee];
+        }
         if (PS_PRECOMPTES_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de PS précomptés pour ' + annee + '.');
         return PS_PRECOMPTES_PAR_ANNEE[annee];
     }
@@ -365,7 +378,10 @@
         var irSalaires = impotRevenu(revenuSalaires, parts, annee, statut).impot_net;
         var psTitres = pv * tauxPS(annee);
         var psInterets = rcm ? rcm * tauxPSRevenuMobilier(annee, precomptes) : 0;
-        var psCrypto = crypto * tauxPS(annee);
+        // Même raison : la crypto n'emprunte pas le taux des titres.
+        var psCrypto = crypto * (paramsActifs(annee)
+            ? paramsActifs(annee).prelevements_sociaux_par_categorie.plus_values_crypto_privees
+            : PS_PAR_ANNEE[annee]);
         var psTotal = psTitres + psInterets + psCrypto;
         var psDeja = precomptes ? psInterets : 0;
         var scenarios = [];
@@ -899,7 +915,9 @@
             : null;
 
         var pvCryptoPos = Math.max(0, U.num(o.pvCryptoImposable, 0));
-        var impotCrypto = pvCryptoPos * tauxPFU(annee); // PFU de référence, pas retenu si 3CN
+        var impotCrypto = pvCryptoPos * (tauxIrForfaitaire(annee) +
+            (paramsActifs(annee) ? paramsActifs(annee).prelevements_sociaux_par_categorie.plus_values_crypto_privees
+                : PS_PAR_ANNEE[annee])); // PFU de référence, pas retenu si 3CN
         var options = comparerOptionsFoyer(revNetSalaires, o.parts, annee, o.statut,
             pvActionsPos, interetsPos, o.interetsPrecomptes, pvCryptoPos);
         var impotCapital = options.retenu.cout_capital;
@@ -1689,8 +1707,28 @@
             + '<div class="dr"><div class="a">' + UI.h(valeur) + '</div><div class="b">modifier</div></div></div>';
     }
 
+    // Une collecte DGFiP n'est complète que si TOUS les régimes utilisés
+    // disposent d'une preuve et d'un moteur compatible. Ce bilan ne publie
+    // ni ne remplace une R2 ; les renseignements personnels restent distincts.
+    function couvertureDgfip(annee) {
+        var boi = officiels[annee] || {}, frais = fraisOfficiels[annee] || {};
+        var feuilles = {
+            'IR': !!boi.ir, 'décote': !!boi.decote,
+            'plafond QF général': !!boi.qf,
+            'abattement salariés': !!frais.abatt, 'repas salariés': typeof frais.repas === 'number',
+            'kilomètres voiture': !!frais.km, 'PS plus-values de titres': !!titresOfficiels[annee],
+            'RCM par produit, précompte et date': false,
+            'PS crypto privés': false, 'CSG déductible et calendrier': false,
+            'crypto et 2086 complets': false, 'plafonds QF spéciaux': false,
+            'formules et arrondis contrôlés': false
+        };
+        return { complet: Object.keys(feuilles).every(function (nom) { return feuilles[nom]; }),
+            feuilles: feuilles,
+            manquants: Object.keys(feuilles).filter(function (nom) { return !feuilles[nom]; }) };
+    }
+
     function bilanMiseAJour(annee, resultat) {
-        var boi = resultat.boi || {}, frais = resultat.frais || {};
+        var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1709,11 +1747,17 @@
             + statut('Barème kilomètres voiture (3 à 7 CV)', f.km && '5 lignes vérifiées', null)
             + '. Sources frais : ' + (PF.fiscalFraisSources ? PF.fiscalFraisSources.KM(annee) + ' ; '
                 + PF.fiscalFraisSources.repasUrl(annee) : 'non disponible') + '. '
-            + 'Prélèvements sociaux par régime/date, CSG déductible, crypto/2086, plafonds QF spéciaux, '
-            + 'changements de formule et conditions personnelles : non disponibles / non vérifiés par ce lecteur. '
+            + 'PS des plus-values de titres : ' + (titres.valeurs
+                ? (titres.valeurs.ps * 100).toFixed(1).replace('.', ',') + ' % (IR forfaitaire '
+                    + (titres.valeurs.ir * 100).toFixed(1).replace('.', ',') + ' %, DGFiP ' + titres.url + ')'
+                : 'non vérifié (' + (titres.etat || 'non recherché') + ')') + '. '
+            + 'RCM selon précompte/date/produit, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
+            + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
             + 'État des sources : BOFiP ' + JSON.stringify(boi.etats || boi.erreur || {})
-            + ' ; frais ' + JSON.stringify(frais.etats || frais.erreur || {}) + '. '
+            + ' ; frais ' + JSON.stringify(frais.etats || frais.erreur || {})
+            + ' ; titres ' + (titres.etat || titres.erreur || 'non recherché') + '. '
+            + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
             + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
 
@@ -1729,7 +1773,7 @@
             var collecte = cible.closest('[data-fisc="collecter"], [data-fisc="collecter-tout"]');
             if (collecte) {
                 var etat = vue.querySelector('#etatCollecteFiscale');
-                if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources) {
+                if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources || !PF.fiscalRegimesSources) {
                     if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
@@ -1749,8 +1793,13 @@
                         }),
                         PF.fiscalFraisSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
+                        }),
+                        PF.fiscalRegimesSources.chercher(an).catch(function (err) {
+                            return { erreur: String(err && err.message || err) };
                         })
-                    ]).then(function (resultats) { return { annee: an, boi: resultats[0], frais: resultats[1] }; });
+                    ]).then(function (resultats) {
+                        return { annee: an, boi: resultats[0], frais: resultats[1], titres: resultats[2] };
+                    });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();
                     if (!courant || courant.id !== proprietaire.id)
@@ -1832,7 +1881,7 @@
         snapshotConstantesCode: snapshotConstantesCode,
         actualiserRevisions: actualiserRevisions, effacerRevisions: effacerRevisions,
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
-        plafondQF: plafondQF, franchiseCrypto: franchiseCrypto,
+        plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

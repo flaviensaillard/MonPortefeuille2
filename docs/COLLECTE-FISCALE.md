@@ -47,9 +47,38 @@ mentionne bien les **revenus 2025**, l'abattement salarié **509 / 14 555 €**
 et les cinq lignes du tarif automobile (3 à 7 CV). Le lecteur accepte
 maintenant aussi les espaces, accents et euros encodés en entités HTML et le
 pont natif répare le jeu de caractères absent ou mal déclaré, sans alléger
-la vérification de l'année ni celle des cinq coefficients. Cette correction
-est à confirmer par un nouveau clic sur la prochaine APK ; la R2 2025
-reste prioritaire même si les frais sont collectés.
+la vérification de l'année ni celle des cinq coefficients. **Contrôle sur téléphone confirmé** : la nouvelle APK a affiché l'abattement 509 / 14 555 €, le repas 5,45 € et les cinq lignes automobiles pour les revenus 2025. La R2 2025 reste prioritaire. Aucun montant personnel de cette vérification n'est enregistré dans le dépôt.
+
+### Étape suivante : prélèvements des plus-values de titres et seuil de bascule
+
+Le bouton vérifie également la [page DGFiP de gains de la déclaration
+2024](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/gains.htm)
+(revenus 2023), celle de [2025](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/gains.htm)
+(revenus 2024), et celle de [2026](https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm)
+(revenus 2025). Il exige l'année des **revenus**, la mention des cessions de
+titres, les taux IR/PS et leur somme, l'option 2OP et la réserve relative aux
+titres acquis avant 2018. Elles affichent **12,8 % d'IR + 17,2 % de PS**
+pour les revenus 2023–2024, et **12,8 % + 18,6 %** pour 2025. Si ce contrôle
+passe, le taux **des gains de titres seulement** peut alimenter la simulation
+indicative des années sans révision active. La R2 2025 reste prioritaire.
+Une rectification d'un millésime crée une nouvelle entrée locale. Pour 2026,
+la page de déclaration 2027 devra mentionner expressément les revenus 2026 ;
+la page 2026 concernant 2025 n'est jamais réutilisée.
+
+**Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
+« Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,
+précompte et date ([DGFiP revenus mobiliers](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers)),
+PS crypto privés et annexe 2086 ([DGFiP actifs numériques](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques)),
+CSG déductible selon l'année de paiement, plafonds QF spéciaux, formules et
+arrondis. Le [BOFiP crypto du 23/04/2024](https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423)
+indique 17,2 % à cette date : ce texte **ne prouve pas** un taux identique
+pour les revenus 2025 ou 2026. La R2 2025 a déjà fait l'objet d'un audit
+spécifique ([36 feuilles](AUDIT-R2-2025.md)), ce qui n'est pas la même chose
+qu'un recontrôle exhaustif en ligne par le bouton. Aucun taux des titres
+n'est recopié sur les RCM ou la crypto. Le PAS DGFiP effectif et la réalité
+des frais, revenus, autres avoirs et opérations du foyer ne peuvent pas être
+déduits des publications générales : ils ne seront jamais « vérifiés » par
+un bouton de consultation de textes publics.
 
 Les pages du simulateur sont consultées avec `année de déclaration = revenus + 1`.
 Le lecteur exige l'année des revenus et cinq lignes de barème automobile avec

@@ -83,7 +83,7 @@ const collecteur = contexte.PF.fiscalSources;
     assert.match(html, /js\/fiscal_dgfip_sources\.js/);
     assert.match(fiscal, /data-fisc="collecter"/);
     assert.match(fiscal, /une simulation indicative/);
-    assert.match(fiscal, /non disponibles \/ non vérifiés par ce lecteur/);
+    assert.match(fiscal, /non vérifiés par ce lecteur/);
     assert.doesNotMatch(fiscal, /PF\.fiscalSources\.synchroniser\(cibleAnnee\)/);
     assert.doesNotMatch(fiscal, /Vérifiez les migrations 009 et 010/);
     console.log('Révisions fiscales annuelles : tests réussis');

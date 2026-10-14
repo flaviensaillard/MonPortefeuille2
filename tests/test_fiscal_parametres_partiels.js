@@ -69,7 +69,7 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.equal(f.plafondQF(2025), 1807, 'millésime historique intact');
     assert.equal(f.tauxPS(2026), f.PS_PAR_ANNEE[2026], 'CSG isolée ≠ PS complets');
     assert.doesNotMatch(f.bilanMiseAJour(2026, { boi: {} }), /1900|310|OpenFisca/);
-    assert.match(f.bilanMiseAJour(2026, { boi: {} }), /CSG déductible.*non disponibles/);
+    assert.match(f.bilanMiseAJour(2026, { boi: {} }), /CSG déductible.*non vérifiés/);
     assert.throws(() => f.plafondQF(2027), /non disponible/);
     await src.synchroniserParametres(2026);
     assert.equal(ecritures, 1, 'répétition sans changement');
@@ -85,7 +85,7 @@ const chemin = cle => src.PARAMETRES[cle].chemin;
     assert.equal(resultat.etats.plafond_qf, 'valeur explicite collectée', 'la recherche ne disparaît pas');
     assert.doesNotMatch(resultat.erreur, /privé|23505/);
     const rapportErreur = f.bilanMiseAJour(2026, { disponibles: [], parametres: resultat });
-    assert.doesNotMatch(rapportErreur, /non recherché|vérifier la migration 012/);
+    assert.doesNotMatch(rapportErreur, /vérifier la migration 012/);
     assert.doesNotMatch(rapportErreur, /1900|1950/);
     refuserEcriture = false;
     masquerLecture = true; // même collision, nouveau contenu => révision 2
