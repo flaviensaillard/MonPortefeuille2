@@ -93,6 +93,8 @@ verifier('pont PDF borné au document DGFiP, sans redirection et sans décodage 
     /www\.impots\.gouv\.fr"\.equalsIgnoreCase\(u\.getHost\(\)\)/.test(pont)
     && /ir_2026\/pdf_som\/nouveautes/.test(pont)
     && /ir_2026\/pdf_som\/09-plus_values_137a156/.test(pont)
+    && /ir_2026\/pdf_som\/08-RCM_121a136/.test(pont)
+    && /ir_2026\/pdf_som\/12-charges_ded_rev_225a236/.test(pont)
     && /formulaires\/2086\/2026\/2086_5515/.test(pont)
     && /u\.getPath\(\)\.equals/.test(pont)
     && /final int maximum = 2 \* 1024 \* 1024/.test(pont)

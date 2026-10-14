@@ -32,7 +32,7 @@ for f in js/util.js js/models.js js/net.js js/store.js js/biometrie.js js/metric
         exit 1
     fi
 done
-for f in js/fiscal_rcm_sources.js js/fiscal_crypto_sources.js js/fiscal_brochure_sources.js js/fiscal_crypto_pdf_sources.js vendor/pdfjs/pdf.min.js vendor/pdfjs/pdf.worker.min.js; do
+for f in js/fiscal_rcm_sources.js js/fiscal_crypto_sources.js js/fiscal_brochure_sources.js js/fiscal_crypto_pdf_sources.js js/fiscal_rcm_pdf_sources.js vendor/pdfjs/pdf.min.js vendor/pdfjs/pdf.worker.min.js; do
     if [ ! -f "$WWW/$f" ]; then
         echo "Module fiscal/PDF manquant : $WWW/$f" >&2
         exit 1

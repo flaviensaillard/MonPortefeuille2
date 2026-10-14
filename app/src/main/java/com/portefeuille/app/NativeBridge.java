@@ -187,6 +187,8 @@ public class NativeBridge {
                     || u.getRef() != null
                     || !(u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf")
                          || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/09-plus_values_137a156.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/08-RCM_121a136.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf")
                          || u.getPath().equals("/sites/default/files/formulaires/2086/2026/2086_5515.pdf")))
                 return erreur("PDF DGFiP non autorisé");
             conn = (HttpURLConnection) u.openConnection();

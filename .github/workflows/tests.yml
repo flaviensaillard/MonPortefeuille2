@@ -48,6 +48,11 @@ jobs:
             echo "== $f"
             node "$f"
           done
+      # Vérification ponctuelle du texte extrait par PDF.js des deux PDF officiels.
+      # Retirer cette étape après contrôle : le réseau ne doit pas conditionner
+      # les tests unitaires récurrents.
+      - name: Diagnostic ponctuel brochures DGFiP RCM/CSG réelles
+        run: node tests/diagnostic_fiscal_rcm_pdf.js
       # Les règles du service IA (phrase imposée sans passage, citation des
       # sources, indexation sans doublon) se testent en JavaScript, avec un
       # faux Cloudflare : aucun appel réseau réel.

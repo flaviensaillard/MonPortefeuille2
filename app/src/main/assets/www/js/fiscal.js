@@ -1806,7 +1806,8 @@
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
             rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {},
             cryptoPdf = resultat.cryptoPdf || {}, notice2086 = cryptoPdf.notice || {},
-            brochureCrypto = cryptoPdf.brochure || {};
+            brochureCrypto = cryptoPdf.brochure || {}, rcmPdf = resultat.rcmPdf || {},
+            brochureRcm = rcmPdf.rcm || {}, chargesRcm = rcmPdf.charges || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1868,6 +1869,16 @@
                 ? 'IR forfaitaire 12,8 %, seuil du foyer 305 €, 2086 même en dessous du seuil, 3CN distincte de l’option RCM ('
                     + brochureCrypto.url + '). Taux global PS crypto 2025 non déterminé par ce lecteur ; aucune activation'
                 : 'non disponible (' + (brochureCrypto.etat || 'non recherchée') + ')') + '. '
+            + (annee === 2025 ? 'Brochure RCM DGFiP revenus 2025 (PDF, preuve partielle) : '
+                : 'Brochure RCM PDF de ce millésime : ') + (brochureRcm.valeurs
+                ? '2CG : pas de CSG déductible ; 2BH : CSG 6,8 % déductible si option globale 2OP et PS prélevés en 2025 ; 2DF : déduction même sans 2OP pour certains produits (dont versements avant le 27.9.2017) déjà soumis aux PS en 2025 ('
+                    + brochureRcm.url + '). Produit, dates et précompte du foyer non attestés ; aucune activation'
+                : 'non disponible (' + (brochureRcm.etat || 'non recherchée') + ')') + '. '
+            + (annee === 2025 ? 'Brochure charges DGFiP revenus 2025 (PDF, preuve partielle) : '
+                : 'Brochure charges PDF de ce millésime : ') + (chargesRcm.valeurs
+                ? 'CSG sur certains revenus du patrimoine 2024 payée en 2025 déductible des revenus 2025 ; case 6DE pour corriger le préremplissage dans les cas prévus. CSG des lignes 2BH/2DF prélevée en 2025 calculée automatiquement, à ne pas ajouter en 6DE ('
+                    + chargesRcm.url + '). Une plus-value 2025 imposée forfaitairement ne crée pas à elle seule une déduction CSG en 2025 ; avis et montants du foyer non lus, aucune activation'
+                : 'non disponible (' + (chargesRcm.etat || 'non recherchée') + ')') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
@@ -1878,7 +1889,9 @@
             + ' ; crypto ' + (crypto.etat || crypto.erreur || 'non recherchée')
             + ' ; brochure CSG PDF ' + (brochure.etat || brochure.erreur || 'non recherchée')
             + ' ; notice 2086 PDF ' + (notice2086.etat || notice2086.erreur || 'non recherchée')
-            + ' ; brochure crypto PDF ' + (brochureCrypto.etat || brochureCrypto.erreur || 'non recherchée') + '. '
+            + ' ; brochure crypto PDF ' + (brochureCrypto.etat || brochureCrypto.erreur || 'non recherchée')
+            + ' ; brochure RCM PDF ' + (brochureRcm.etat || brochureRcm.erreur || 'non recherchée')
+            + ' ; brochure charges PDF ' + (chargesRcm.etat || chargesRcm.erreur || 'non recherchée') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
             + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
@@ -1897,7 +1910,7 @@
                 var etat = vue.querySelector('#etatCollecteFiscale');
                 if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
                     !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources
-                    || !PF.fiscalBrochureSources || !PF.fiscalCryptoPdfSources) {
+                    || !PF.fiscalBrochureSources || !PF.fiscalCryptoPdfSources || !PF.fiscalRcmPdfSources) {
                     if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
@@ -1933,11 +1946,15 @@
                         PF.fiscalCryptoPdfSources.chercher(an).catch(function (err) {
                             return { notice: { erreur: String(err && err.message || err) },
                                 brochure: { erreur: String(err && err.message || err) } };
+                        }),
+                        PF.fiscalRcmPdfSources.chercher(an).catch(function (err) {
+                            return { rcm: { erreur: String(err && err.message || err) },
+                                charges: { erreur: String(err && err.message || err) } };
                         })
                     ]).then(function (resultats) {
                         return { annee: an, boi: resultats[0], frais: resultats[1],
                             titres: resultats[2], rcm: resultats[3], crypto: resultats[4],
-                            brochure: resultats[5], cryptoPdf: resultats[6] };
+                            brochure: resultats[5], cryptoPdf: resultats[6], rcmPdf: resultats[7] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();
