@@ -7,13 +7,16 @@ const pdfjs = require('../app/src/main/assets/www/vendor/pdfjs/pdf.min.js');
 const dossier = 'app/src/main/assets/www/js/';
 const id = '0b5524a0-88dc-4920-a899-913067b8d352';
 const memoire = new Map();
-const texte = `PRINCIPALES NOUVEAUTES REVENUS 2025
-Prelevements sociaux Le taux de la CSG est porte de 9,2 % a 10,6 % sur les revenus du patrimoine et les produits de placement.
+const texte = `Prelevements sociaux Le taux de la CSG est porte de 9,2 % a 10,6 % sur les revenus du patrimoine et les produits de placement.
 Les revenus fonciers, les plus-values immobilieres, l'assurance-vie, l'epargne logement restent soumis au taux de 9,2 %.
 Le taux de CSG deductible reste a 6,8 %.
 La hausse de la CSG s'applique a compter des revenus 2025 declares en 2026 pour les revenus du patrimoine et a compter du 1.1.2026 pour les produits de placement.
 (LFSS 2026, art. 12 ; CSS, art. L136-8)
-PRINCIPALES NOUVEAUTES REVENUS 2026 & SUIVANTS`;
+PRINCIPALES NOUVEAUT E S REVENUS 2025`;
+const autreAnnee = `PRINCIPALES NOUVEAUTES REVENUS 2026 & SUIVANTS`;
+// Passage public réellement extrait de la page 1 par PDF.js sur le PDF DGFiP :
+// titre 2025 APRÈS le paragraphe CSG, « NOUVEAUT É S » scindé par la police.
+const passageReel = `Prélèvements sociaux Le taux de la CSG est porté de 9,2 % à 10,6 % sur les revenus du patrimoine et les produits de placement. Les revenus fonciers, les plus-values immobilières, l’assurance-vie, l’épargne logement restent soumis au taux de 9,2 %. Le taux de CSG déductible reste à 6,8 % La hausse de la CSG s’applique à compter des revenus 2025 déclarés en 2026 pour les revenus du patrimoine et à compter du 1.1.2026 pour les produits de placement. (LFSS 2026, art. 12 ; CSS, art. L136-8) PRINCIPALES NOUVEAUT É S REVENUS 2025`;
 
 // PDF minimal valide, texte sans dépendance npm pendant le test/CI.
 function pdf(pages) {
@@ -21,7 +24,7 @@ function pdf(pages) {
         `<< /Type /Pages /Kids [${pages.map((_, i) => 4 + i * 2 + ' 0 R').join(' ')}] /Count ${pages.length} >>`,
         '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
     for (let i = 0; i < pages.length; i++) {
-        const lignes = pages[i].match(/.{1,65}(?:\s|$)/g) || [pages[i]];
+        const lignes = pages[i].replace(/\s+/g,' ').match(/.{1,65}(?:\s|$)/g) || [pages[i]];
         const stream = 'BT /F1 10 Tf 40 750 Td 12 TL ' + lignes.map(x => '(' + x.replace(/[()\\]/g, '\\$&') + ') Tj T*').join(' ') + ' ET';
         const content = 5 + i * 2;
         objets.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`);
@@ -37,7 +40,7 @@ function pdf(pages) {
 }
 
 const ctx = {
-    PF: { net: { auth: { utilisateur: () => ({ id }) }, reqPdf: async () => ({ ok: true, binary_b64: pdf(texte.split('\n')) }) } },
+    PF: { net: { auth: { utilisateur: () => ({ id }) }, reqPdf: async () => ({ ok: true, binary_b64: pdf([texte, autreAnnee]) }) } },
     pdfjsLib: pdfjs,
     pdfjsWorkerSrc: require.resolve('../app/src/main/assets/www/vendor/pdfjs/pdf.worker.min.js'),
     atob: b64 => Buffer.from(b64, 'base64').toString('binary'),
@@ -60,6 +63,13 @@ const lecteur = ctx.PF.fiscalBrochureSources;
     netCtx.PF.net._fin(rappel, { ok: true, status: 200, binary_b64: brut });
     assert.equal((await attente).binary_b64, brut);
     assert.equal(lecteur.analyser(texte).valeurs.nouveauTauxCsg, .106);
+    assert.equal(lecteur.analyser([passageReel, autreAnnee]).valeurs.nouveauTauxCsg, .106,
+        'l’ordre des items et le titre fragmenté du vrai PDF sont reconnus');
+    assert.equal(lecteur.analyser([passageReel.replace('revenus 2025 déclarés en 2026', 'revenus 2026 déclarés en 2027'), autreAnnee]).valeurs, undefined);
+    assert.equal(lecteur.analyser([passageReel.replace('PRINCIPALES NOUVEAUT É S REVENUS 2025', ''), autreAnnee]).valeurs, undefined,
+        'un taux 2025 sans titre sur la même page est refusé');
+    assert.equal(lecteur.analyser([passageReel, passageReel]).valeurs, undefined,
+        'un millésime ambigu sur plusieurs pages est refusé');
     assert.equal(lecteur.analyser(texte).valeurs.psCrypto2025Attestes, false);
     assert.equal(lecteur.analyser(texte.replace('revenus 2025 declares en 2026', 'revenus 2026 declares en 2027')).valeurs, undefined);
     assert.equal(lecteur.analyser(texte.replace('revenus du patrimoine et les produits de placement', 'les revenus')).valeurs, undefined);
@@ -80,7 +90,7 @@ const lecteur = ctx.PF.fiscalBrochureSources;
     await lecteur.chercher(2025);
     assert.equal(JSON.parse([...memoire.values()][0]).length, 1);
     // Rectification sur le même millésime : conserver les deux preuves.
-    ctx.PF.net.reqPdf = async () => ({ ok: true, binary_b64: pdf(texte.replace('Le taux de CSG deductible reste a 6,8 %.', 'Le taux de CSG deductible reste a 6,8 %. Note complementaire.').split('\n')) });
+    ctx.PF.net.reqPdf = async () => ({ ok: true, binary_b64: pdf([texte.replace('Le taux de CSG deductible reste a 6,8 %.', 'Le taux de CSG deductible reste a 6,8 %. Note complementaire.'), autreAnnee]) });
     assert.equal((await lecteur.chercher(2025)).enregistree, true);
     assert.equal(JSON.parse([...memoire.values()][0]).length, 2);
     ctx.PF.net.reqPdf = async () => ({ ok: true, binary_b64: Buffer.from('<html>not a pdf</html>').toString('base64') });

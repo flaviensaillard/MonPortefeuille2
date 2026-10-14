@@ -12,11 +12,18 @@
             .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
     }
     function analyser(textePdf) {
-        var t = normaliser(textePdf);
-        var debut = t.search(/PRINCIPALES NOUVEAUTES REVENUS 2025/i);
-        var fin = t.search(/PRINCIPALES NOUVEAUTES REVENUS 2026\s*&\s*SUIVANTS/i);
-        if (debut < 0 || fin <= debut) return { etat: 'rubrique revenus 2025 non reconnue dans le PDF' };
-        var section = t.slice(debut, fin);
+        // PDF.js renvoie les items dans l'ordre de dessin, pas forcément dans
+        // l'ordre de lecture : sur le PDF DGFiP, le titre « revenus 2025 » est
+        // dessiné APRÈS le paragraphe CSG et « NOUVEAUT É S » est scindé.
+        // Exiger titre et passage sur la MÊME page interdit de prendre une
+        // règle de 2026 sur la page suivante pour une règle de 2025.
+        var pages = (Array.isArray(textePdf) ? textePdf : [textePdf]).map(normaliser);
+        var candidats = pages.filter(function (t) {
+            return /PRINCIPALES\s+NOUVEAUT\s*E\s*S\s+REVENUS\s+2025\b/i.test(t)
+                && !/PRINCIPALES\s+NOUVEAUT\s*E\s*S\s+REVENUS\s+2026\s*&\s*SUIVANTS/i.test(t);
+        });
+        if (candidats.length !== 1) return { etat: 'rubrique revenus 2025 non reconnue sur une page unique du PDF' };
+        var section = candidats[0];
         var bloc = section.match(/Prelevements sociaux\s+(Le taux de la CSG est porte[\s\S]{0,950}?\(LFSS 2026, art\.\s*12\s*;\s*CSS, art\.\s*L\s*136-8\))/i);
         if (!bloc) return { etat: 'section prélèvements sociaux du PDF non reconnue' };
         var s = bloc[1];
@@ -31,8 +38,7 @@
             valeurs: { revenus: 2025, declaration: 2026, ancienTauxCsg: .092, nouveauTauxCsg: .106,
                 csgDeductibleMentionnee: .068, effetPatrimoine: 'revenus 2025 déclarés en 2026',
                 effetPlacement: 'à compter du 1.1.2026', psCrypto2025Attestes: false },
-            extrait: 'PRINCIPALES NOUVEAUTES REVENUS 2025 Prelevements sociaux ' + s
-                + ' PRINCIPALES NOUVEAUTES REVENUS 2026 & SUIVANTS' };
+            extrait: 'Prelevements sociaux ' + s + ' PRINCIPALES NOUVEAUTES REVENUS 2025' };
     }
     function compte() {
         var u = PF.net && PF.net.auth && PF.net.auth.utilisateur();
@@ -70,7 +76,7 @@
                 })); })(page);
             }
             return Promise.all(pages).then(function (contenu) {
-                return pdf.destroy().then(function () { return contenu.join(' '); });
+                return pdf.destroy().then(function () { return contenu; });
             });
         });
     }

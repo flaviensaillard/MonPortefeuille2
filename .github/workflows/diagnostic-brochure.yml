@@ -25,9 +25,11 @@ jobs:
             console.log('Octets', b.length, 'signature', Buffer.from(b.slice(0,5)).toString('ascii'));
             const doc = await pdfjs.getDocument({data:b,isEvalSupported:false,useSystemFonts:true}).promise;
             console.log('Pages', doc.numPages);
+            const textes=[];
             for (let n=1;n<=Math.min(doc.numPages,20);n++) {
               const p=await doc.getPage(n), c=await p.getTextContent();
               const t=c.items.map(i=>i.str).join(' ').replace(/\s+/g,' ');
+              textes.push(t);
               const ix=t.search(/nouv|2025|prelev|patrimoine|CSG/i);
               console.log('Page',n,'items',c.items.length,'début',JSON.stringify(t.slice(0,450)));
               console.log('Page',n,'premier repère',ix,JSON.stringify(t.slice(Math.max(0,ix-40),Math.max(0,ix-40)+700)));
@@ -39,6 +41,10 @@ jobs:
               }
             }
             await doc.destroy();
+            require('./app/src/main/assets/www/js/fiscal_brochure_sources.js');
+            const analyse = globalThis.PF.fiscalBrochureSources.analyser(textes);
+            console.log('Analyse officielle', JSON.stringify({etat:analyse.etat,valeurs:analyse.valeurs || null}));
+            if (!analyse.valeurs || analyse.valeurs.psCrypto2025Attestes !== false) process.exitCode=1;
           })().catch(e => {console.error(e);process.exitCode=1});
           JS
           # Annotations consultables via api.github.com, sans stockage d'une
