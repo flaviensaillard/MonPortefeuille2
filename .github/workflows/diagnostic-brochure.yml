@@ -31,6 +31,12 @@ jobs:
               const ix=t.search(/nouv|2025|prelev|patrimoine|CSG/i);
               console.log('Page',n,'items',c.items.length,'début',JSON.stringify(t.slice(0,450)));
               console.log('Page',n,'premier repère',ix,JSON.stringify(t.slice(Math.max(0,ix-40),Math.max(0,ix-40)+700)));
+              if (n === 1) {
+                const social=t.search(/pr[eé]l[eè]vements sociaux/i), csg=t.search(/taux de la CSG/i);
+                console.log('Page 1', 'social', social, 'CSG', csg);
+                for (let j=Math.max(0,social-70); j<Math.min(t.length,Math.max(social,csg)+1850);j+=780)
+                  console.log('social extrait',j,JSON.stringify(t.slice(j,j+780)));
+              }
             }
             await doc.destroy();
           })().catch(e => {console.error(e);process.exitCode=1});
