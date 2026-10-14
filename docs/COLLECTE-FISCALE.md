@@ -121,7 +121,30 @@ toujours explicitement **2018** dans la condition des titres acquis.
 Les tests vérifient l'acceptation de cette variante, la relecture du cache
 et le refus de 2019. Si la prochaine lecture échoue encore, le diagnostic
 affichera aussi un court contexte autour de « 2018 » du document public ;
-aucune donnée personnelle n'est nécessaire. Validation sur téléphone requise.
+aucune donnée personnelle n'est nécessaire. **Essai sur téléphone du correctif
+`b72b667` : confirmé.** Le rapport affiche pour les revenus **2025** :
+**R2 déjà active prioritaire** et **PS des plus-values de titres 18,6 %,
+IR forfaitaire 12,8 %**, avec la page DGFiP de la déclaration 2026 et le
+contrôle explicite de l'année. Cela valide la lecture des gains de titres sur
+cet appareil, pas les autres revenus du capital ni la situation du foyer.
+
+### Audit des autres régimes avant toute bascule (14/10/2026)
+
+| Domaine | Ce que la DGFiP publie | Pourquoi la simulation ne peut pas encore l'activer automatiquement comme régime complet |
+| --- | --- | --- |
+| RCM et précompte | La [page DGFiP « revenus mobiliers »](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers), **modifiée le 08/04/2026**, indique que les produits de placement **versés en 2025** ont supporté **17,2 % de PS** lors du versement ; les RCM **non précomptés lors de l'encaissement en 2025** peuvent être soumis à **18,6 % sur l'avis 2026 des revenus 2025**. À partir de 2026 le taux change, avec des produits qui restent à 17,2 % (assurance-vie/capitalisation, certains CEL/PEL/PEP). | Il faut distinguer produit, encaissement, date, précompte effectif, dispense/acompte IR et exceptions. La page actuelle n'atteste pas toute la situation du foyer ni les millésimes 2023–2024 ; **ne pas y appliquer le PS des titres**. Pas de révision RCM complète par simple lecture de deux taux. |
+| CSG déductible et calendrier | La même [page DGFiP](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers) mentionne la fraction de **6,8 %** des RCM imposés au barème, **déductible l'année du paiement de la CSG**, sous exception des fonds en euros d'assurance-vie/capitalisation ; au PFU, pas de CSG déductible au titre des RCM. Le [BOFiP CSG](https://bofip.impots.gouv.fr/bofip/887-PGP.html/identifiant=BOI-IR-BASE-20-20-20170724) précise aussi les règles d'assiette et d'imputation, mais sa version affichée est datée **24/07/2017**. | La fraction, son éligibilité, la date de paiement et le rattachement au bon foyer/avis doivent être croisés avec les millésimes applicables. Une page actuelle et un BOFiP ancien ne valident pas à eux seuls toutes les années ni tous les arrondis de l'APK. |
+| Crypto privée et 2086 | La [FAQ DGFiP](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques), modifiée le **17/07/2026**, indique actuellement **31,4 %**, l'option **3CN indépendante de 2OP**, la franchise de **305 € sur les prix bruts annuels de cession**, l'annexe **2086** et la non-reportabilité des moins-values ; le [BOFiP du 23/04/2024](https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423) indiquait **30 %** à sa date. | Ne pas appliquer rétroactivement le taux de la FAQ courante ; établir la date d'effet de chaque taux, le portefeuille crypto **global** du foyer et l'intégralité des cessions/comptes externes, puis vérifier la formule 2086 et ses arrondis. La seule application ne certifie pas une 2086 complète. |
+| QF et calcul complet | Le [BOFiP QF du 07/04/2026](https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407) contient le plafond général **1 807 €/demi-part pour 2025**, une double liquidation et des plafonds spécifiques. | Le bouton ne lit que le plafond général ; les situations spéciales et la concordance de toutes les formules/arrondis avec le millésime restent non testées. Les cas personnels non documentés ne peuvent pas être déclarés vérifiés à partir du BOFiP. |
+
+Ces textes constituent une **cartographie de travail**, pas des paramètres
+activés. Les taux RCM/crypto et la CSG du code déjà embarqué restent signalés
+comme hypothèses tant qu'un lecteur par produit, année **des revenus** et date
+de paiement n'a pas produit une preuve réévaluable et que le moteur associé
+n'a pas été testé ; la R2 2025 garde sa priorité indépendante. Pour 2026,
+aucun barème 2025 n'est reconduit silencieusement. Les informations ponctuelles
+sur le portefeuille/foyer communiquées par le propriétaire pour 2025 ne sont
+pas transformées en règles publiques ni inscrites dans le dépôt.
 
 **Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
 « Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,
