@@ -5,6 +5,9 @@
     'use strict';
     var PF = root.PF = root.PF || {};
     var CLE = 'pf2.dgfip.regimes.v1.';
+    // Dans l'aide HTML « 1<sup>er</sup> » devient « 1 er » quand les
+    // balises sont supprimées. La date reste exigée (jamais 2019 ni 2025).
+    var DATE_TITRES_ANCIENS = /avant\s+le\s+1\s*(?:e\s*r|ᵉ\s*ʳ)\s+janvier\s+2018/i;
     function url(annee) {
         return 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/' + (annee + 1) + '/aides/gains.htm';
     }
@@ -57,15 +60,20 @@
         // La formulation exacte de la phrase d'abattement n'est pas un taux :
         // vérifier ensemble son objet, la condition d'acquisition et sa date,
         // plutôt qu'exiger le mot-à-mot d'un seul libellé éditorial.
-        var condition = passageTitres.match(/abattement.{0,750}?avant\s+le\s+1er\s+janvier\s+2018/i);
-        var anciens = !!condition && /titres\s+(?:acquis|souscrits?)/i.test(condition[0]);
-        if (!option || !anciens)
+        var abattement = passageTitres.match(/abattement.{0,750}/i);
+        var condition = abattement && abattement[0].match(DATE_TITRES_ANCIENS);
+        var anciens = !!condition && /titres\s+(?:acquis|souscrits?)/i.test(abattement[0].slice(0, condition.index));
+        if (!option || !anciens) {
+            var indice2018 = passageTitres.indexOf('2018');
             return { etat: (option ? '' : 'case 2OP non reconnue ; ')
                 + (anciens ? '' : 'abattement des titres acquis avant 2018 non reconnu')
                 + ' (repères du document public : 2OP=' + /\b2OP\b/i.test(t)
                 + ', abattement=' + /abattement/i.test(passageTitres)
                 + ', titres acquis=' + /titres\s+(?:acquis|souscrits?)/i.test(passageTitres)
-                + ', avant 2018=' + /avant\s+le\s+1er\s+janvier\s+2018/i.test(passageTitres) + ')' };
+                + ', avant 2018=' + DATE_TITRES_ANCIENS.test(passageTitres)
+                + (anciens || indice2018 < 0 ? '' : ', contexte 2018=«'
+                    + passageTitres.slice(Math.max(0, indice2018 - 65), indice2018 + 12) + '»') + ')' };
+        }
         return { etat: 'taux IR/PS des titres et année explicites',
             valeurs: { ir: ir, ps: ps, pfu: pfu },
             // Extrait textuel du document public, sans données du portefeuille.

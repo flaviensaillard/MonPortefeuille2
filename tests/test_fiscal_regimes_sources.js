@@ -27,7 +27,14 @@ const src = ctx.PF.fiscalRegimesSources;
     // espaces insécables numériques, et longue phrase des titres anciens.
     const aide2025 = `<td>Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises,<br>lors de leur imposition, à <b>un prélèvement forfaitaire unique (PFU)</b> de 12,8&#160;% auquel<br>s'ajoutent les prélèvements sociaux de 18,6&#160;% soit au total un taux de <b>31,4&#160;%</b>.<br>Cependant vous pouvez opter, lors de la déclaration de revenus, pour une imposition globale de ces revenus et gains au barème progressif<br>de l'impôt sur le revenu en cochant la <b>case 2OP</b>.<br><b>Gains de cession de valeurs mobilières, droits sociaux et gains assimilés</b><br>Si, en 2025, vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières, des droits<br>sociaux et titres assimilés, si vous avez perçu des distributions effectuées par certaines structures.<br>Le mécanisme d’abattements qui existe pour certains gains en tenant compte de la durée de détention des titres cédés s'applique uniquement pour les titres acquis ou souscrit avant le<br>1er janvier 2018 en cas d'option pour le barème progressif.</td>`;
     assert.equal(src.lireTitres(aide2025, 2025).ps, .186);
-    pages[2025] = aide2025;
+    // Cas observé par diagnostic mobile : la date peut être coupée par une
+    // balise de typographie HTML, donnant « 1 er » dans le texte normalisé.
+    const aideAvecExposant = aide2025.replaceAll('1er janvier 2018', '1<sup>er</sup> janvier 2018');
+    assert.equal(src.lireTitres(aideAvecExposant, 2025).ps, .186);
+    assert.equal(src.lireTitres(aide2025.replaceAll('1er janvier 2018', '1ᵉʳ janvier 2018'), 2025).ps, .186);
+    assert.equal(src.lireTitres(aideAvecExposant.replace('1<sup>er</sup> janvier 2018 en cas',
+        '1<sup>er</sup> janvier 2019 en cas'), 2025), null, 'condition des titres anciens millésimée');
+    pages[2025] = aideAvecExposant;
     const releve2025 = await src.chercher(2025);
     assert.equal(releve2025.valeurs.ps, .186, 'extrait de la vraie structure HTML relu après stockage');
     assert.match(releve2025.etat, /année explicites/);

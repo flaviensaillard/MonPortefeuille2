@@ -106,8 +106,22 @@ R2 en cours. Tant que les transactions ne sont pas chargées, la simulation
 personnelle est suspendue et la R2 indiquée **non évaluée**, pas inactive.
 Une lecture de transactions échouée ne se fait plus passer pour une table vide ;
 une fois le chargement terminé, le rapport de collecte affiché est réévalué
-avec l'état réel de la R2. Ces deux corrections attendent encore un essai sur
-téléphone. Pas de modification SQL, ni de preuve d'une R2 perdue en base.
+avec l'état réel de la R2. Pas de modification SQL, ni de preuve d'une R2
+perdue en base.
+
+**Essai de l'APK `8e4aaf2` (14/10/2026) :** la R2 2025 est de nouveau
+confirmée active et prioritaire après le clic. Le diagnostic des gains montre
+`2OP=true`, `abattement=true`, `titres acquis=true` mais `avant 2018=false` ;
+le taux PS des titres n'est donc **toujours pas validé dans l'APK**. La page
+officielle consultée affiche « avant le 1er janvier 2018 ». Une explication
+possible, à confirmer sur l'appareil, est une écriture HTML telle que
+`1<sup>er</sup>` qui devient `1 er` après suppression des balises : le lecteur
+accepte désormais ces deux graphies et l'exposant Unicode, en exigeant
+toujours explicitement **2018** dans la condition des titres acquis.
+Les tests vérifient l'acceptation de cette variante, la relecture du cache
+et le refus de 2019. Si la prochaine lecture échoue encore, le diagnostic
+affichera aussi un court contexte autour de « 2018 » du document public ;
+aucune donnée personnelle n'est nécessaire. Validation sur téléphone requise.
 
 **Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
 « Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,
