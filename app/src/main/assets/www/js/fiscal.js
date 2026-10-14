@@ -1931,11 +1931,15 @@
         var m = matriceCouverture();
         if (!m) return '';
         var corps = m.annees.map(function (an) {
+            var verifs = PF.fiscalCouverture.texteVerifications(an);
             return '<div style="margin-top:8px"><b>Revenus ' + UI.h(an) + '</b> — déclaration '
                 + UI.h(m.millesimes[an].declaration) + ', publication BOFiP '
                 + UI.h(m.millesimes[an].publicationBoi || 'non disponible')
                 + '<div class="st" style="white-space:pre-wrap;overflow-wrap:anywhere">'
-                + UI.h(PF.fiscalCouverture.texteDetail(m, an)) + '</div></div>';
+                + UI.h(PF.fiscalCouverture.texteDetail(m, an)) + '</div>'
+                + (verifs ? '<div class="st" style="white-space:pre-wrap;overflow-wrap:anywhere">'
+                    + '<b>Sources publiques relues hors application</b>\n' + UI.h(verifs) + '</div>' : '')
+                + '</div>';
         }).join('');
         var contra = PF.fiscalCouverture.contradictions();
         return '<details style="margin-top:8px"><summary>Matrice de couverture DGFiP 2023–2026 '

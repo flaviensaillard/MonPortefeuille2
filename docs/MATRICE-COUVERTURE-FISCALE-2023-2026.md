@@ -58,7 +58,7 @@ confirmés sur Android + BOFiP + aides du simulateur 2026) :
 | Abattement salariés 10 % | établiable | établiable | **établi** | non disponible |
 | Forfait repas | établiable | établiable | **établi** | non disponible |
 | Barème kilométrique | établiable | établiable | **établi** | non disponible |
-| PS plus-values de titres | partiel | partiel | **établi** (divergence signalée) | non disponible |
+| PS plus-values de titres | établiable (aide du millésime 2024 relue à distance le 14/10/2026 : 17,2 %) | établiable (corroborée par l'accueil du simulateur 2025 : 17,2 %) | **établi** (divergence signalée) | non disponible |
 | PS cessions crypto privées | partiel | partiel | **recoupement** (non activé) | non disponible |
 | RCM : produit, année, précompte, 2OP, 2CG/2BH/2DF | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
 | CSG déductible et calendrier 6DE | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
@@ -69,6 +69,13 @@ confirmés sur Android + BOFiP + aides du simulateur 2026) :
 rétroactifs et la vérifie au clic ; la case devient « établi » après lecture
 réussie. Rien n'est établi pour 2026 : les brochures et aides du millésime
 « revenus 2026 » (déclaration 2027) n'existent pas encore.
+
+« relu à distance » = la page publique a été lue le 14/10/2026 hors application
+pour vérifier qu'elle existe, qu'elle porte bien l'année des revenus et le taux
+annoncé. Cela ne remplit **aucune** case dans l'application : seul le clic du
+propriétaire, sur l'appareil, établit une valeur (voir
+`VERIFICATIONS_DISTANTES` dans `fiscal_couverture.js`, affiché dans le bloc
+replié de la matrice).
 
 **Catégories jamais établies par un document public, quel que soit le
 millésime** : plafonds QF particuliers, RCM personnels (produit, précompte
@@ -236,9 +243,48 @@ de la notice) reste signalé, jamais tranché.
 | 3. CSG : patrimoine 2024 payée en 2025, RCM précomptés en 2025, gains 2025 acquittés sur l'avis 2026 | **partiel** (revenus 2025) | les trois calendriers sont distincts dans `csgDeductible6DE()` ; la part 6,8 % × (2BH + 2DF) calculée automatiquement ne doit **jamais** être reportée en 6DE : un 6DE qui la contient est **bloqué** comme double compte. Aucun montant n'est produit sans saisie personnelle. |
 | 4. 2086 : formule, frais, seuil, cases au niveau du foyer | **partiel** | voir section 4 : formule, frais hors quotient, seuil et cases relus ; exhaustivité du foyer non certifiable. |
 | 5a. Cas QF particuliers, changements de formule, arrondis | **non disponible** | `casParticuliersQF()` bloque bilan et recommandation 2OP dès qu'un cas particulier est déclaré ou qu'une demi-part n'est pas expliquée par la règle générale. Les plafonds spéciaux ne sont pas modélisés. |
-| 5b. Divergence DGFiP sur les PS des titres 2025 | **signalée** | aide du simulateur 2026 : 18,6 % daté « en 2025 » (vérifié le 14/10/2026) ; notice 2042 : 17,2 % (lecture antérieure consignée dans `docs/COLLECTE-FISCALE.md`). Le lecteur retient l'aide du simulateur et affiche la divergence ; R2 prioritaire. |
-| 5c. Sources propres à 2023 et 2024 | **établiables, non établies avant clic** | BOFiP datés 18/06/2024 et 14/04/2025, aides des déclarations 2024 et 2025. Les PS crypto de ces millésimes restent « partiel » : aucune source ne date le taux par année de cession. |
-| 5d. Paramètres des revenus 2026 | **non disponible** | aucun document du millésime. `PROVENANCE_PS[2026]` dit explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche. `baremeDe` et `plafondQF` refusent 2026 sans preuve ; `comparerOptionsFoyer(…, 2026, …)` lève une erreur. |
+| 5b. Divergence DGFiP sur les PS des titres 2025 | **signalée, non levée** | aide du simulateur 2026 : 18,6 % daté « en 2025 » (vérifié le 14/10/2026) ; notice 2042 : 17,2 % (lecture antérieure consignée dans `docs/COLLECTE-FISCALE.md`) ; **et la page d'accueil du même simulateur 2026 affiche encore « Flat Tax de 30% (12.8% d'impôt sur le revenu et 17.2% de prélèvements sociaux) »** — la contradiction est donc interne au millésime 2026. Les trois termes sont consignés dans `CONTRADICTIONS.ps_titres_2025` ; seul le passage qui date explicitement l'année (« Si, en 2025 … ») et dont la somme est cohérente (12,8 + 18,6 = 31,4) est retenu. Aucun taux intermédiaire n'est inventé ; R2 2025 publiée reste prioritaire. |
+| 5c. Sources propres à 2023 et 2024 | **établiables, non établies avant clic** | voir ci-dessous le détail des pages relues à distance le 14/10/2026. Les PS crypto de ces millésimes restent « partiel » : aucune source ne date le taux par année de cession. |
+| 5d. Paramètres des revenus 2026 | **non disponible** | aucun document du millésime. `PROVENANCE_PS[2026]` dit explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche. `baremeDe` et `plafondQF` refusent 2026 sans preuve ; `comparerOptionsFoyer(…, 2026, …)` lève une erreur. Sonde du 14/10/2026 : aucune page du millésime « revenus 2026 » (déclaration 2027) publiée ou indexée, aucune brochure `ir_2027` ; la sonde directe de `/calcul_impot/2027/` n'a pas abouti depuis l'environnement de vérification, le constat repose sur l'absence de publication et sur `docs/COLLECTE-FISCALE.md` (13/10/2026). |
+
+### 5.1 Détail du point 5c — sources propres à 2023 et 2024, relues le 14/10/2026
+
+**Revenus 2023** (aide « Plus-values et gains divers » du simulateur, millésime
+déclaration 2024) —
+`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/gains.htm` :
+
+> « Les plus-values de cession de valeurs mobilières réalisées depuis le
+> 1er janvier 2018 sont soumises, lors de leur imposition, à un prélèvement
+> forfaitaire unique (PFU) de 12,8 % auquel s'ajoutent les prélèvements sociaux
+> de **17,2 %** soit au total un taux de **30 %** » ; « **Si, en 2023**, vous ou
+> les membres de votre foyer fiscal avez vendu des valeurs mobilières, des
+> droits sociaux et titres assimilés » ; option au barème en cochant la **case
+> 2OP** ; abattement pour durée de détention réservé aux titres acquis ou
+> souscrits avant le 1er janvier 2018 ; plus-value avant abattement en case
+> **3VG**, moins-value reportable dix ans en case **3VH**.
+
+Portée : le lecteur `analyserTitres(html, 2023)` accepte ce libellé et renvoie
+`établi` avec `ps = 0.172` ; `PS_PAR_ANNEE[2023] = 0.172` est donc cohérent avec
+la source du millésime. Vérifié hors réseau par
+`tests/test_fiscal_regimes_revenus_2023_reel.js`, qui transpose le texte réel de
+la page (balisage simplifié) et contrôle aussi les refus : la même page n'est
+**pas** acceptée pour 2024 ni pour 2025, et sans « Si, en 2023 » elle
+n'établit rien.
+
+**Revenus 2024** : l'aide gains.htm du millésime déclaration 2025 n'a pas pu être
+relue à distance depuis cet environnement (accès en échec). La page d'accueil du
+même simulateur, millésime déclaration 2025 —
+`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/complet/index.htm` —
+indique pour les revenus 2024 la « Flat Tax de 30% (12.8% d'impôt sur le revenu
+et 17.2% de prélèvements sociaux) » ; la page d'accueil du millésime déclaration
+2024 liste les cases 3TB, 3XD « PS 15,5 % » et 3YA « PS 17,2 % ». Ce sont des
+**corroborations** : la case de la matrice reste « établiable » et ne devient
+« établi » qu'après lecture réussie de l'aide millésimée par le bouton.
+
+**Limite assumée** : ces vérifications distantes ne remplacent pas la collecte.
+Elles sont consignées telles quelles, avec leur date et leur portée, dans
+`VERIFICATIONS_DISTANTES` et affichées dans le bloc replié de la matrice, sans
+jamais alimenter une valeur du moteur.
 
 ---
 
@@ -261,6 +307,13 @@ de la notice) reste signalé, jamais tranché.
   (documents DGFiP) et données personnelles (salaires, intérêts, précompte réel,
   montants 2BH/2DF/6DE, options du foyer, parts, PAS). Le PAS n'entre ni dans la
   matrice ni dans les caches publics.
+- **Jumeau Python vérifié le 14/10/2026** : `core/fiscal_bars.py` porte les mêmes
+  taux que le moteur JS — `PS_PAR_ANNEE` 0.172 jusqu'en 2024, 0.186 en 2025 et
+  2026, `PS_PRECOMPTES_PAR_ANNEE` 0.172 jusqu'en 2025 et 0.186 en 2026. Aucune
+  divergence à signaler. `jobs/importer_fiscal_existant.py` refuse toujours de
+  rejouer l'import initial figé (il lève `RuntimeError` dès que
+  `PS_PAR_ANNEE[2025] != 0.172`) : correction par nouvelle révision dédiée, jamais
+  par relance.
 
 ---
 
@@ -270,12 +323,13 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 
 | Fichier | Couvre |
 | --- | --- |
-| `tests/test_fiscal_matrice_couverture.js` | statuts par millésime et catégorie, refus de reconduction, recoupement distinct d'un texte explicite, contradictions, bascule jamais déclarée totale |
+| `tests/test_fiscal_matrice_couverture.js` | statuts par millésime et catégorie, refus de reconduction, recoupement distinct d'un texte explicite, contradictions (dont les trois termes de `ps_titres_2025`), liste et portée des vérifications distantes consignées, bascule jamais déclarée totale |
 | `tests/test_fiscal_crypto_ps_recoupement.js` | lecture du BOFiP (date de version, qualification, taux), huit maillons, refus par millésime et par maillon manquant, corroboration et contradiction de la FAQ, caches par compte/document/millésime, rectifications conservées, cache altéré refusé |
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
+| `tests/test_fiscal_regimes_revenus_2023_reel.js` | libellé **réel** de l'aide gains.htm des revenus 2023 relu le 14/10/2026 : 17,2 %/30 % acceptés, variantes typographiques tolérées, refus pour 2024 et 2025, refus sans attribution d'année, preuve collectée → case « établi » uniquement pour 2023, cohérence avec `VERIFICATIONS_DISTANTES` |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 45 suites JavaScript sont vertes en local.
+modification : les 46 suites JavaScript sont vertes en local.

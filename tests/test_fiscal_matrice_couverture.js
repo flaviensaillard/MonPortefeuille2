@@ -120,6 +120,42 @@ assert.equal(C.contradictions(2024).length, 0, 'aucune contradiction inventée p
 assert.equal(contra.find(c => c.id === 'ps_titres_2025').termes[1].passage.includes('Si, en 2025'), true);
 assert.match(contra.find(c => c.id === 'seuil_2086_2025').arbitrage, /jamais résolu par une hypothèse/);
 
+// Divergence relevée le 14/10/2026 à l'intérieur du même millésime de simulateur :
+// la page d'accueil du modèle complet 2026 affiche encore 30 % / 17,2 % alors que
+// l'aide « Plus-values et gains divers » du même millésime affiche 31,4 % / 18,6 %.
+const titres = contra.find(c => c.id === 'ps_titres_2025');
+assert.equal(titres.termes.length, 3, 'les deux pages du simulateur 2026 sont consignées');
+assert.match(titres.termes[2].valeur, /17,2 %/);
+assert.match(titres.termes[2].passage, /12\.8% d’impôt sur le revenu et 17\.2%/);
+assert.match(titres.termes[2].url, /calcul_impot\/2026\/complet\/index\.htm$/);
+assert.match(titres.termes[2].limite, /INTERNE au simulateur/);
+assert.match(titres.arbitrage, /Si, en 2025/, 'seule l’aide date explicitement l’année');
+assert.match(titres.arbitrage, /divergence non levée/);
+assert.match(titres.arbitrage, /R2 2025 publiée prioritaire/);
+
+// ------------------------------------------- vérifications distantes consignées
+const verifs = C.VERIFICATIONS_DISTANTES;
+assert.ok(verifs.length >= 7, 'chaque source relue hors application est tracée');
+verifs.forEach(v => {
+    assert.match(v.date, /^2026-10-14$/);
+    assert.ok(v.url && /^https:\/\/(simulateur-ir-ifi\.impots\.gouv\.fr|www\.impots\.gouv\.fr|bofip\.impots\.gouv\.fr)\//.test(v.url),
+        'source DGFiP uniquement : ' + v.url);
+    assert.ok(v.constate && v.portée, 'constat et portée obligatoires');
+});
+assert.equal(C.verificationsDistantes(2023, 'ps_titres').length, 1);
+assert.equal(C.verificationsDistantes(2022).length, 0, 'hors périmètre : rien de consigné');
+const verifs2026 = C.verificationsDistantes(2026);
+assert.equal(verifs2026.length, 1, 'pour 2026, seule l’absence de publication est consignée');
+assert.equal(verifs2026[0].categorie, 'toutes');
+assert.match(verifs2026[0].constate, /aucune aide ni brochure du millésime « revenus 2026 »/);
+assert.match(verifs2026[0].portée, /rien n’est établi pour 2026/);
+assert.match(verifs2026[0].limite, /sonde directe/, 'la limite de la vérification est explicite');
+assert.match(C.texteVerifications(2025), /BOI-RPPM-PVBMC-30-30-20240423/, 'BOFiP en permalien versionné');
+assert.equal(C.texteVerifications(2022), '');
+// Le BOFiP ne date aucune année de cession : il ne peut pas établir 2025 seul.
+assert.match(C.verificationsDistantes(2025, 'ps_crypto')[0].portée, /aucune année de cession/);
+assert.match(C.verificationsDistantes(2025, 'ps_crypto')[2].portée, /jamais attribuée à 2025/);
+
 // ------------------------------------------------------------------ comptes rendus
 const t = C.texte(m3);
 assert.match(t, /année des revenus ≠ année de déclaration/);

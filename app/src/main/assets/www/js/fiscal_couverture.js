@@ -292,10 +292,21 @@
                     passage: '« Si, en 2025, vous ou les membres de votre foyer fiscal avez vendu des valeurs '
                         + 'mobilières ... PFU de 12,8 % auquel s’ajoutent les prélèvements sociaux de 18,6 % '
                         + 'soit au total un taux de 31,4 % »',
-                    limite: 'page vérifiée le 14/10/2026 ; l’année 2025 est explicite' }
+                    limite: 'page vérifiée le 14/10/2026 ; l’année 2025 est explicite' },
+                { valeur: '17,2 %', source: 'Simulateur IR-IFI 2026, page d’accueil du modèle complet '
+                        + '(même millésime que l’aide ci-dessus)',
+                    url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/complet/index.htm',
+                    publication: 'déclaration 2026',
+                    passage: '« Si la case 2OP n’est pas cochée, vos revenus de capitaux mobiliers et gains de '
+                        + 'cession de valeurs mobilières demeurent soumis à l’imposition au prélèvement forfaitaire '
+                        + 'unique (Flat Tax) de 30% (12.8% d’impôt sur le revenu et 17.2% de prélèvements sociaux) »',
+                    limite: 'vérifiée le 14/10/2026 : la contradiction est INTERNE au simulateur du millésime 2026' }
             ],
-            arbitrage: 'Le lecteur retient l’aide du simulateur, qui date explicitement le taux des revenus 2025. '
-                + 'La divergence avec la notice 2042 reste signalée ; R2 2025 publiée reste prioritaire.'
+            arbitrage: 'Le lecteur retient l’aide « Plus-values et gains divers », seule page du simulateur qui '
+                + 'date explicitement le taux des revenus 2025 (« Si, en 2025 … ») et dont la somme IR + PS = PFU '
+                + 'est cohérente (12,8 + 18,6 = 31,4). La page d’accueil du même simulateur et la notice 2042 '
+                + 'affichent encore 30 % / 17,2 % : divergence non levée, aucun taux intermédiaire inventé, '
+                + 'R2 2025 publiée prioritaire.'
         },
         {
             id: 'seuil_2086_2025', categorie: 'crypto_2086_foyer', millesime: 2025,
@@ -309,6 +320,68 @@
                 + 'jamais résolu par une hypothèse.'
         }
     ];
+
+    /* Vérifications distantes menées le 14/10/2026 sur les documents publics,
+       hors application. Elles ne remplacent PAS la collecte du bouton : elles
+       consignent ce qui a été constaté sur la source à cette date, et ce qui ne
+       l'a pas été. Les tests récurrents, eux, n'utilisent jamais le réseau. */
+    var VERIFICATIONS_DISTANTES = [
+        { date: '2026-10-14', millesime: 2023, categorie: 'ps_titres',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/gains.htm',
+            constate: 'PFU de 12,8 % + PS de 17,2 % = 30 % ; « Si, en 2023, vous ou les membres de votre '
+                + 'foyer fiscal avez vendu des valeurs mobilières » ; case 2OP ; abattement réservé aux titres '
+                + 'acquis ou souscrits avant le 1er janvier 2018',
+            portée: 'libellé accepté par analyserTitres pour les revenus 2023 : la case passe à « établi » au clic' },
+        { date: '2026-10-14', millesime: 2024, categorie: 'ps_titres',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/complet/index.htm',
+            constate: 'Flat Tax de 30 % (12,8 % d’IR et 17,2 % de PS) pour les revenus 2024',
+            portée: 'corroboration seulement',
+            limite: 'l’aide gains.htm du millésime 2025 n’a pas pu être relue à distance depuis cet '
+                + 'environnement : la case reste à établir par le bouton' },
+        { date: '2026-10-14', millesime: 2025, categorie: 'ps_titres',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm',
+            constate: 'PFU de 12,8 % + PS de 18,6 % = 31,4 % ; « Si, en 2025 … »',
+            portée: 'source retenue par le lecteur ; contradiction interne au simulateur 2026 signalée' },
+        { date: '2026-10-14', millesime: 2025, categorie: 'ps_crypto',
+            url: 'https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423',
+            constate: '« Date de début de publication du BOI : 23/04/2024 » ; 12,8 % + « prélèvements sociaux '
+                + 'sur les revenus du patrimoine au taux global de 17,2 % » ; « taux global de 30 % »',
+            portée: 'maillon 1 du recoupement ; aucune année de cession n’est datée par ce texte' },
+        { date: '2026-10-14', millesime: 2025, categorie: 'ps_crypto',
+            url: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf',
+            constate: 'CSG portée de 9,2 % à 10,6 % sur les revenus du patrimoine et les produits de placement ; '
+                + 'revenus fonciers, plus-values immobilières, assurance-vie et épargne logement maintenus à '
+                + '9,2 % ; CSG déductible à 6,8 % ; hausse « à compter des revenus 2025 déclarés en 2026 pour les '
+                + 'revenus du patrimoine et à compter du 1.1.2026 pour les produits de placement » '
+                + '(LFSS 2026, art. 12 ; CSS, art. L 136-8)',
+            portée: 'maillon 2 du recoupement ; les actifs numériques ne figurent pas dans les exceptions' },
+        { date: '2026-10-14', millesime: 2025, categorie: 'ps_crypto',
+            url: 'https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques',
+            constate: '« Publié le 16/06/2023, modifié le 17/07/2026 » ; PFU de 31,4 % (12,8 % + 18,6 %) ; '
+                + 'option 3CN définitive et indépendante de celle des RCM ; exonération si la somme des prix de '
+                + 'cession n’excède pas 305 € ; annexe 2086 et cases 3AN/3BN',
+            portée: 'corroboration sans année de cession : jamais attribuée à 2025' },
+        { date: '2026-10-14', millesime: 2025, categorie: 'crypto_2086_foyer',
+            url: 'https://bofip.impots.gouv.fr/bofip/11967-PGP.html/identifiant=BOI-RPPM-PVBMC-30-10-20190902',
+            constate: '« il convient de retenir les cessions d’actifs numériques … réalisées dans le cadre du '
+                + 'foyer fiscal … tant par le contribuable ou les époux soumis à une imposition commune … que par '
+                + 'les autres membres du foyer fiscal »',
+            portée: 'fonde l’exigence du seuil et de l’annexe au niveau du FOYER, pas du seul portefeuille' },
+        { date: '2026-10-14', millesime: 2026, categorie: 'toutes',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2027/aides/frais.htm',
+            constate: 'aucune aide ni brochure du millésime « revenus 2026 » (déclaration 2027) publiée ou '
+                + 'indexée à cette date',
+            portée: 'rien n’est établi pour 2026 ; les constantes embarquées restent des hypothèses provisoires',
+            limite: 'la sonde directe de cette URL n’a pas abouti depuis l’environnement de vérification : '
+                + 'constat fondé sur l’absence de publication indexée et sur docs/COLLECTE-FISCALE.md (13/10/2026)' }
+    ];
+
+    function verificationsDistantes(annee, categorie) {
+        return VERIFICATIONS_DISTANTES.filter(function (v) {
+            return (annee === undefined || v.millesime === annee)
+                && (categorie === undefined || v.categorie === categorie || v.categorie === 'toutes');
+        });
+    }
 
     function contradictions(annee) {
         return CONTRADICTIONS.filter(function (c) { return annee === undefined || c.millesime === annee; });
@@ -387,12 +460,26 @@
         }).join('\n');
     }
 
+    /* Liste textuelle, pour le bloc replié, des lectures de sources publiques
+       menées hors application. Rien ici n'établit une valeur dans le moteur :
+       la matrice ne dépend que des preuves collectées sur l'appareil. */
+    function texteVerifications(annee) {
+        var v = verificationsDistantes(annee);
+        if (!v.length) return '';
+        return v.map(function (x) {
+            return '— ' + x.date + ', revenus ' + x.millesime + ' / ' + x.categorie + ' : ' + x.constate
+                + '\n  portée : ' + x.portée + (x.limite ? '\n  limite : ' + x.limite : '')
+                + '\n  ' + x.url;
+        }).join('\n');
+    }
+
     PF.fiscalCouverture = {
         STATUTS: STATUTS, MILLESIMES: MILLESIMES, CATEGORIES: CATEGORIES,
-        CONTRADICTIONS: CONTRADICTIONS,
+        CONTRADICTIONS: CONTRADICTIONS, VERIFICATIONS_DISTANTES: VERIFICATIONS_DISTANTES,
         categories: categories, millésime: millésime, millésimeDe: millésime,
         preuveDuMillesime: preuveDuMillesime, evaluer: evaluer, matrice: matrice,
         synthese: synthese, statutDe: statutDe, contradictions: contradictions,
+        verificationsDistantes: verificationsDistantes, texteVerifications: texteVerifications,
         texte: texte, texteDetail: texteDetail
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
