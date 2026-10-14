@@ -21,19 +21,34 @@
                 return cp > 0 && cp < 0x110000 ? String.fromCodePoint(cp) : ' ';
             }).replace(/\s+/g, ' ').trim();
     }
-    function lireTitres(html, annee) {
-        var t = texte(html);
-        if (!Number.isInteger(annee) || annee < 2023 ||
-            !new RegExp('Si, en\\s+' + annee + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières', 'i').test(t) ||
-            !/case\s*2OP/i.test(t) || !/titres acquis ou souscrit avant le\s+1er janvier 2018/i.test(t)) return null;
-        var phrase = t.match(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises[^.]{0,450}?prélèvement forfaitaire unique\s*\(PFU\)\s*de\s*(12[,.]8)\s*%[^.]{0,160}?prélèvements sociaux de\s*(17[,.]2|18[,.]6)\s*%[^.]{0,140}?taux de\s*(30|31[,.]4)\s*%/i);
-        if (!phrase) return null;
-        var ir = Math.round(Number(phrase[1].replace(',', '.')) * 10) / 1000;
-        var ps = Math.round(Number(phrase[2].replace(',', '.')) * 10) / 1000;
-        var global = Math.round(Number(phrase[3].replace(',', '.')) * 10) / 1000;
-        if (Math.abs(ir + ps - global) > .00001) return null;
-        return { ir: ir, ps: ps, pfu: global };
+    function analyserTitres(html, annee) {
+        var t = texte(html), debut = t.search(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises/i);
+        if (!Number.isInteger(annee) || annee < 2023 || debut < 0)
+            return { etat: 'régime des gains de titres absent' };
+        // Pas de taux isolé ailleurs sur la page : ils doivent être dans le
+        // paragraphe du PFU DES TITRES, avant les exemples et autres régimes.
+        var paragraphe = t.slice(debut, debut + 1100);
+        var fin = paragraphe.search(/Gains de cession de valeurs mobilières, droits sociaux/i);
+        if (fin > 0) paragraphe = paragraphe.slice(0, fin);
+        var irM = paragraphe.match(/prélèvement forfaitaire unique\s*\(PFU\)\s*de\s*(12[,.]8)\s*%/i);
+        var psM = paragraphe.match(/prélèvements sociaux de\s*(17[,.]2|18[,.]6)\s*%/i);
+        var pfuM = paragraphe.match(/taux de\s*(30|31[,.]4)\s*%/i);
+        if (!irM || !psM || !pfuM) return { etat: 'taux IR/PS/PFU des titres absents du paragraphe officiel' };
+        var ir = Math.round(Number(irM[1].replace(',', '.')) * 10) / 1000;
+        var ps = Math.round(Number(psM[1].replace(',', '.')) * 10) / 1000;
+        var pfu = Math.round(Number(pfuM[1].replace(',', '.')) * 10) / 1000;
+        if (Math.abs(ir + ps - pfu) > .00001) return { etat: 'taux IR + PS différents du PFU publié' };
+        if (!new RegExp('Si, en\\s+' + annee + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières', 'i').test(t))
+            return { etat: 'revenus ' + annee + ' non mentionnés pour les titres' };
+        if (!/case\s*2OP/i.test(t) || !/Le mécanisme d.abattements/i.test(t) ||
+            !/titres acquis ou souscrits? avant le\s+1er janvier 2018/i.test(t))
+            return { etat: 'option 2OP ou condition des titres anciens non reconnue' };
+        return { etat: 'taux IR/PS des titres et année explicites',
+            valeurs: { ir: ir, ps: ps, pfu: pfu },
+            // Extrait exact du document public (aucune donnée du portefeuille).
+            extrait: t.slice(debut, Math.min(t.length, debut + 4200)) };
     }
+    function lireTitres(html, annee) { return analyserTitres(html, annee).valeurs || null; }
     function compte() {
         var u = PF.net && PF.net.auth && PF.net.auth.utilisateur();
         return u && /^[a-f0-9-]{36}$/i.test(u.id || '') ? u.id : null;
@@ -55,9 +70,9 @@
         if (!id) return Promise.reject(new Error('Session requise pour la collecte des gains.'));
         var source = url(annee);
         return PF.net.req('GET', source, { Accept: 'text/html' }).then(function (rep) {
-            var valeur = rep.ok && rep.body && lireTitres(rep.body, annee);
-            var etat = !rep.ok || !rep.body ? 'document inaccessible'
-                : valeur ? 'taux IR/PS des titres et année explicites' : 'année absente ou format non reconnu';
+            var analyse = rep.ok && rep.body ? analyserTitres(rep.body, annee) : null;
+            var valeur = analyse && analyse.valeurs;
+            var etat = analyse ? analyse.etat : 'document inaccessible';
             if (compte() !== id) throw new Error('Session changée : collecte des titres annulée.');
             if (!root.localStorage) return { etat: etat, enregistree: false };
             var cle = CLE + id, donnees;
@@ -66,15 +81,7 @@
             var historique = Array.isArray(donnees[annee]) ? donnees[annee] : [];
             var nouveau = { annee: annee, url: source, extrait: null };
             if (valeur) {
-                // Preuve textuelle minimale ; reparse à la lecture, pas de HTML complet.
-                var t = texte(rep.body);
-                var phrase = t.match(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises[^.]{0,900}?taux de\s*(?:30|31[,.]4)\s*%[.]/i);
-                var preuveAnnee = t.match(new RegExp('Si, en\\s+' + annee
-                    + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières[^.]{0,480}[.]', 'i'));
-                var preuveOption = t.match(/[^.]{0,280}case\s*2OP[^.]{0,80}[.]/i);
-                var preuveAssiette = t.match(/Le mécanisme d.abattements[^.]{0,450}?titres acquis ou souscrit avant le\s+1er janvier 2018[^.]{0,230}[.]/i);
-                nouveau.extrait = [phrase, preuveAnnee, preuveOption, preuveAssiette]
-                    .map(function (m) { return m ? m[0] : ''; }).join(' ');
+                nouveau.extrait = analyse.extrait;
                 if (!lireTitres(nouveau.extrait, annee)) {
                     nouveau.extrait = null;
                     etat = 'preuve insuffisante pour relecture';
@@ -96,5 +103,6 @@
             return { etat: 'document inaccessible', enregistree: false, url: source };
         });
     }
-    PF.fiscalRegimesSources = { lireTitres: lireTitres, lireCache: lireCache, chercher: chercher, url: url };
+    PF.fiscalRegimesSources = { lireTitres: lireTitres, analyserTitres: analyserTitres,
+        lireCache: lireCache, chercher: chercher, url: url };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

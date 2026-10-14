@@ -84,8 +84,15 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     ];
     assert.equal(f.detail2086(txsCrypto, 2025, {}, {}).exonere_305, false);
     lignes = [faux(), active(p)];
-    assert.equal(await f.actualiserRevisions({transactions: []}), 2);
+    const ctxActif = {transactions: []};
+    assert.equal(await f.actualiserRevisions(ctxActif), 2);
     assert.equal(f.revisionActive(2025), true);
+    // Le bouton DGFiP recharge ses caches sans faire disparaître la R2 si
+    // Supabase tombe au moment du clic (même compte et même contexte chargé).
+    erreurReseau = true;
+    assert.equal(await f.actualiserCollectesDgfip(ctxActif), 2);
+    assert.equal(f.revisionActive(2025), true);
+    erreurReseau = false;
     assert.equal(f.revisionActive(2024), false);
     assert.equal(f.baremeDe(2025).tranches[0], p.bareme.tranches[0]);
     assert.equal(f.baremeDe(2025).taux[0], p.bareme.taux[0]);
@@ -121,6 +128,10 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     assert.equal(requetes.at(-1).table, 'pf2_fiscal_annees');
     assert.match(requetes.at(-1).query, /annee_revenus=eq\.2025&select=/);
     const nbRequetes = requetes.length;
+    ctxActif.transactions.push({ticker: 'LINGOT'});
+    assert.equal(await f.actualiserCollectesDgfip(ctxActif), null,
+        'même objet de contexte muté : ne pas garder une R2 hors périmètre');
+    assert.equal(f.revisionActive(2025), false);
     assert.equal(await f.actualiserRevisions({transactions: [{ticker: 'LINGOT'}]}), null,
         'une opération de métal physique sort du périmètre R2');
     assert.equal(f.revisionActive(2025), false);
@@ -134,8 +145,10 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     assert.equal(f.revisionActive(2025), false);
     lignes = [faux(), active(clone(origine))];
     erreurReseau = true;
-    assert.equal(await f.actualiserRevisions({transactions: []}), null);
+    assert.equal(await f.actualiserCollectesDgfip({transactions: []}), null,
+        'R2 absente : le bouton retente bien sa lecture');
     assert.equal(f.revisionActive(2025), false);
+    assert.match(f.bilanMiseAJour(2025, {boi: {}, frais: {}}), /lecture R2 impossible/);
     erreurReseau = false;
 
     // La réponse d'une ancienne session ne doit jamais s'installer chez B.

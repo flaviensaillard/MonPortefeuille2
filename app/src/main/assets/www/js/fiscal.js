@@ -63,6 +63,7 @@
     var revisionsActives = Object.create(null), officiels = Object.create(null),
         fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
+    var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue';
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
     function franchiseCrypto(annee) {
@@ -87,35 +88,48 @@
         officiels = Object.create(null);
         fraisOfficiels = Object.create(null);
         titresOfficiels = Object.create(null);
+        compteRevisions = null;
+        contexteRevisions = null;
+        etatR2 = 'non lue';
+    }
+    function chargerCachesDgfip(compte) {
+        if (!compte || !compte.id) return;
+        if (PF.fiscalFraisSources) annees().forEach(function (an) {
+            if (an >= 2023) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+        });
+        if (PF.fiscalDgfipSources) annees().forEach(function (an) {
+            if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
+        });
+        if (PF.fiscalRegimesSources) annees().forEach(function (an) {
+            if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
+        });
+    }
+    function perimetreR2(ctx) {
+        return ctx && Array.isArray(ctx.transactions) && PF.modele &&
+            typeof PF.modele.classeDe === 'function' && !ctx.transactions.some(function (t) {
+                return PF.modele.classeDe(t.ticker) === 'or_physique';
+            });
     }
     function actualiserRevisions(ctx) {
         effacerRevisions();
         var numero = sequenceLecture;
         var compte = PF.net && PF.net.auth && PF.net.auth.utilisateur();
-        // Frais officiels locaux et isolés par compte/millésime, R2 prioritaire.
-        if (compte && compte.id && PF.fiscalFraisSources) {
-            annees().forEach(function (an) {
-                if (an >= 2023) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
-            });
-        }
-        if (compte && compte.id && PF.fiscalDgfipSources) {
-            annees().forEach(function (an) {
-                if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
-            });
-        }
-        if (compte && compte.id && PF.fiscalRegimesSources) {
-            annees().forEach(function (an) {
-                if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
-            });
-        }
+        // Les caches DGFiP sont indépendants de la sélection SQL de la R2.
+        chargerCachesDgfip(compte);
+        compteRevisions = compte && compte.id || null;
+        contexteRevisions = ctx;
         // L'or détenu en métal relève d'un régime DISTINCT non publié par R2.
         // Une transaction physique dans les données chargées interdit de présenter
         // la couverture de cette révision comme intégrale pour ce portefeuille.
-        if (!ctx || !Array.isArray(ctx.transactions) || !PF.modele ||
-            typeof PF.modele.classeDe !== 'function' || ctx.transactions.some(function (t) {
-                return PF.modele.classeDe(t.ticker) === 'or_physique';
-            })) return Promise.resolve(null);
-        if (!compte || !compte.id || !PF.fiscalRevisions) return Promise.resolve(null);
+        if (!perimetreR2(ctx)) {
+            etatR2 = !ctx || !Array.isArray(ctx.transactions) ? 'portefeuille non chargé'
+                : 'hors périmètre : or physique ou classe inconnue';
+            return Promise.resolve(null);
+        }
+        if (!compte || !compte.id || !PF.fiscalRevisions) {
+            etatR2 = 'session ou lecteur R2 absent';
+            return Promise.resolve(null);
+        }
         var chemins = PF.fiscalRevisions.cheminsFeuilles(snapshotConstantesCode(2025));
         return PF.fiscalRevisions.consulter(2025, chemins).then(function (selection) {
             var compteActuel = PF.net.auth.utilisateur();
@@ -123,12 +137,26 @@
             if (selection && selection.statut === 'candidat_structurel_non_homologue') {
                 // L'objet réseau n'est pas conservé : copie non partagée pour la session.
                 revisionsActives[2025] = JSON.parse(JSON.stringify(selection.parametres));
+                etatR2 = 'active';
                 return selection.revision;
             }
+            etatR2 = 'révision inactive ou non compatible avec le lecteur';
             return null;
-        }).catch(function () { return null; }).then(function (revision) {
-            return revision; // historique OpenFisca non consulté, non appliqué
+        }).catch(function () {
+            etatR2 = 'lecture R2 impossible (connexion ou Supabase)';
+            return null;
         }); // hors ligne : estimation embarquée, jamais ancienne règle en cache
+    }
+    function actualiserCollectesDgfip(ctx) {
+        var compte = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+        // La collecte publique ne doit PAS vider une R2 déjà vérifiée dans la
+        // même session : une panne Supabase au clic provoquait un faux repli.
+        if (paramsActifs(2025) && compte && compte.id === compteRevisions &&
+            ctx === contexteRevisions && perimetreR2(ctx)) {
+            chargerCachesDgfip(compte);
+            return Promise.resolve(2);
+        }
+        return actualiserRevisions(ctx); // autre compte, contexte changé, ou réessai R2 absente
     }
     function revisionActive(annee) { return !!paramsActifs(annee); }
 
@@ -1739,7 +1767,8 @@
         var decote = v.decote && v.decote.dc + ' / ' + v.decote.dcCouple + ' € (45,25 %, plafond brut '
             + v.decote.dcPlafond + ' / ' + v.decote.dcPlafondCouple + ' €)';
         return 'Revenus ' + annee + ' (déclaration ' + (annee + 1) + ') : collecte partielle DGFiP, '
-            + (revisionActive(annee) ? 'R2 déjà active prioritaire. ' : 'simulation indicative seulement. ')
+            + (revisionActive(annee) ? 'R2 déjà active prioritaire. '
+                : 'simulation indicative seulement. R2 2025 : ' + etatR2 + '. ')
             + statut('IR', ir, sources.ir) + ' ; ' + statut('Décote', decote, sources.decote) + ' ; '
             + statut('Plafond QF général (hors plafonds spéciaux)', v.qf && v.qf + ' €/demi-part', sources.qf) + ' ; '
             + statut('Abattement salariés 10 % (min/max)', f.abatt && f.abatt.min + ' / ' + f.abatt.max + ' €', null) + ' ; '
@@ -1804,7 +1833,7 @@
                     var courant = PF.net.auth.utilisateur();
                     if (!courant || courant.id !== proprietaire.id)
                         throw new Error('Session changée pendant la recherche.');
-                    return actualiserRevisions(PF.app.etat.ctx).then(function () {
+                    return actualiserCollectesDgfip(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
                         resultats.forEach(function (r) { rapportsControle[r.annee] = bilanMiseAJour(r.annee, r); });
@@ -1879,7 +1908,8 @@
         detail2074: detail2074, detail2086: detail2086, simulerFoyer: simulerFoyer,
         PROMPT_MAJ: PROMPT_MAJ, URL_MAJ_BAREMES: URL_MAJ_BAREMES,
         snapshotConstantesCode: snapshotConstantesCode,
-        actualiserRevisions: actualiserRevisions, effacerRevisions: effacerRevisions,
+        actualiserRevisions: actualiserRevisions, actualiserCollectesDgfip: actualiserCollectesDgfip,
+        effacerRevisions: effacerRevisions,
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
         vue: vue, attacher: attacher

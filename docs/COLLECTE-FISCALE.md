@@ -65,6 +65,23 @@ Une rectification d'un millésime crée une nouvelle entrée locale. Pour 2026,
 la page de déclaration 2027 devra mentionner expressément les revenus 2026 ;
 la page 2026 concernant 2025 n'est jamais réutilisée.
 
+**Retour d'essai du 14/10/2026 (APK `dbbc065`) :** sur le téléphone, la
+page des gains 2025 a encore affiché « année absente ou format non reconnu »
+et le rapport a indiqué « simulation indicative seulement » au lieu de R2
+prioritaire. Ce retour n'établit pas que la R2 a disparu de Supabase : le
+bouton relisait la base et vidait la sélection R2 au préalable ; une erreur
+ponctuelle à cette étape pouvait suffire à produire ce repli. La collecte
+DGFiP conserve maintenant la R2 déjà chargée pour le même compte et le même
+contexte éligible, sans requête Supabase supplémentaire ; si elle n'était pas
+chargée, elle retente la lecture et affiche un diagnostic (connexion, session,
+périmètre ou révision incompatible). Le lecteur des gains analyse séparément
+les taux et les preuves de l'année/2OP/titres anciens, puis relit l'extrait
+public conservé en cache. Il indique la vérification qui échoue au lieu d'un
+simple « format non reconnu ». Un nouveau contrôle **sur téléphone** reste
+indispensable pour connaître la cause exacte de l'échec précédent et confirmer
+le taux PS des titres 2025 et la priorité R2. La collecte partielle ne vaut
+toujours pas révision complète.
+
 **Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
 « Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,
 précompte et date ([DGFiP revenus mobiliers](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers)),
