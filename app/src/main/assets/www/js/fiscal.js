@@ -1187,7 +1187,7 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés. '
+            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; page DGFiP pour les RCM partiels. '
             + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
@@ -1789,7 +1789,8 @@
     }
 
     function bilanMiseAJour(annee, resultat) {
-        var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {};
+        var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
+            rcm = resultat.rcm || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1816,12 +1817,21 @@
                 ? (titres.valeurs.ps * 100).toFixed(1).replace('.', ',') + ' % (IR forfaitaire '
                     + (titres.valeurs.ir * 100).toFixed(1).replace('.', ',') + ' %, DGFiP ' + titres.url + ')'
                 : 'non vérifié (' + (titres.etat || 'non recherché') + ')') + '. '
-            + 'RCM selon précompte/date/produit, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
+            + 'RCM — preuve partielle : ' + (rcm.valeurs
+                ? 'revenus encaissés en 2025 : ' + (rcm.valeurs.precompte2025 * 100).toFixed(1).replace('.', ',')
+                    + ' % si PS précomptés lors du versement ; '
+                    + (rcm.valeurs.nonPrecompteAvis2026 * 100).toFixed(1).replace('.', ',')
+                    + ' % sur avis 2026 si non précomptés en 2025 (page modifiée le '
+                    + rcm.valeurs.dateModification + ', ' + rcm.url + '). Produit, exception et précompte du foyer non déterminés ; taux non activés.'
+                    + (rcm.valeurs.csgConditionnelle ? ' CSG de 6,8 % au barème et dans l’année du paiement mentionnée sur la page courante, non millésimée ni activée.' : '')
+                : 'non disponible (' + (rcm.etat || 'non recherché') + ')') + '. '
+            + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
             + 'État des sources : BOFiP ' + JSON.stringify(boi.etats || boi.erreur || {})
             + ' ; frais ' + JSON.stringify(frais.etats || frais.erreur || {})
-            + ' ; titres ' + (titres.etat || titres.erreur || 'non recherché') + '. '
+            + ' ; titres ' + (titres.etat || titres.erreur || 'non recherché')
+            + ' ; RCM ' + (rcm.etat || rcm.erreur || 'non recherché') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
             + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
@@ -1838,7 +1848,8 @@
             var collecte = cible.closest('[data-fisc="collecter"], [data-fisc="collecter-tout"]');
             if (collecte) {
                 var etat = vue.querySelector('#etatCollecteFiscale');
-                if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources || !PF.fiscalRegimesSources) {
+                if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
+                    !PF.fiscalRegimesSources || !PF.fiscalRcmSources) {
                     if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
@@ -1861,9 +1872,13 @@
                         }),
                         PF.fiscalRegimesSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
+                        }),
+                        PF.fiscalRcmSources.chercher(an).catch(function (err) {
+                            return { erreur: String(err && err.message || err) };
                         })
                     ]).then(function (resultats) {
-                        return { annee: an, boi: resultats[0], frais: resultats[1], titres: resultats[2] };
+                        return { annee: an, boi: resultats[0], frais: resultats[1],
+                            titres: resultats[2], rcm: resultats[3] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();

@@ -81,6 +81,7 @@ const collecteur = contexte.PF.fiscalSources;
     const fiscal = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/js/fiscal.js'), 'utf8');
     assert.doesNotMatch(html, /<script src="js\/fiscal_sources\.js"/);
     assert.match(html, /js\/fiscal_dgfip_sources\.js/);
+    assert.match(html, /js\/fiscal_rcm_sources\.js/);
     assert.match(fiscal, /data-fisc="collecter"/);
     assert.match(fiscal, /une simulation indicative/);
     assert.match(fiscal, /non vérifiés par ce lecteur/);

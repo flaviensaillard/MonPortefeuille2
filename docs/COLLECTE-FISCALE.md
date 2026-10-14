@@ -137,6 +137,25 @@ cet appareil, pas les autres revenus du capital ni la situation du foyer.
 | Crypto privée et 2086 | La [FAQ DGFiP](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques), modifiée le **17/07/2026**, indique actuellement **31,4 %**, l'option **3CN indépendante de 2OP**, la franchise de **305 € sur les prix bruts annuels de cession**, l'annexe **2086** et la non-reportabilité des moins-values ; le [BOFiP du 23/04/2024](https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423) indiquait **30 %** à sa date. | Ne pas appliquer rétroactivement le taux de la FAQ courante ; établir la date d'effet de chaque taux, le portefeuille crypto **global** du foyer et l'intégralité des cessions/comptes externes, puis vérifier la formule 2086 et ses arrondis. La seule application ne certifie pas une 2086 complète. |
 | QF et calcul complet | Le [BOFiP QF du 07/04/2026](https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407) contient le plafond général **1 807 €/demi-part pour 2025**, une double liquidation et des plafonds spécifiques. | Le bouton ne lit que le plafond général ; les situations spéciales et la concordance de toutes les formules/arrondis avec le millésime restent non testées. Les cas personnels non documentés ne peuvent pas être déclarés vérifiés à partir du BOFiP. |
 
+**Lecteur RCM partiel (étape suivante) :** le bouton consulte désormais la
+page DGFiP des revenus mobiliers **uniquement pour les revenus encaissés en
+2025**. Il exige, dans la même section, la preuve du précompte lors de
+l'encaissement en 2025 et la preuve séparée du taux sur l'avis 2026 pour les
+revenus 2025 non précomptés. La date de modification de la page est conservée
+comme métadonnée, **pas** comme date d'effet. Un extrait public est recontrôlé
+au chargement, en cache local par compte/année, et une rectification de la
+même année produit une nouvelle entrée sans effacer l'ancienne. Pour les
+revenus 2023, 2024 et 2026, cette page courante n'est pas réutilisée :
+« non disponible ». Le rapport peut afficher **17,2 % à l'encaissement en
+2025** et **18,6 % sur l'avis 2026 si non précompté en 2025** seulement si
+le lecteur reconnaît effectivement les deux passages sur le téléphone.
+L'application **n'active aucun de ces taux RCM dans la simulation** : elle ne
+connaît pas le produit précis ni le précompte effectif des éventuels revenus
+externes du foyer. La mention de CSG 6,8 % est un indice conditionnel de la
+page courante, non une vérification millésimée du calcul. R2 2025 reste
+prioritaire ; « RCM par produit, précompte et date » demeure manquant dans
+`couvertureDgfip`. **Validation mobile de ce nouveau lecteur nécessaire.**
+
 Ces textes constituent une **cartographie de travail**, pas des paramètres
 activés. Les taux RCM/crypto et la CSG du code déjà embarqué restent signalés
 comme hypothèses tant qu'un lecteur par produit, année **des revenus** et date
