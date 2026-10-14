@@ -82,6 +82,24 @@
         return Promise.resolve(norm({ ok: false, status: -1, body: '', error: 'hors ligne' }));
     }
 
+    /* Le pont texte ne transporte pas des PDF : son décodage UTF-8 altérerait
+       les octets. Ce canal binaire est réservé à la brochure DGFiP autorisée
+       par NativeBridge, sans recours direct à fetch/file:// dans la WebView. */
+    function reqPdf(url) {
+        if (transport) return Promise.resolve(transport('GET', url, { Accept: 'application/pdf' }, null)).then(norm);
+        if (!estNavigateur || !root.Native || !root.Native.httpPdfAsync)
+            return Promise.resolve({ ok: false, error: 'pont PDF indisponible' });
+        return new Promise(function (resoudre) {
+            var id = 'cb' + (++compteurCb);
+            promesses[id] = resoudre;
+            try { root.Native.httpPdfAsync(url, id); }
+            catch (e) {
+                delete promesses[id];
+                resoudre({ ok: false, error: 'pont PDF indisponible' });
+            }
+        });
+    }
+
     /* Rappel appelé par Java : Native.httpAsync -> PF.net._fin(id, json). */
     function _fin(id, charge) {
         var r = null;
@@ -670,7 +688,7 @@
     }
 
     PF.net = {
-        req: req, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
+        req: req, reqPdf: reqPdf, _fin: _fin, serie: serie, cours: cours, coursActuels: coursActuels,
         variationRecente: variationRecente, variationSeance: variationSeance,
         deviseDe: deviseDe, coursOr: coursOr,
         taux: taux, tauxMouvement: tauxMouvement, viderCache: viderCache, supabase: supabase,

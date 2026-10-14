@@ -32,6 +32,16 @@ for f in js/util.js js/models.js js/net.js js/store.js js/biometrie.js js/metric
         exit 1
     fi
 done
+for f in js/fiscal_rcm_sources.js js/fiscal_crypto_sources.js js/fiscal_brochure_sources.js vendor/pdfjs/pdf.min.js vendor/pdfjs/pdf.worker.min.js; do
+    if [ ! -f "$WWW/$f" ]; then
+        echo "Module fiscal/PDF manquant : $WWW/$f" >&2
+        exit 1
+    fi
+    if [ "$f" != vendor/pdfjs/pdf.worker.min.js ] && ! grep -q "$f" "$WWW/index.html"; then
+        echo "$f existe mais n est pas charge par index.html" >&2
+        exit 1
+    fi
+done
 for onglet in bord portefeuille performance retraite fiscalite ia; do
     if ! grep -q "data-onglet=\"$onglet\"" "$WWW/index.html"; then
         echo "Onglet $onglet absent de la navigation" >&2

@@ -89,7 +89,14 @@ const exposees = [...pont.matchAll(/@JavascriptInterface\s+public\s+\S+\s+(\w+)\
 // que les jetons de session chiffrés (Keystore) et un retour de biométrie ;
 // elles ne reçoivent jamais de mot de passe (verrouillé par
 // tests/test_empreinte_cableage.py).
-const ADMISES = ['http', 'httpAsync', 'telechargerInflationInsee', 'isOnline',
+verifier('pont PDF borné au document DGFiP, sans redirection et sans décodage UTF-8',
+    /www\.impots\.gouv\.fr"\.equalsIgnoreCase\(u\.getHost\(\)\)/.test(pont)
+    && /ir_2026\/pdf_som\/nouveautes/.test(pont)
+    && /final int maximum = 2 \* 1024 \* 1024/.test(pont)
+    && pont.includes("pdf[0] != '%'")
+    && /setInstanceFollowRedirects\(false\)/.test(pont)
+    && /binary_b64/.test(pont));
+const ADMISES = ['http', 'httpAsync', 'httpPdfAsync', 'telechargerInflationInsee', 'isOnline',
     'haptic', 'toast', 'openExternal', 'share', 'versionCode', 'versionName',
     'empreinteEtat', 'empreinteSessionGardee', 'empreinteMajSession',
     'empreinteActiver', 'empreinteOuvrir', 'empreinteEffacer'];

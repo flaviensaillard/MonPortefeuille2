@@ -1197,7 +1197,7 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; pages DGFiP pour les RCM et la crypto (preuves partielles). '
+            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; pages DGFiP pour les RCM et la crypto et brochure PDF DGFiP 2025 pour le calendrier CSG (preuves partielles). '
             + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
@@ -1803,7 +1803,7 @@
 
     function bilanMiseAJour(annee, resultat) {
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
-            rcm = resultat.rcm || {}, crypto = resultat.crypto || {};
+            rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1850,6 +1850,11 @@
                     + crypto.valeurs.dateModification + ', ' + crypto.url + '). '
                     + 'La FAQ ne date pas ce PFU par année de cession : aucun taux crypto de cette lecture attribué aux revenus 2025 ni activé dans la simulation'
                 : 'non disponible (' + (crypto.etat || 'non recherchée') + ')') + '. '
+            + (annee === 2025 ? 'Brochure DGFiP revenus 2025 (PDF, preuve partielle) : ' : 'Brochure PDF de ce millésime : ')
+            + (brochure.valeurs
+                ? 'CSG patrimoine de 9,2 % à 10,6 % sur revenus 2025 déclarés en 2026 ; produits de placement à compter du 1.1.2026 ; exceptions à 9,2 % et CSG déductible 6,8 % mentionnées ('
+                    + brochure.url + '). Cette lecture ne prouve ni le taux global PS crypto 2025, ni la CSG personnelle déductible ; aucun taux activé'
+                : 'non disponible (' + (brochure.etat || 'non recherchée') + ')') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
@@ -1857,7 +1862,8 @@
             + ' ; frais ' + JSON.stringify(frais.etats || frais.erreur || {})
             + ' ; titres ' + (titres.etat || titres.erreur || 'non recherché')
             + ' ; RCM ' + (rcm.etat || rcm.erreur || 'non recherché')
-            + ' ; crypto ' + (crypto.etat || crypto.erreur || 'non recherchée') + '. '
+            + ' ; crypto ' + (crypto.etat || crypto.erreur || 'non recherchée')
+            + ' ; brochure PDF ' + (brochure.etat || brochure.erreur || 'non recherchée') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
             + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
@@ -1875,7 +1881,8 @@
             if (collecte) {
                 var etat = vue.querySelector('#etatCollecteFiscale');
                 if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
-                    !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources) {
+                    !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources
+                    || !PF.fiscalBrochureSources) {
                     if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
@@ -1904,10 +1911,13 @@
                         }),
                         PF.fiscalCryptoSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
+                        }),
+                        PF.fiscalBrochureSources.chercher(an).catch(function (err) {
+                            return { erreur: String(err && err.message || err) };
                         })
                     ]).then(function (resultats) {
                         return { annee: an, boi: resultats[0], frais: resultats[1],
-                            titres: resultats[2], rcm: resultats[3], crypto: resultats[4] };
+                            titres: resultats[2], rcm: resultats[3], crypto: resultats[4], brochure: resultats[5] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();

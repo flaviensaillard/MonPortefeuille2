@@ -4,6 +4,10 @@
 Les montants présents dans le code 2.2.1 ne deviennent pas officiels parce qu'ils
 ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.
 
+## Lecture expérimentale de la brochure PDF DGFiP (14/10/2026)
+
+Le bouton lit désormais aussi la [brochure DGFiP de déclaration 2026](https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf) pour les **revenus 2025** : hausse de CSG sur revenus du patrimoine, calendrier distinct des produits de placement et exceptions. Cette lecture est **partielle, non activante et encore à vérifier dans la WebView Android** ; elle ne permet pas d'attribuer un taux global de PS aux cessions crypto 2025. R2 2025 reste prioritaire, bascule totale toujours « non ». Voir [méthode, limites et test Android](LECTURE-PDF-DGFIP.md).
+
 ## Politique de collecte DGFiP (branche, 13/10/2026)
 
 Le bouton « Vérifier cette année (DGFiP) » ou « Vérifier 2023 à 2026 »

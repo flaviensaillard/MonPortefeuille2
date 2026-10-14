@@ -164,6 +164,66 @@ public class NativeBridge {
         });
     }
 
+    /** PDF DGFiP uniquement : octets bruts, distincts du transport texte UTF-8.
+     * Pas de redirection, taille bornée, signature PDF vérifiée avant retour JS. */
+    @JavascriptInterface
+    public void httpPdfAsync(final String url, final String callbackId) {
+        if (callbackId == null || !callbackId.matches("cb[0-9]{1,12}")) return;
+        pool.execute(new Runnable() {
+            @Override public void run() {
+                JSONObject res = lirePdfDgfip(url);
+                if (js != null) js.eval("PF.net._fin('" + callbackId + "', " + res.toString() + ")");
+            }
+        });
+    }
+
+    private JSONObject lirePdfDgfip(String url) {
+        HttpURLConnection conn = null;
+        try {
+            URL u = new URL(url);
+            if (!"https".equalsIgnoreCase(u.getProtocol())
+                    || !"www.impots.gouv.fr".equalsIgnoreCase(u.getHost())
+                    || u.getPort() != -1 || u.getUserInfo() != null || u.getQuery() != null
+                    || u.getRef() != null
+                    || !u.getPath().matches("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes\\.pdf"))
+                return erreur("PDF DGFiP non autorisé");
+            conn = (HttpURLConnection) u.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(TIMEOUT_MS);
+            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Accept", "application/pdf");
+            int status = conn.getResponseCode();
+            if (status != 200) return erreur("PDF DGFiP : HTTP " + status);
+            final int maximum = 2 * 1024 * 1024;
+            if (conn.getContentLengthLong() > maximum) return erreur("PDF DGFiP trop volumineux");
+            ByteArrayOutputStream octets = new ByteArrayOutputStream();
+            try (InputStream in = conn.getInputStream()) {
+                byte[] tampon = new byte[8192];
+                int n;
+                while ((n = in.read(tampon)) != -1) {
+                    if (octets.size() + n > maximum) return erreur("PDF DGFiP trop volumineux");
+                    octets.write(tampon, 0, n);
+                }
+            }
+            byte[] pdf = octets.toByteArray();
+            if (pdf.length < 8 || pdf[0] != '%' || pdf[1] != 'P' || pdf[2] != 'D'
+                    || pdf[3] != 'F' || pdf[4] != '-')
+                return erreur("Réponse DGFiP non PDF");
+            JSONObject res = new JSONObject();
+            res.put("ok", true);
+            res.put("status", 200);
+            res.put("binary_b64", Base64.encodeToString(pdf, Base64.NO_WRAP));
+            return res;
+        } catch (Exception e) {
+            Log.w(TAG, "PDF DGFiP inaccessible : " + e.getMessage());
+            return erreur("PDF DGFiP inaccessible");
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     @JavascriptInterface
     public String http(String method, String url, String headersJson, String body) {
         return executer(method, url, headersJson, body).toString();
