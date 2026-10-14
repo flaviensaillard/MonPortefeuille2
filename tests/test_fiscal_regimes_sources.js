@@ -32,6 +32,15 @@ const src = ctx.PF.fiscalRegimesSources;
     assert.equal(releve2025.valeurs.ps, .186, 'extrait de la vraie structure HTML relu après stockage');
     assert.match(releve2025.etat, /année explicites/);
     assert.equal(src.analyserTitres(aide2025, 2026).etat, 'revenus 2026 non mentionnés pour les titres');
+    // Si la phrase introductive change ou est cassée par des balises, le
+    // titre de section et son paragraphe PFU voisin servent de preuve, mais
+    // jamais la seule présence de « 18,6 % » sur une page sans titres.
+    const introVariante = aide2025.replace('Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises,',
+        'Plus-values et gains divers. Ces opérations sont soumises,');
+    assert.equal(src.lireTitres(introVariante, 2025).ps, .186);
+    assert.equal(src.lireTitres(introVariante.replace('Gains de cession de valeurs mobilières, droits sociaux',
+        'Gains sur des actifs numériques'), 2025), null);
+    assert.equal(src.lireTitres(introVariante.replace('Si, en 2025,', 'Si, en 2024,'), 2025), null);
     assert.equal(src.lireTitres(pages[2025], 2026), null, 'déclaration 2026 ≠ revenus 2026');
     assert.equal(src.lireTitres(html(2025, '18,6', '30'), 2025), null, 'somme incohérente');
     assert.equal(src.lireTitres(html(2025).replace('2OP', '3CN'), 2025), null, 'option absente');
@@ -42,6 +51,10 @@ const src = ctx.PF.fiscalRegimesSources;
     const rectif = await src.chercher(2024);
     assert.equal(rectif.valeurs.ps, .186);
     assert.equal(JSON.parse(storage.get('pf2.dgfip.regimes.v1.' + compte))['2024'].length, 2);
+    pages[2025] = '<html><h1>Page de maintenance temporaire</h1></html>';
+    const mauvaisePage = await src.chercher(2025);
+    assert.match(mauvaisePage.etat, /régime des gains de titres absent \(HTTP \?, \d+ caractères ; début du document : «Page de maintenance temporaire»\)/);
+    assert.equal(src.lireCache(2025), null, 'une autre page 200 ne valide aucun taux');
     compte = '87654321-1234-4123-a123-123456789012';
     assert.equal(src.lireCache(2024), null, 'pas de fuite entre comptes');
     console.log('PV de titres DGFiP : années, taux, refus, rectification et comptes OK');

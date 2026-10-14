@@ -77,10 +77,21 @@ chargée, elle retente la lecture et affiche un diagnostic (connexion, session,
 périmètre ou révision incompatible). Le lecteur des gains analyse séparément
 les taux et les preuves de l'année/2OP/titres anciens, puis relit l'extrait
 public conservé en cache. Il indique la vérification qui échoue au lieu d'un
-simple « format non reconnu ». Un nouveau contrôle **sur téléphone** reste
-indispensable pour connaître la cause exacte de l'échec précédent et confirmer
-le taux PS des titres 2025 et la priorité R2. La collecte partielle ne vaut
-toujours pas révision complète.
+simple « format non reconnu ». **Nouvel essai utilisateur** :
+la R2 est bien visible avant/après le clic, mais les titres 2025 restent « régime
+des gains de titres absent ». Cela prouve seulement que la phrase exacte
+attendue par le lecteur ne se trouve pas dans le corps HTTP normalisé reçu :
+le contenu brut reçu sur le téléphone n'est pas disponible dans le dépôt.
+Le lecteur accepte maintenant aussi la section « Gains de cession de valeurs
+mobilières, droits sociaux » avec le paragraphe PFU immédiatement voisin et
+les preuves distinctes de l'année 2025, de l'option 2OP, de la condition des
+titres anciens et de la somme IR + PS = PFU. Un document HTTP 200 sans ces
+preuves est toujours refusé ; en cas d'intitulé absent, le rapport affichera
+le statut HTTP, la longueur et les 130 premiers caractères du **seul document
+public** reçu, pour identifier un changement de page ou d'encodage. Ce correctif
+doit encore être vérifié sur téléphone : ne pas affirmer que les PS des titres
+ont été mis à jour dans l'APK. La collecte partielle ne vaut toujours pas
+révision complète.
 
 **Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
 « Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,

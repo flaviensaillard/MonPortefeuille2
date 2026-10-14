@@ -15,38 +15,52 @@
             .replace(/&(?:#x[0-9a-f]+|#\d+|[a-z]+);/gi, function (e) {
                 var key = e.slice(1, -1).toLowerCase();
                 var noms = { nbsp: ' ', euro: '€', rsquo: '’', eacute: 'é', egrave: 'è',
-                    ccedil: 'ç', agrave: 'à', ecirc: 'ê', amp: '&' };
+                    ccedil: 'ç', agrave: 'à', ecirc: 'ê', amp: '&', apos: "'",
+                    ugrave: 'ù', uacute: 'ú', ucirc: 'û', ocirc: 'ô', oelig: 'œ',
+                    acirc: 'â', icirc: 'î', iuml: 'ï', euml: 'ë', laquo: '«', raquo: '»' };
                 if (key[0] !== '#') return noms[key] || ' ';
                 var cp = key[1] === 'x' ? parseInt(key.slice(2), 16) : parseInt(key.slice(1), 10);
                 return cp > 0 && cp < 0x110000 ? String.fromCodePoint(cp) : ' ';
             }).replace(/\s+/g, ' ').trim();
     }
     function analyserTitres(html, annee) {
-        var t = texte(html), debut = t.search(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises/i);
-        if (!Number.isInteger(annee) || annee < 2023 || debut < 0)
+        var t = texte(html).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (!Number.isInteger(annee) || annee < 2023)
+            return { etat: 'millésime de gains invalide' };
+        // L'aide peut fragmenter ou reformuler la phrase d'introduction.
+        // On exige soit cette introduction ciblée, soit le titre de la section
+        // des titres ET un paragraphe PFU immédiatement avant cette section.
+        var debut = t.search(/plus-values\s+de\s+cession\s+de\s+valeurs\s+mobilieres/i);
+        var section = t.search(/Gains\s+de\s+cession\s+de\s+valeurs\s+mobilieres,?\s+droits\s+sociaux/i);
+        if (debut < 0 && section < 0)
             return { etat: 'régime des gains de titres absent' };
-        // Pas de taux isolé ailleurs sur la page : ils doivent être dans le
-        // paragraphe du PFU DES TITRES, avant les exemples et autres régimes.
-        var paragraphe = t.slice(debut, debut + 1100);
-        var fin = paragraphe.search(/Gains de cession de valeurs mobilières, droits sociaux/i);
-        if (fin > 0) paragraphe = paragraphe.slice(0, fin);
-        var irM = paragraphe.match(/prélèvement forfaitaire unique\s*\(PFU\)\s*de\s*(12[,.]8)\s*%/i);
-        var psM = paragraphe.match(/prélèvements sociaux de\s*(17[,.]2|18[,.]6)\s*%/i);
+        // Jamais de taux isolé ailleurs sur la page : IR, PS et somme doivent
+        // précéder la section des titres, dans le paragraphe du même PFU.
+        var depart = debut >= 0 && (section < 0 || (debut < section && section - debut <= 1100))
+            ? debut : Math.max(0, section - 1000);
+        var paragraphe = t.slice(depart, section > depart ? Math.min(section, depart + 1100) : depart + 1100);
+        if (!/plus-values\s+de\s+cession\s+de\s+valeurs\s+mobilieres/i.test(paragraphe) &&
+            !/Plus-values\s+et\s+gains\s+divers/i.test(paragraphe))
+            return { etat: 'paragraphe des taux des titres non identifié' };
+        var irM = paragraphe.match(/prelevement forfaitaire unique\s*\(PFU\)\s*de\s*(12[,.]8)\s*%/i);
+        var psM = paragraphe.match(/prelevements sociaux de\s*(17[,.]2|18[,.]6)\s*%/i);
         var pfuM = paragraphe.match(/taux de\s*(30|31[,.]4)\s*%/i);
         if (!irM || !psM || !pfuM) return { etat: 'taux IR/PS/PFU des titres absents du paragraphe officiel' };
         var ir = Math.round(Number(irM[1].replace(',', '.')) * 10) / 1000;
         var ps = Math.round(Number(psM[1].replace(',', '.')) * 10) / 1000;
         var pfu = Math.round(Number(pfuM[1].replace(',', '.')) * 10) / 1000;
         if (Math.abs(ir + ps - pfu) > .00001) return { etat: 'taux IR + PS différents du PFU publié' };
-        if (!new RegExp('Si, en\\s+' + annee + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières', 'i').test(t))
+        var passageTitres = t.slice(section > depart ? section : depart, depart + 4200);
+        if (!new RegExp('Si, en\\s+' + annee + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilieres', 'i').test(passageTitres))
             return { etat: 'revenus ' + annee + ' non mentionnés pour les titres' };
-        if (!/case\s*2OP/i.test(t) || !/Le mécanisme d.abattements/i.test(t) ||
-            !/titres acquis ou souscrits? avant le\s+1er janvier 2018/i.test(t))
+        if (!/case\s*2OP/i.test(t.slice(depart, depart + 4200)) ||
+            !/Le mecanisme d.abattements/i.test(passageTitres) ||
+            !/titres acquis ou souscrits? avant le\s+1er janvier 2018/i.test(passageTitres))
             return { etat: 'option 2OP ou condition des titres anciens non reconnue' };
         return { etat: 'taux IR/PS des titres et année explicites',
             valeurs: { ir: ir, ps: ps, pfu: pfu },
-            // Extrait exact du document public (aucune donnée du portefeuille).
-            extrait: t.slice(debut, Math.min(t.length, debut + 4200)) };
+            // Extrait textuel du document public, sans données du portefeuille.
+            extrait: t.slice(depart, Math.min(t.length, depart + 4200)) };
     }
     function lireTitres(html, annee) { return analyserTitres(html, annee).valeurs || null; }
     function compte() {
@@ -73,6 +87,14 @@
             var analyse = rep.ok && rep.body ? analyserTitres(rep.body, annee) : null;
             var valeur = analyse && analyse.valeurs;
             var etat = analyse ? analyse.etat : 'document inaccessible';
+            if (analyse && !valeur && /absent|non identifié/.test(etat)) {
+                // Diagnostic limité au document PUBLIC reçu, sans donnée du
+                // compte, afin de distinguer une page différente d'un problème
+                // d'encodage ; jamais conservé en cache ni utilisé comme preuve.
+                etat += ' (HTTP ' + (rep.status || '?') + ', ' + rep.body.length
+                    + ' caractères ; début du document : «'
+                    + texte(rep.body).slice(0, 130) + '»)';
+            }
             if (compte() !== id) throw new Error('Session changée : collecte des titres annulée.');
             if (!root.localStorage) return { etat: etat, enregistree: false };
             var cle = CLE + id, donnees;
