@@ -2,7 +2,9 @@ name: Diagnostic ponctuel PDF crypto DGFiP
 on:
   push:
     branches: ['arena/**']
-    paths: ['.github/workflows/diagnostic-crypto-pdf.yml']
+    paths:
+      - '.github/workflows/diagnostic-crypto-pdf.yml'
+      - 'app/src/main/assets/www/js/fiscal_crypto_pdf_sources.js'
 permissions:
   contents: read
 jobs:
