@@ -113,6 +113,12 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     assert.equal(f.tauxPS(2025), .19);
     assert.equal(f.tauxPFU(2025), .318);
     assert.equal(f.tauxPS(2024), .172);
+    const avantMatrice = json(f.comparerOptionsFoyer(42000, 2, 2025, 'Marié', 1000, 1000, true, 1000));
+    const ligneR2 = f.matriceCouvertureDgfip().find(l => l.revenus === 2025);
+    assert.equal(ligneR2.revisionPrioritaire, true);
+    assert.equal(ligneR2.complet, false, 'R2 prioritaire ne certifie pas la collecte DGFiP');
+    assert.equal(f.revisionActive(2025), true);
+    assert.deepEqual(json(f.comparerOptionsFoyer(42000, 2, 2025, 'Marié', 1000, 1000, true, 1000)), avantMatrice);
     assert.equal(f.forfaitRepas(2025), 6.45);
     assert.equal(f.forfaitRepas(2024), 5.35);
     assert.equal(f.abattement10(1000, 2025), 519);

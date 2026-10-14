@@ -1,5 +1,11 @@
 # Millésimes fiscaux — reprise de l'existant et révisions
 
+> État actualisé le 14/10/2026, après PR #22 / APK 2.2.2 : l'utilisateur a
+> confirmé la lecture Android des **cinq PDF**. Les mentions « reste à vérifier »
+> ci-dessous décrivent les étapes historiques, pas une demande de nouvel essai.
+> Suite et limites actuelles : [matrice 2023–2026](COUVERTURE-FISCALE-2023-2026.md).
+
+
 **Année des revenus ≠ année de déclaration** : revenus 2025 → déclaration 2026.
 Les montants présents dans le code 2.2.1 ne deviennent pas officiels parce qu'ils
 ont été copiés en base. Ils portent l'origine `reprise_code_non_verifiee`.

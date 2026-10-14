@@ -376,6 +376,7 @@
     /* Option 2OP : ne pas mélanger le taux des titres et celui des RCM déjà
        précomptés ; la CSG des titres est déductible à son paiement (N+1). */
     function comparerPfuBareme(pv, autresRevenus, parts, annee, statut, interets, interetsPrecomptes) {
+        exigerCouvertureFuture(annee);
         pv = Math.max(0, U.num(pv, 0));
         interets = Math.max(0, U.num(interets, 0));
         if (interets > 0 && typeof interetsPrecomptes !== 'boolean')
@@ -413,6 +414,7 @@
     /* 2OP (titres + RCM) et 3CN (crypto) : options indépendantes, mais IR
        progressif calculé conjointement sur les assiettes sélectionnées. */
     function comparerOptionsFoyer(revenuSalaires, parts, annee, statut, pvTitres, interets, precomptes, pvCrypto) {
+        exigerCouvertureFuture(annee);
         var pv = Math.max(0, U.num(pvTitres, 0));
         var rcm = Math.max(0, U.num(interets, 0));
         var crypto = Math.max(0, U.num(pvCrypto, 0));
@@ -668,7 +670,8 @@
 
     function vide2086(annee) {
         return { annee: annee, cessions: [], total_cessions_213: 0, total_cessions_218: 0,
-            plus_value_globale_224: 0, exonere_305: false, case_3an: 0, case_3bn: 0 };
+            plus_value_globale_224: 0, exonere_305: false, case_3an: 0, case_3bn: 0,
+            perimetre: 'portefeuille_seul', annexe_foyer_complete: false, cases_foyer_certifiees: false };
     }
 
     /* Formulaire 2074 : synthèse 905/913, cadre 5 ligne par ligne et cadre 11
@@ -883,7 +886,8 @@
         return {
             annee: annee, cessions: cessions, total_cessions_213: total213,
             total_cessions_218: total218, plus_value_globale_224: total224, exonere_305: exonere,
-            case_3an: U.arrondi(case3an, 2), case_3bn: U.arrondi(case3bn, 2), indisponible: []
+            case_3an: U.arrondi(case3an, 2), case_3bn: U.arrondi(case3bn, 2), indisponible: [],
+            perimetre: 'portefeuille_seul', annexe_foyer_complete: false, cases_foyer_certifiees: false
         };
     }
 
@@ -936,6 +940,7 @@
        simplifiées sur salaires, pas les taux individualisés transmis par la DGFiP
        (CGI art. 204 M : revenus communs, crédits et arrondis non reconstruits). */
     function simulerFoyer(o) {
+        exigerCouvertureFuture(o.annee);
         var annee = o.annee;
         var couple = estCouple(o.statut);
         var sal1 = Math.max(0, U.num(o.salaire1, 0));
@@ -1139,12 +1144,13 @@
             return k === 'repas' ? typeof frais[k] === 'number' : !!frais[k];
         }).length;
         return 'Revenus ' + annee + ' (déclaration ' + (annee + 1) + ') — '
-            + (revisionActive(annee) ? 'R2 publiée prioritaire' : 'simulation indicative seulement')
+            + (revisionActive(annee) ? 'R2 publiée prioritaire' : annee >= 2026 && !couvertureDgfip(annee).complet
+                ? 'calcul non disponible' : 'simulation indicative seulement')
             + '. DGFiP : IR/décote/QF ' + ir + '/3, frais salariés ' + salaries + '/3, PS titres '
             + lu(r.titres) + '. PDF : nouveautés CSG ' + lu(r.brochure)
             + ', notice 2086 ' + lu(crypto.notice) + ', brochure crypto ' + lu(crypto.brochure)
             + ', RCM ' + lu(rcm.rcm) + ', charges/CSG ' + lu(rcm.charges)
-            + '. RCM personnels, PS crypto 2025 et déduction CSG du foyer non vérifiés ; '
+            + '. RCM personnels, PS crypto ' + annee + ' et déduction CSG du foyer non vérifiés ; '
             + 'aucun nouveau taux activé. Bascule DGFiP totale : non.';
     }
     function htmlRapport(annee) {
@@ -1166,12 +1172,10 @@
         out += '<div class="chips">' + annees().map(function (a) {
             return '<button class="chip' + (a === annee ? ' actif' : '') + '" data-fisc="annee" data-valeur="' + a + '">Revenus ' + a + '</button>';
         }).join('') + '</div>';
-        if (!BAREMES[annee] || (annee >= 2026 && (!officiels[annee] ||
-            !officiels[annee].ir || !officiels[annee].decote || !officiels[annee].qf ||
-            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
-            !fraisOfficiels[annee].abatt))) {
+        out += htmlCouvertureDgfip();
+        if (!BAREMES[annee] || (annee >= 2026 && !couvertureDgfip(annee).complet)) {
             return out + '<div class="info"><b>Revenus ' + UI.h(annee)
-                + ' : calcul fiscal indisponible.</b> IR, décote, plafond QF ou frais salariés officiels de ce millésime non réunis. '
+                + ' : calcul fiscal indisponible.</b> Paramètres publics et moteur de ce millésime non réunis pour toutes les catégories nécessaires. '
                 + 'Le barème isolé d’une source externe ne suffit pas à produire un bilan ; '
                 + 'les chiffres d’une autre année ne sont pas réutilisés. Déclaration ' + UI.h(annee + 1) + ' ≠ revenus ' + UI.h(annee) + '.'
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="collecter">'
@@ -1487,7 +1491,7 @@
 
         out += UI.accordeon('Formulaire 2042 & 2042-C',
             '<div style="font-size:12px;color:var(--txt-3);margin-bottom:8px">Déclaration principale — les montants '
-            + 'sont ceux de vos écritures ' + annee + ' et de vos paramètres. Recopiez-les tels quels.</div>'
+            + 'sont ceux de vos écritures ' + annee + ' et de vos paramètres : indications à vérifier avec les justificatifs du foyer, pas des montants certifiés à recopier.</div>'
             + tableauCases(cases2042),
             false, resume2042.join(' · '));
 
@@ -1637,6 +1641,10 @@
             + U.eur(t.total_cessions_218, { dec: 0 }) + '</b> · résultat net global (cumul des lignes 224) : <b>'
             + U.eur(t.plus_value_globale_224, { dec: 0 }) + '</b>.</div>';
 
+        out += '<div class="info">Annexe 2086 exhaustive du foyer : non disponible. Les montants ci-dessous couvrent ce portefeuille seulement ; '
+            + 'vérifier chaque déclarant, personne à charge, personne interposée et avoir hors application. '
+            + 'Soultes et arrondis déclaratifs complets non contrôlés ; 3CN reste distincte de 2OP.</div>';
+
         if (t.exonere_305) {
             out += '<div class="info">Franchise de 305 € à confirmer sur tout le foyer : les cessions de '
                 + 'ce portefeuille (' + U.eur(t.total_cessions_218, { dec: 0 }) + ' nets de frais) restent sous le seuil. '
@@ -1644,9 +1652,9 @@
                 + 'éventuelles du conjoint hors de ce portefeuille. Laissez 3AN/3BN vides seulement si le '
                 + 'seuil du foyer est respecté ; vérifiez également l’annexe 2086.</div>';
         } else {
-            out += '<div class="info">Seuil de 305 € franchi : la plus-value est imposable dès le premier euro. '
+            out += '<div class="info">Seuil de 305 € franchi dans ce portefeuille : calcul indicatif dès le premier euro. '
                 + 'Ce seuil porte sur le <b>total des prix de cession</b> de l’année, ce n’est pas un abattement.<br>'
-                + 'À reporter en case <b>' + (t.case_3an > 0 ? '3AN' : '3BN') + '</b> : <b>'
+                + 'Case indicative <b>' + (t.case_3an > 0 ? '3AN' : t.case_3bn > 0 ? '3BN' : '3AN/3BN') + '</b> : <b>'
                 + U.eur(t.case_3an > 0 ? t.case_3an : t.case_3bn, { dec: 0 }) + '</b>.</div>';
         }
 
@@ -1675,7 +1683,12 @@
     // ------------------------------------------- 3. arbitrage, bilan et source
 
     function bilanImpot(annee, sim, t2074, t2086) {
-        var out = '';
+        var out = '<div class="info">CSG personnelle déductible : non disponible sans qualification des produits, IFU et avis du foyer. '
+            + 'Les hypothèses chiffrées du moteur ne sont pas établies par la lecture des brochures. '
+            + 'Ne pas ajouter en 6DE la CSG des lignes 2BH/2DF, calculée automatiquement par la DGFiP. '
+            + (annee === 2025 ? 'Patrimoine 2024 payé en 2025 ≠ RCM précomptés en 2025 ≠ gains 2025 payés sur avis 2026. '
+                : 'Règles CSG complètes de ce millésime : non disponibles ; ne pas transposer la brochure des revenus 2025. ')
+            + 'Le précompte social ne prouve pas un acompte d’IR ou le PAS officiel.</div>';
 
         // --- Arbitrage PFU / barème
         if (sim.options_fiscales.assiette_3cn > 0) {
@@ -1722,7 +1735,7 @@
                     ? 'Case <b>2OP</b> à envisager sur les seuls revenus saisis : vérifier les autres revenus mobiliers du foyer.'
                     : 'Case <b>2OP</b> non retenue sur les seuls revenus saisis.')
                 + (a.bareme.csg_deductible > 0
-                    ? ' CSG déductible cette année sur intérêts précomptés : '
+                    ? ' Hypothèse de CSG du moteur sur intérêts déclarés précomptés (produit et éligibilité non établis) : '
                       + U.eur(a.bareme.csg_deductible, { dec: 0 }) + '.' : '')
                 + (a.bareme.csg_deductible_apres_paiement_estimee > 0
                     ? ' CSG potentiellement déductible l’année de son paiement (non comptée dans ce choix) : '
@@ -1817,7 +1830,8 @@
             'IR': !!boi.ir, 'décote': !!boi.decote,
             'plafond QF général': !!boi.qf,
             'abattement salariés': !!frais.abatt, 'repas salariés': typeof frais.repas === 'number',
-            'kilomètres voiture': !!frais.km, 'PS plus-values de titres': !!titresOfficiels[annee],
+            'kilomètres voiture': !!frais.km,
+            'PS plus-values de titres': annee !== 2025 && !!titresOfficiels[annee],
             'RCM par produit, précompte et date': false,
             'PS crypto privés': false, 'CSG déductible et calendrier': false,
             'crypto et 2086 complets': false, 'plafonds QF spéciaux': false,
@@ -1826,6 +1840,51 @@
         return { complet: Object.keys(feuilles).every(function (nom) { return feuilles[nom]; }),
             feuilles: feuilles,
             manquants: Object.keys(feuilles).filter(function (nom) { return !feuilles[nom]; }) };
+    }
+
+    function exigerCouvertureFuture(annee) {
+        if (annee >= 2026 && !couvertureDgfip(annee).complet)
+            throw new Error('Simulation des revenus ' + annee + ' non disponible : preuves DGFiP et moteur incomplets.');
+    }
+
+    // État documentaire, jamais un nouvel objet de paramètres activables.
+    // Aucune information personnelle ni PAS ; R2 est indiquée séparément.
+    function matriceCouvertureDgfip() {
+        return [2023, 2024, 2025, 2026].map(function (annee) {
+            var couverture = couvertureDgfip(annee), boi = officiels[annee] || {};
+            var correspondance = { IR: 'ir', 'décote': 'decote', 'plafond QF général': 'qf' };
+            return { revenus: annee, declaration: annee + 1, revisionPrioritaire: revisionActive(annee),
+                complet: couverture.complet,
+                categories: Object.keys(couverture.feuilles).map(function (nom) {
+                    var source = boi.sources && boi.sources[correspondance[nom]];
+                    var disponible = couverture.feuilles[nom];
+                    return { categorie: nom, etat: disponible ? 'preuve partielle disponible' : 'non disponible',
+                        publication: disponible && source ? source.datePublication : null,
+                        source: disponible && source ? source.url : null,
+                        limite: nom === 'PS plus-values de titres' && annee === 2025
+                            ? 'divergence DGFiP 17,2 % / 18,6 % non résolue ; R2 reste prioritaire'
+                            : nom === 'PS crypto privés' && annee === 2025
+                                ? 'FAQ courante non millésimée ; BOFiP 2024 divergent'
+                                : disponible ? 'ne certifie ni le foyer ni une révision complète'
+                                    : 'preuve du millésime, moteur compatible ou situation du foyer non établis' };
+                }) };
+        });
+    }
+    function htmlCouvertureDgfip() {
+        var lignes = matriceCouvertureDgfip();
+        return '<details style="margin:8px 0"><summary>Couverture DGFiP par millésime et catégorie</summary>'
+            + '<div class="st">État des preuves relues sur ce compte. Une absence ne supprime pas l’historique. '
+            + 'Revenus ≠ déclaration ≠ publication ; date de publication non attestée si absente. '
+            + 'Les PDF partiels ne certifient pas une catégorie complète. R2 2025 reste prioritaire.</div>'
+            + lignes.map(function (ligne) {
+                return '<h4>Revenus ' + ligne.revenus + ' / déclaration ' + ligne.declaration
+                    + (ligne.revisionPrioritaire ? ' — R2 prioritaire' : '') + '</h4><ul>'
+                    + ligne.categories.map(function (c) {
+                        return '<li>' + UI.h(c.categorie) + ' : <b>' + UI.h(c.etat) + '</b>'
+                            + (c.publication ? ' (publication ' + UI.h(c.publication) + ')' : '')
+                            + ' — ' + UI.h(c.limite) + '</li>';
+                    }).join('') + '</ul>';
+            }).join('') + '</details>';
     }
 
     function bilanMiseAJour(annee, resultat) {
@@ -1880,6 +1939,10 @@
                     + crypto.valeurs.dateModification + ', ' + crypto.url + '). '
                     + 'La FAQ ne date pas ce PFU par année de cession : aucun taux crypto de cette lecture attribué aux revenus 2025 ni activé dans la simulation'
                 : 'non disponible (' + (crypto.etat || 'non recherchée') + ')') + '. '
+            + (annee === 2025 ? 'Divergence crypto non résolue : BOI-RPPM-PVBMC-30-30 du 23/04/2024, § 10, PS 17,2 % '
+                + '(https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423), '
+                + 'contre FAQ courante modifiée le 17/07/2026, PS 18,6 % lors de l’audit du 14/10/2026. '
+                + 'Ni cette date ni la hausse générale de CSG ne suffisent à certifier les PS crypto des cessions 2025. ' : '')
             + (annee === 2025 ? 'Brochure DGFiP revenus 2025 (PDF, preuve partielle) : ' : 'Brochure PDF de ce millésime : ')
             + (brochure.valeurs
                 ? 'CSG patrimoine de 9,2 % à 10,6 % sur revenus 2025 déclarés en 2026 ; produits de placement à compter du 1.1.2026 ; exceptions à 9,2 % et CSG déductible 6,8 % mentionnées ('
@@ -2088,6 +2151,7 @@
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
         resumeRapport: resumeRapport, htmlRapport: htmlRapport,
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
+        matriceCouvertureDgfip: matriceCouvertureDgfip, htmlCouvertureDgfip: htmlCouvertureDgfip,
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

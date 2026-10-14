@@ -1,5 +1,11 @@
 # Crypto privés — notice 2086 et brochure DGFiP des revenus 2025
 
+> État actualisé le 14/10/2026, après PR #22 / APK 2.2.2 : l'utilisateur a
+> confirmé la lecture Android des **cinq PDF**. Les mentions « reste à vérifier »
+> ci-dessous décrivent les étapes historiques, pas une demande de nouvel essai.
+> Suite et limites actuelles : [matrice 2023–2026](COUVERTURE-FISCALE-2023-2026.md).
+
+
 Le bouton consulte **deux documents DGFiP distincts**, sans attribuer les taux courants de la FAQ à 2025 :
 
 - [Formulaire et notice 2086, déclaration 2026 des cessions réalisées en 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf) : année des cessions explicite ; quotient du prix de cession **avant frais** sur la valeur globale du portefeuille, frais déduits du premier terme du gain ; prix 213/217/218, capital 220–223, résultat 224 ; ligne 51 agrégeant les cessions **du foyer** (218/258/318/413/423/433), seuil de 305 €, 3AN/3BN, option 3CN indépendante de l'option RCM. L'IR forfaitaire de 12,8 % est mentionné, mais **aucun taux global de PS crypto 2025 n'est chiffré dans la preuve lue**. Le formulaire indique « inférieur ou égal à 305 € » ; un paragraphe explicatif de la notice écrit « inférieur à 305 € ». Cette divergence de rédaction est signalée, sans convertir la lecture partielle en certification du seuil du foyer.
