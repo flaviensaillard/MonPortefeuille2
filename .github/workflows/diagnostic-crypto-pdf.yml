@@ -40,6 +40,8 @@ jobs:
               const a=type==='notice'?reader.analyserNotice(pages):reader.analyserBrochure(pages);
               console.log(type,'analyse',JSON.stringify({etat:a.etat,valeurs:a.valeurs||null}));
               const t=pages.join(' ').replace(/\s+/g,' ');
+              if(type==='brochure') console.log('brochure titres',JSON.stringify([...t.matchAll(/plus.values de cession d.actifs numeriques/ig)].map(m=>[m.index,t.slice(m.index,m.index+240)])));
+              if(type==='brochure') console.log('brochure autour crypto',JSON.stringify(t.slice(124000,125300)));
               for(const motif of (type==='notice'?[]:[/plus.values de cession d.actifs num/i,/l.ensemble des cessions imposables/i,/foyers fiscaux r/i,/cette plus.value est impos/i,/2086 doit etre jointe/i,/option expresse/i])){
                 const i=t.search(motif);
                 console.log(type,'repère',String(motif),i,JSON.stringify(t.slice(Math.max(0,i-40),Math.max(0,i-40)+450)));
@@ -48,6 +50,6 @@ jobs:
           })().catch(e=>{console.error(e);process.exitCode=1});
           JS
           # 10 annotations max ; tout le texte est public DGFiP, aucun compte.
-          grep -E '^(notice analyse|brochure (analyse|repère))' diagnostic-public.txt | while IFS= read -r ligne; do
+          grep -E '^(notice analyse|brochure (analyse|titres|autour crypto))' diagnostic-public.txt | while IFS= read -r ligne; do
             echo "::warning::${ligne:0:950}"
           done
