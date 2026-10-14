@@ -92,7 +92,7 @@ const collecteur = contexte.PF.fiscalSources;
     assert.match(fiscal, /PF\.fiscalCryptoPdfSources\.chercher\(an\)/);
     assert.match(fiscal, /PF\.fiscalRcmPdfSources\.chercher\(an\)/);
     assert.match(fiscal, /data-fisc="collecter"/);
-    assert.match(fiscal, /une simulation indicative/);
+    assert.match(fiscal, /simulation indicative/);
     assert.match(fiscal, /non vérifiés par ce lecteur/);
     assert.doesNotMatch(fiscal, /PF\.fiscalSources\.synchroniser\(cibleAnnee\)/);
     assert.doesNotMatch(fiscal, /Vérifiez les migrations 009 et 010/);

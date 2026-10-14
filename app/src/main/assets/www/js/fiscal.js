@@ -1127,6 +1127,35 @@
         var r = rapportsControle[annee];
         return r && typeof r === 'object' ? bilanMiseAJour(Number(annee), r) : (r || '');
     }
+    // Un compte rendu utile sur téléphone doit tenir en quelques lignes.
+    // L'audit intégral reste accessible, mais n'est plus affiché d'emblée.
+    function resumeRapport(annee, r) {
+        if (!r || typeof r !== 'object') return String(r || '');
+        var boi = r.boi && r.boi.valeurs || {}, frais = r.frais && r.frais.valeurs || {};
+        var crypto = r.cryptoPdf || {}, rcm = r.rcmPdf || {};
+        function lu(v) { return v && v.valeurs ? 'lu' : 'non disponible'; }
+        var ir = ['ir', 'decote', 'qf'].filter(function (k) { return !!boi[k]; }).length;
+        var salaries = ['abatt', 'repas', 'km'].filter(function (k) {
+            return k === 'repas' ? typeof frais[k] === 'number' : !!frais[k];
+        }).length;
+        return 'Revenus ' + annee + ' (déclaration ' + (annee + 1) + ') — '
+            + (revisionActive(annee) ? 'R2 publiée prioritaire' : 'simulation indicative seulement')
+            + '. DGFiP : IR/décote/QF ' + ir + '/3, frais salariés ' + salaries + '/3, PS titres '
+            + lu(r.titres) + '. PDF : nouveautés CSG ' + lu(r.brochure)
+            + ', notice 2086 ' + lu(crypto.notice) + ', brochure crypto ' + lu(crypto.brochure)
+            + ', RCM ' + lu(rcm.rcm) + ', charges/CSG ' + lu(rcm.charges)
+            + '. RCM personnels, PS crypto 2025 et déduction CSG du foyer non vérifiés ; '
+            + 'aucun nouveau taux activé. Bascule DGFiP totale : non.';
+    }
+    function htmlRapport(annee) {
+        if (!rapportsControle[annee]) return '';
+        return '<div style="margin-top:8px;overflow-wrap:anywhere">' + UI.h(resumeRapport(Number(annee), rapportsControle[annee]))
+            + '</div><button class="btn ghost" data-fisc="copier-resume" data-annee="' + Number(annee)
+            + '" style="margin-top:8px">Copier le résumé</button>'
+            + '<details style="margin-top:8px"><summary>Sources, valeurs et limites détaillées</summary>'
+            + '<div class="st" style="margin-top:8px;overflow-wrap:anywhere">' + UI.h(texteRapport(annee))
+            + '</div></details>';
+    }
     function vue(ctx) {
         var prefait = ctx && ctx.config ? appliquerConfig(ctx) : false;
         var r = PF.store.reglages();
@@ -1149,10 +1178,10 @@
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + (rapportsControle[annee] ? UI.h(texteRapport(annee)) : '')
+                + htmlRapport(annee)
                 + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
                     .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
-                        + UI.h(texteRapport(an)) + '</div>'; }).join('') + '</div>';
+                        + htmlRapport(an) + '</div>'; }).join('') + '</div>';
         }
 
         // Le cache d'accueil ne contient aucune transaction : tant que la
@@ -1166,7 +1195,7 @@
                 + '<button class="btn sec" data-fisc="collecter">Vérifier cette année (DGFiP)</button>'
                 + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + UI.h(texteRapport(annee)) + '</div>';
+                + htmlRapport(annee) + '</div>';
         }
 
         // --- Bandeau de mise à jour
@@ -1197,19 +1226,16 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; pages DGFiP pour les RCM et la crypto, et PDF DGFiP 2025 pour le calendrier CSG, la notice 2086 et la brochure crypto (preuves partielles). '
-            + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
-            + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
-            + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
+            + '<div class="st" style="margin:6px 0">Sources DGFiP uniquement. Collecte partielle : les paramètres non vérifiés restent signalés, les révisions précédentes conservées. Résumé ci-dessous ; détails disponibles au besoin.</div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
             + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-            + (rapportsControle[annee] ? UI.h(texteRapport(annee)) : '')
+            + htmlRapport(annee)
             + '</div></div>';
         var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
         if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
             + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
-                + UI.h(texteRapport(an)) + '</div>'; }).join('') + '</div>';
+                + htmlRapport(an) + '</div>'; }).join('') + '</div>';
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
@@ -1905,6 +1931,25 @@
         vue.addEventListener('click', function (e) {
             var cible = e.target.closest ? e.target : null;
             if (!cible) return;
+            var copieResume = cible.closest('[data-fisc="copier-resume"]');
+            if (copieResume) {
+                var aCopier = Number(copieResume.getAttribute('data-annee'));
+                var uCopie = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+                if (!uCopie || uCopie.id !== compteRapports || !rapportsControle[aCopier]) return;
+                var texteCourt = resumeRapport(aCopier, rapportsControle[aCopier]);
+                var zoneCopie = document.createElement('textarea');
+                zoneCopie.value = texteCourt;
+                zoneCopie.style.position = 'fixed'; zoneCopie.style.opacity = '0';
+                document.body.appendChild(zoneCopie);
+                zoneCopie.select();
+                var okCopie = false;
+                try { okCopie = document.execCommand('copy'); } catch (_) { /* WebView sans presse-papiers */ }
+                document.body.removeChild(zoneCopie);
+                if (okCopie) UI.toast('Résumé copié');
+                else if (root.Native && root.Native.share) root.Native.share('Bilan fiscal DGFiP', texteCourt);
+                else UI.toast('Copie impossible');
+                return;
+            }
             var collecte = cible.closest('[data-fisc="collecter"], [data-fisc="collecter-tout"]');
             if (collecte) {
                 var etat = vue.querySelector('#etatCollecteFiscale');
@@ -2041,6 +2086,7 @@
         actualiserRevisions: actualiserRevisions, actualiserCollectesDgfip: actualiserCollectesDgfip,
         effacerRevisions: effacerRevisions,
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
+        resumeRapport: resumeRapport, htmlRapport: htmlRapport,
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
         vue: vue, attacher: attacher
     };
