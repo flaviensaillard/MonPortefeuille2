@@ -35,7 +35,7 @@
             seuilFoyer: seuil, ligne51: ligne51, cases: cases, option3CN: option, ir: ir };
         var absents = Object.keys(morceaux).filter(function (k) { return !morceaux[k]; });
         if (absents.length) return { etat: 'notice 2086 2025 : preuves incomplètes (' + absents.join(', ') + ')' };
-        return { etat: 'notice 2086 revenus 2025 : méthode et foyer partiellement vérifiés, PS non chiffrés',
+        return { etat: 'notice 2086 revenus 2025 : méthode et foyer partiellement vérifiés, PS non déterminés par ce lecteur',
             valeurs: { revenus: 2025, declaration: 2026, irForfaitaire: .128,
                 seuilFoyer: 305, numerateurQuotientAvantFrais: true, fraisPremierTerme: true,
                 ligne51Foyer: true, cases: '3AN/3BN', option: '3CN indépendante de 2OP',

@@ -33,7 +33,10 @@ function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.fro
 (async () => {
     assert.equal(lecteur.analyserNotice(notice).valeurs.psCrypto2025Attestes, false);
     assert.equal(lecteur.analyserNotice(notice).valeurs.annexeFoyerComplete, false);
+    assert.equal(lecteur.analyserNotice(notice + ' Taux PS futur 19,1 %').valeurs.psCrypto2025Attestes, false,
+        'un futur ajout chiffré non contrôlé ne doit pas être attribué automatiquement');
     assert.equal(lecteur.analyserBrochure(brochure).valeurs.psCrypto2025Attestes, false);
+    assert.equal(lecteur.analyserBrochure(brochure + ' Taux PS futur 19,1 %').valeurs.psCrypto2025Attestes, false);
     assert.equal(lecteur.analyserBrochure(brochure.replace('Cette plus-value', 'Cette plus- value')
         .replace('prélèvements sociaux', 'prélève - ments sociaux')).valeurs.psCrypto2025Attestes, false,
     'césures typographiques du vrai PDF reconnues sans inventer les PS');
