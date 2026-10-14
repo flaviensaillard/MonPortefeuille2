@@ -68,10 +68,13 @@
             if (valeur) {
                 // Preuve textuelle minimale ; reparse à la lecture, pas de HTML complet.
                 var t = texte(rep.body);
-                var phrase = t.match(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises[^.]{0,900}?taux de\s*(?:30|31[,.]4)\s*%/i);
-                nouveau.extrait = (phrase ? phrase[0] : '') + ' Si, en ' + annee
-                    + ', vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières. '
-                    + 'Le mécanisme d’abattements s’applique uniquement pour les titres acquis ou souscrit avant le 1er janvier 2018 en cas d’option pour le barème progressif. Case 2OP.';
+                var phrase = t.match(/Les plus-values de cession de valeurs mobilières réalisées depuis le 1er janvier 2018 sont soumises[^.]{0,900}?taux de\s*(?:30|31[,.]4)\s*%[.]/i);
+                var preuveAnnee = t.match(new RegExp('Si, en\\s+' + annee
+                    + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières[^.]{0,480}[.]', 'i'));
+                var preuveOption = t.match(/[^.]{0,280}case\s*2OP[^.]{0,80}[.]/i);
+                var preuveAssiette = t.match(/Le mécanisme d.abattements[^.]{0,450}?titres acquis ou souscrit avant le\s+1er janvier 2018[^.]{0,230}[.]/i);
+                nouveau.extrait = [phrase, preuveAnnee, preuveOption, preuveAssiette]
+                    .map(function (m) { return m ? m[0] : ''; }).join(' ');
                 if (!lireTitres(nouveau.extrait, annee)) {
                     nouveau.extrait = null;
                     etat = 'preuve insuffisante pour relecture';
