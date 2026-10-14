@@ -39,6 +39,18 @@
         2018: 0.172, 2019: 0.172, 2020: 0.172, 2021: 0.172, 2022: 0.172,
         2023: 0.172, 2024: 0.172, 2025: 0.172, 2026: 0.186
     };
+    /* Provenance des taux de PS embarqués, millésime par millésime. 2026 est
+       une RECONDUCTION de 2025 : aucun document du millésime « revenus 2026 »
+       n'existe, elle ne peut donc pas être présentée comme officielle. Cette
+       table ne change aucun calcul ; elle interdit de faire passer une
+       constante recopiée pour une mise à jour vérifiée. */
+    var PROVENANCE_PS = {
+        2023: 'BOFiP crypto/titres : 17,2 % stable, attribution par année de cession non vérifiée',
+        2024: 'BOFiP crypto/titres : 17,2 % stable, attribution par année de cession non vérifiée',
+        2025: 'titres : aide du simulateur 2026 (revenus 2025 explicites), divergence notice 2042 signalée ; '
+            + 'crypto : recoupement BOFiP + brochure nouveautés revenus 2025, non activé',
+        2026: 'reconduction de 2025, aucun document du millésime revenus 2026 : non établi'
+    };
     var CSG_DEDUCTIBLE = 0.068;
     var CRYPTO_FRANCHISE_CESSIONS = 305.0;    // seuil sur le TOTAL des prix de cession
     var OR_PHYS_TFMP = 0.115, OR_PHYS_PV_IR = 0.19, OR_PHYS_PV_PS = 0.172;
@@ -61,7 +73,8 @@
     // Collectes BOFiP / frais DGFiP par année et compte. Les anciennes
     // collectes OpenFisca restent en base mais ne sont plus relues ni appliquées.
     var revisionsActives = Object.create(null), officiels = Object.create(null),
-        fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null);
+        fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null),
+        recoupementsCrypto = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
     var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue', compteRapports = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
@@ -93,6 +106,7 @@
         officiels = Object.create(null);
         fraisOfficiels = Object.create(null);
         titresOfficiels = Object.create(null);
+        recoupementsCrypto = Object.create(null);
         compteRevisions = null;
         contexteRevisions = null;
         etatR2 = 'non lue';
@@ -107,6 +121,11 @@
         });
         if (PF.fiscalRegimesSources) annees().forEach(function (an) {
             if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
+        });
+        // Le recoupement PS crypto est relu et REVALIDÉ à chaque lecture : une
+        // ligne en cache n'est jamais une preuve en soi.
+        if (PF.fiscalCryptoPsRecoupement) annees().forEach(function (an) {
+            if (an >= 2023) recoupementsCrypto[an] = PF.fiscalCryptoPsRecoupement.lireCache(an);
         });
     }
     function perimetreR2(ctx) {
@@ -223,6 +242,22 @@
         if (PS_PRECOMPTES_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de PS précomptés pour ' + annee + '.');
         return PS_PRECOMPTES_PAR_ANNEE[annee];
     }
+    /* Taux de PS des plus-values de titres ÉTABLI pour un millésime : une
+       révision publiée ou un document DGFiP de ce millésime. Renvoie null
+       sinon — jamais la constante embarquée, qui peut être une reconduction
+       silencieuse de l'année précédente (2026 = copie de 2025). */
+    function tauxPSEtabli(annee) {
+        var p = paramsActifs(annee);
+        if (p) return { taux: p.prelevements_sociaux_par_categorie.plus_values_titres,
+            statut: 'révision publiée', provenance: 'R2 publiée par le propriétaire (Supabase)' };
+        if (titresOfficiels[annee]) return { taux: titresOfficiels[annee].ps, statut: 'établi',
+            provenance: PROVENANCE_PS[annee] || 'document DGFiP du millésime' };
+        return null;
+    }
+    /* Recoupement PS crypto : statut « recoupement » ou « partiel », jamais
+       une activation. La R2 publiée reste prioritaire. */
+    function psCryptoRecoupement(annee) { return recoupementsCrypto[annee] || null; }
+
     var PLAFOND_QF_GENERAL = { 2022: 1759, 2023: 1759, 2024: 1759, 2025: 1807, 2026: 1807 }; // 2026 provisoire
     function plafondQF(annee) {
         var p = paramsActifs(annee);
@@ -514,8 +549,8 @@
         return {
             disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
             message: 'Constantes intégrées jusqu’aux revenus ' + derniere + ' (PFU titres '
-                + U.nombre(tauxPFU(derniere) * 100, 1) + ' %). '
-                + 'Cela ne prouve ni l’exactitude des règles ni l’absence de rectification.'
+                + U.nombre(tauxPFU(derniere) * 100, 1) + ' % — ' + (PROVENANCE_PS[derniere] || 'provenance non documentée')
+                + '). Cela ne prouve ni l’exactitude des règles ni l’absence de rectification.'
         };
     }
 
@@ -1178,7 +1213,7 @@
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + htmlRapport(annee)
+                + htmlRapport(annee) + htmlMatrice()
                 + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
                     .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
                         + htmlRapport(an) + '</div>'; }).join('') + '</div>';
@@ -1231,7 +1266,7 @@
             + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
             + htmlRapport(annee)
-            + '</div></div>';
+            + '</div>' + htmlMatrice() + '</div>';
         var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
         if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
             + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
@@ -1239,7 +1274,13 @@
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
-        out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.</div>';
+        var qfGarde = PF.fiscalGardesFoyer ? PF.fiscalGardesFoyer.casParticuliersQF({
+            parts: U.num(r.partsFiscales, 0), statut: r.statutFiscal, enfants: enfants }) : null;
+        out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.'
+            + (qfGarde && (qfGarde.blocages.length || qfGarde.avertissements.length)
+                ? '<div class="st" style="margin-top:6px">'
+                    + UI.h(qfGarde.blocages.concat(qfGarde.avertissements).join(' ')) + '</div>' : '')
+            + '</div>';
 
         // --- 1. Paramètres fiscaux
         var couple = estCouple(r.statutFiscal);
@@ -1649,6 +1690,16 @@
                 + 'À reporter en case <b>' + (t.case_3an > 0 ? '3AN' : '3BN') + '</b> : <b>'
                 + U.eur(t.case_3an > 0 ? t.case_3an : t.case_3bn, { dec: 0 }) + '</b>.</div>';
         }
+        // Portée du FOYER contrôlée, pas seulement annoncée : les cases 3AN/3BN
+        // sont celles du foyer, l'application ne peut pas les certifier.
+        if (PF.fiscalGardesFoyer) {
+            var portee = PF.fiscalGardesFoyer.portee2086Foyer({ annee: annee,
+                totalPrixCessionPortefeuille: t.total_cessions_218,
+                operationsPortefeuille: t.cessions.length, seuilOfficiel: CRYPTO_FRANCHISE_CESSIONS });
+            out += '<div class="st" style="margin-bottom:8px">' + UI.h(portee.etat + ' — ' + portee.seuilApplicable
+                + '. ' + portee.limite + (portee.avertissements.length ? ' ' + portee.avertissements.join(' ') : ''))
+                + '</div>';
+        }
 
         out += '<table class="tableau compact" style="margin-top:10px"><tr><th>Actif</th><th>Date</th>'
             + '<th>212 valeur globale</th><th>213 brut</th><th>214 frais</th><th>218 net</th>'
@@ -1828,12 +1879,87 @@
             manquants: Object.keys(feuilles).filter(function (nom) { return !feuilles[nom]; }) };
     }
 
+    /* Preuves réellement LUES pour un millésime, en vue de la matrice. Les
+       constantes embarquées du code n'y apparaissent jamais : seule une
+       relecture de cache revalidée, ou un document du millésime, compte. */
+    function preuvesParAnnee(annee) {
+        var r = rapportsControle[annee] || {};
+        function cache(module, args) {
+            try {
+                return module && typeof module.lireCache === 'function'
+                    ? module.lireCache.apply(module, args || []) : null;
+            } catch (_) { return null; }
+        }
+        var recoupement = recoupementsCrypto[annee]
+            || cache(PF.fiscalCryptoPsRecoupement, [annee]) || null;
+        return {
+            boi: officiels[annee] || cache(PF.fiscalDgfipSources, [annee]) || null,
+            frais: fraisOfficiels[annee] || cache(PF.fiscalFraisSources, [annee]) || null,
+            titres: titresOfficiels[annee] || cache(PF.fiscalRegimesSources, [annee]) || null,
+            cryptoFaq: cache(PF.fiscalCryptoSources) || null,
+            brochure: cache(PF.fiscalBrochureSources) || null,
+            notice2086: cache(PF.fiscalCryptoPdfSources, ['notice']) || null,
+            brochureCrypto: cache(PF.fiscalCryptoPdfSources, ['brochure']) || null,
+            brochureRcm: cache(PF.fiscalRcmPdfSources, ['rcm']) || null,
+            chargesRcm: cache(PF.fiscalRcmPdfSources, ['charges']) || null,
+            recoupementPsCrypto: recoupement && recoupement.statut === 'partiel' ? recoupement
+                : recoupement ? { statut: recoupement.statut, taux: recoupement.taux,
+                    sources: recoupement.sources, note: recoupement.derivation } : null,
+            revisionPubliee: revisionActive(annee),
+            urls: {
+                frais: PF.fiscalFraisSources ? PF.fiscalFraisSources.KM(annee) : null,
+                repas: PF.fiscalFraisSources ? PF.fiscalFraisSources.repasUrl(annee) : null,
+                gains: PF.fiscalRegimesSources ? PF.fiscalRegimesSources.url(annee) : null,
+                cryptoFaq: PF.fiscalCryptoSources ? PF.fiscalCryptoSources.url : null,
+                notice2086: PF.fiscalCryptoPdfSources ? PF.fiscalCryptoPdfSources.urls.notice : null,
+                brochureRcm: PF.fiscalRcmPdfSources ? PF.fiscalRcmPdfSources.urls.rcm : null,
+                charges: PF.fiscalRcmPdfSources ? PF.fiscalRcmPdfSources.urls.charges : null
+            }
+        };
+    }
+
+    function matriceCouverture() {
+        if (!PF.fiscalCouverture) return null;
+        var preuves = {};
+        annees().forEach(function (an) { if (an >= 2023) preuves[an] = preuvesParAnnee(an); });
+        return PF.fiscalCouverture.matrice(preuves);
+    }
+
+    /* Matrice repliée : le compte rendu court reste copiable en un clic, les
+       preuves détaillées ne s'imposent pas. */
+    function htmlMatrice() {
+        var m = matriceCouverture();
+        if (!m) return '';
+        var corps = m.annees.map(function (an) {
+            return '<div style="margin-top:8px"><b>Revenus ' + UI.h(an) + '</b> — déclaration '
+                + UI.h(m.millesimes[an].declaration) + ', publication BOFiP '
+                + UI.h(m.millesimes[an].publicationBoi || 'non disponible')
+                + '<div class="st" style="white-space:pre-wrap;overflow-wrap:anywhere">'
+                + UI.h(PF.fiscalCouverture.texteDetail(m, an)) + '</div></div>';
+        }).join('');
+        var contra = PF.fiscalCouverture.contradictions();
+        return '<details style="margin-top:8px"><summary>Matrice de couverture DGFiP 2023–2026 '
+            + '(établis ' + m.synthese.etablis + '/' + m.synthese.total
+            + (m.synthese.recoupements ? ', recoupements ' + m.synthese.recoupements : '')
+            + ') — bascule totale : ' + (m.synthese.basculeComplete ? 'oui' : 'non') + '</summary>'
+            + corps + (contra.length ? '<div style="margin-top:8px"><b>Contradictions documentaires DGFiP</b>'
+                + contra.map(function (c) {
+                    return '<div class="st" style="margin-top:6px;overflow-wrap:anywhere">' + UI.h(c.resume)
+                        + ' (revenus ' + UI.h(c.millesime) + ') : ' + UI.h(c.termes.map(function (t) {
+                            return t.valeur + ' — ' + t.source + ' (' + (t.publication || 'date non indiquée') + ')'
+                                + (t.passage ? ' ' + t.passage : '');
+                        }).join(' CONTRE ')) + '. ' + UI.h(c.arbitrage) + '</div>';
+                }).join('') + '</div>' : '')
+            + '</details>';
+    }
+
     function bilanMiseAJour(annee, resultat) {
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
             rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {},
             cryptoPdf = resultat.cryptoPdf || {}, notice2086 = cryptoPdf.notice || {},
             brochureCrypto = cryptoPdf.brochure || {}, rcmPdf = resultat.rcmPdf || {},
-            brochureRcm = rcmPdf.rcm || {}, chargesRcm = rcmPdf.charges || {};
+            brochureRcm = rcmPdf.rcm || {}, chargesRcm = rcmPdf.charges || {},
+            recoupement = resultat.recoupement || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1905,6 +2031,16 @@
                 ? 'CSG sur certains revenus du patrimoine 2024 payée en 2025 déductible des revenus 2025 ; case 6DE pour corriger le préremplissage dans les cas prévus. CSG des lignes 2BH/2DF prélevée en 2025 calculée automatiquement, à ne pas ajouter en 6DE ('
                     + chargesRcm.url + '). Une plus-value 2025 imposée forfaitairement ne crée pas à elle seule une déduction CSG en 2025 ; avis et montants du foyer non lus, aucune activation'
                 : 'non disponible (' + (chargesRcm.etat || 'non recherchée') + ')') + '. '
+            + 'PS des cessions crypto privées — recoupement documentaire : '
+            + (recoupement.statut === 'recoupement'
+                ? 'revenus ' + annee + ' : ' + recoupement.derivation + '. Statut « recoupement » de deux textes '
+                    + 'DGFiP, aucun texte unique ne datant ce taux par année de cession. '
+                    + (recoupement.contradictionBofip || 'Contradiction BOFiP signalée.')
+                    + ' Aucun taux activé par cette lecture'
+                : 'revenus ' + annee + ' non établi (' + (recoupement.etat || 'non recherché') + '). '
+                    + 'La FAQ courante n’est pas attribuée à cette année ; le BOFiP crypto '
+                    + '(BOI-RPPM-PVBMC-30-30, version du 23/04/2024, 17,2 %) ne date pas son taux par année '
+                    + 'de cession. Aucun taux activé') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
@@ -1995,11 +2131,21 @@
                         PF.fiscalRcmPdfSources.chercher(an).catch(function (err) {
                             return { rcm: { erreur: String(err && err.message || err) },
                                 charges: { erreur: String(err && err.message || err) } };
+                        }),
+                        // Recoupement PS crypto : module récent, donc optionnel.
+                        // Son absence ne bloque pas la collecte déjà livrée.
+                        (PF.fiscalCryptoPsRecoupement
+                            ? PF.fiscalCryptoPsRecoupement.chercher(an)
+                            : Promise.resolve({ statut: 'partiel', etat: 'module de recoupement absent' })
+                        ).catch(function (err) {
+                            return { statut: 'partiel', etat: 'recoupement interrompu : '
+                                + String(err && err.message || err) };
                         })
                     ]).then(function (resultats) {
                         return { annee: an, boi: resultats[0], frais: resultats[1],
                             titres: resultats[2], rcm: resultats[3], crypto: resultats[4],
-                            brochure: resultats[5], cryptoPdf: resultats[6], rcmPdf: resultats[7] };
+                            brochure: resultats[5], cryptoPdf: resultats[6], rcmPdf: resultats[7],
+                            recoupement: resultats[8] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();
@@ -2012,6 +2158,12 @@
                             rapportsControle = Object.create(null);
                         compteRapports = proprietaire.id;
                         resultats.forEach(function (r) { rapportsControle[r.annee] = r; });
+                        // Le recoupement relu est conservé par millésime : il ne
+                        // s'applique jamais à une autre année et n'active rien.
+                        resultats.forEach(function (r) {
+                            if (r.recoupement && r.recoupement.statut && r.recoupement.statut !== 'partiel')
+                                recoupementsCrypto[r.annee] = r.recoupement;
+                        });
                         PF.app.rendre();
                     });
                 }).catch(function (err) {
@@ -2088,6 +2240,11 @@
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
         resumeRapport: resumeRapport, htmlRapport: htmlRapport,
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
+        PROVENANCE_PS: PROVENANCE_PS, tauxPSEtabli: tauxPSEtabli, psCryptoRecoupement: psCryptoRecoupement,
+        preuvesParAnnee: preuvesParAnnee, matriceCouverture: matriceCouverture, htmlMatrice: htmlMatrice,
+        csgDeductible6DE: function (d) { return PF.fiscalGardesFoyer.csgDeductible6DE(d); },
+        portee2086Foyer: function (d) { return PF.fiscalGardesFoyer.portee2086Foyer(d); },
+        casParticuliersQF: function (d) { return PF.fiscalGardesFoyer.casParticuliersQF(d); },
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

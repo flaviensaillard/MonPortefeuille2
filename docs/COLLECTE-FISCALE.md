@@ -528,3 +528,44 @@ tant que la page salariale pour l’année 2026 ne les publie pas.
 
 Test hors réseau : `node tests/test_fiscal_frais_sources.js` (année exacte,
 format complet, cohérence, rectification, isolation des comptes).
+
+---
+
+## Matrice de couverture par millésime et catégorie (14/10/2026)
+
+`app/src/main/assets/www/js/fiscal_couverture.js` calcule, pour les revenus
+**2023, 2024, 2025 et 2026**, le statut de chaque catégorie : `établi` (texte
+DGFiP du millésime), `recoupement` (dérivation documentée d'au moins deux textes,
+jamais activée), `partiel` (document lu, portée insuffisante) ou `non disponible`.
+Les trois dates sont séparées : **année des revenus**, **année de déclaration**,
+**date de publication du document**.
+
+Une constante embarquée dans le code n'est jamais une preuve : sans collecte, les
+52 cases (4 millésimes × 13 catégories) sont « non disponible ». `basculeComplete`
+n'est vrai que si toutes les cases sont « établi » ; un recoupement ne suffit pas.
+Aujourd'hui : **bascule DGFiP totale : non**.
+
+Les catégories qui ne peuvent pas être établies par un document public — plafonds
+QF particuliers, RCM personnels (produit, précompte réel, option 2OP du foyer,
+2CG/2BH/2DF), CSG déductible personnelle, exhaustivité de la 2086 du foyer,
+changements de formule et arrondis — restent affichées « non disponible » ou
+« partiel », jamais comme une estimation officielle.
+
+Trois garde-fous du foyer sont ajoutés (`fiscal_gardes_foyer.js`) :
+
+- `csgDeductible6DE()` : la part 6,8 % × (2BH + 2DF) est calculée
+  automatiquement par l'administration ; un 6DE qui la contient est **bloqué**
+  comme double compte. Aucun montant n'est produit sans saisie personnelle, donc
+  jamais à partir de la seule lecture des brochures.
+- `portee2086Foyer()` : `certifieFoyer` reste `false`. Seule l'inférence à sens
+  unique est admise — un total du seul portefeuille supérieur à 305 € exclut
+  l'exonération du foyer, un total inférieur ne la prouve pas. Les options 3CN et
+  2OP restent distinctes.
+- `casParticuliersQF()` : un cas particulier déclaré, ou une demi-part non
+  expliquée par la règle générale, bloque le bilan et la recommandation 2OP.
+
+`PROVENANCE_PS` qualifie chaque taux de PS embarqué ; pour 2026 il dit
+explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche.
+
+Détail des sources, passages probants, contradictions et tests :
+**`docs/MATRICE-COUVERTURE-FISCALE-2023-2026.md`**.

@@ -1,0 +1,281 @@
+# Matrice de couverture fiscale DGFiP — revenus 2023 à 2026
+
+**Date de vérification des sources : 14/10/2026** (lecture directe des documents
+DGFiP, pas de reprise d'un compte rendu antérieur).
+**Point de départ du code : `main` = `e878c2f` (PR #22 fusionnée, APK 2.2.2 publiée).**
+Aucune migration SQL rejouée, aucun secret demandé, R2 des revenus 2025 inchangée
+et toujours prioritaire.
+
+Ce document accompagne `app/src/main/assets/www/js/fiscal_couverture.js`
+(la matrice calculée), `fiscal_crypto_ps_recoupement.js` (la preuve manquante
+recherchée au point 1) et `fiscal_gardes_foyer.js` (CSG 6DE, annexe 2086,
+quotient familial).
+
+---
+
+## 1. Méthode : trois dates, jamais confondues
+
+| Notion | Exemple pour les revenus 2025 | Où elle est contrôlée |
+| --- | --- | --- |
+| **Année des revenus** (millésime imposable) | 2025 | chaque lecteur exige l'année dans le texte, jamais dans la seule URL |
+| **Année de déclaration** | 2026 | `MILLESIMES[annee].declaration` ; les URL des aides et brochures en dépendent |
+| **Date de publication du document** | BOFiP : 07/04/2026 ; FAQ : modifiée le 17/07/2026 ; BOFiP crypto : 23/04/2024 | relevée dans le document lui-même, conservée avec l'extrait |
+
+Statuts employés par la matrice :
+
+- **établi** — un texte DGFiP du millésime attribue explicitement la valeur à
+  cette année de revenus ;
+- **recoupement** — la valeur résulte d'une dérivation documentée d'au moins
+  deux textes DGFiP ; le statut est distinct d'un texte explicite et
+  **n'active jamais un taux** ;
+- **partiel** — un document du millésime a été lu, mais sa portée ne permet pas
+  d'activer (règles générales, produits du foyer non déterminés, seuil non
+  tranché) ;
+- **non disponible** — aucune preuve de ce millésime. Une constante embarquée
+  dans le code produit ce statut : elle n'est jamais présentée comme une mise à
+  jour officielle.
+
+`basculeComplete` n'est vrai que si **toutes** les catégories de **tous** les
+millésimes sont « établi ». Un recoupement ne suffit pas. Aujourd'hui :
+**bascule DGFiP totale : non.**
+
+---
+
+## 2. Matrice (état réel au 14/10/2026, avant clic du propriétaire)
+
+Sans collecte, toutes les cases sont « non disponible » : c'est le comportement
+attendu, les constantes embarquées ne comptent pas comme preuves.
+
+Après collecte des documents du millésime **revenus 2025** (les cinq PDF déjà
+confirmés sur Android + BOFiP + aides du simulateur 2026) :
+
+| Catégorie | Revenus 2023 | Revenus 2024 | Revenus 2025 | Revenus 2026 |
+| --- | --- | --- | --- | --- |
+| Barème IR | établiable (BOFiP 18/06/2024) | établiable (BOFiP 14/04/2025) | **établi** (BOFiP 07/04/2026) | non disponible |
+| Décote | établiable | établiable | **établi** | non disponible |
+| Plafond QF général | établiable | établiable | **établi** | non disponible |
+| Plafonds QF particuliers | non disponible | non disponible | non disponible | non disponible |
+| Abattement salariés 10 % | établiable | établiable | **établi** | non disponible |
+| Forfait repas | établiable | établiable | **établi** | non disponible |
+| Barème kilométrique | établiable | établiable | **établi** | non disponible |
+| PS plus-values de titres | partiel | partiel | **établi** (divergence signalée) | non disponible |
+| PS cessions crypto privées | partiel | partiel | **recoupement** (non activé) | non disponible |
+| RCM : produit, année, précompte, 2OP, 2CG/2BH/2DF | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
+| CSG déductible et calendrier 6DE | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
+| Annexe 2086 à l'échelle du foyer | non disponible | non disponible | **partiel** (formule et cases) | non disponible |
+| Changements de formule et arrondis | non disponible | non disponible | non disponible | non disponible |
+
+« établiable » = le lecteur dispose d'une source millésimée pour ces revenus
+rétroactifs et la vérifie au clic ; la case devient « établi » après lecture
+réussie. Rien n'est établi pour 2026 : les brochures et aides du millésime
+« revenus 2026 » (déclaration 2027) n'existent pas encore.
+
+**Catégories jamais établies par un document public, quel que soit le
+millésime** : plafonds QF particuliers, RCM personnels (produit, précompte
+réel, option 2OP du foyer), CSG déductible personnelle, exhaustivité de la 2086
+du foyer, changements de formule et arrondis. Elles restent « non disponible »
+ou « partiel », et le bilan l'affiche.
+
+---
+
+## 3. Point 1 — PS des cessions crypto privées de 2025 : preuve recherchée
+
+### 3.1 Ce que disent réellement les documents DGFiP (vérifié le 14/10/2026)
+
+**Source A — BOFiP `BOI-RPPM-PVBMC-30-30`**, « Cession d'actifs numériques à
+titre occasionnel — Modalités d'imposition et obligations déclaratives ».
+Permalien : <https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423>
+(la redirection `https://bofip.impots.gouv.fr/doctrine/BOI-RPPM-PVBMC-30-30`
+pointe toujours sur cette version au 14/10/2026).
+
+- *Date de début de publication du BOI :* **23/04/2024**.
+- Passage probant, § 10 : « Les plus-values des particuliers entrant dans le
+  champ d'application de l'article 150 VH bis du CGI sont soumises à l'impôt sur
+  le revenu au taux forfaitaire de 12,8 % (CGI, art. 200 C) ainsi qu'aux
+  **prélèvements sociaux sur les revenus du patrimoine** au taux global de
+  **17,2 %**. Les plus-values concernées sont donc imposées à un taux global de
+  **30 %**. »
+- **Limite** : ce texte ne date pas son taux par année de cession et n'a pas été
+  mis à jour depuis le 23/04/2024. Il apporte cependant le maillon décisif : la
+  **qualification** « revenus du patrimoine », qui fixe la date d'effet.
+
+**Source B — Brochure DGFiP « Principales nouveautés revenus 2025 »** (déclaration
+2026) : <https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf>
+
+- Passages probants : « Le taux de la CSG est porté de 9,2 % à 10,6 % sur les
+  revenus du patrimoine et les produits de placement. » ; « Les revenus fonciers,
+  les plus-values immobilières, l'assurance-vie, l'épargne logement restent
+  soumis au taux de 9,2 %. » ; « Le taux de CSG déductible reste à 6,8 %. » ;
+  « La hausse de la CSG s'applique **à compter des revenus 2025 déclarés en
+  2026 pour les revenus du patrimoine** et à compter du 1.1.2026 pour les
+  produits de placement. *(LFSS 2026, art. 12 ; CSS, art. L 136-8)* »
+- **Limite** : la brochure ne nomme pas les actifs numériques.
+
+**Source C — FAQ DGFiP actifs numériques** :
+<https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques>
+
+- « Publié le 16/06/2023, **modifié le 17/07/2026** » ; « Les plus-values
+  réalisées dans le cadre de la gestion votre patrimoine privé sont imposées au
+  prélèvement forfaitaire unique (PFU) de **31,4 %** (12,8 % d'impôt + **18,6 %**
+  de prélèvements sociaux) ».
+- **Limite** : page courante, **aucune année de cession** n'est attribuée à ce
+  taux. Elle n'est donc **pas** la preuve de 2025 et reste une simple
+  **corroboration**.
+
+**Source D (rappel, catégorie titres) — Aide du simulateur IR-IFI 2026**, page
+« Plus-values et gains divers » :
+<https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm>
+
+- « Les plus-values de cession de valeurs mobilières réalisées depuis le
+  1er janvier 2018 sont soumises, lors de leur imposition, à un prélèvement
+  forfaitaire unique (PFU) de 12,8 % auquel s'ajoutent les **prélèvements
+  sociaux de 18,6 %** soit au total un taux de **31,4 %**. » puis « **Si, en
+  2025**, vous ou les membres de votre foyer fiscal avez vendu des valeurs
+  mobilières… ».
+- Contrairement à la FAQ crypto, cette page **date explicitement** le taux des
+  revenus 2025. Elle porte sur les **titres**, pas sur les actifs numériques :
+  le lecteur ne transpose pas ce taux à la crypto.
+
+### 3.2 Contradiction documentaire, non tranchée par un texte unique
+
+| Document | Taux PS crypto | Date | Portée |
+| --- | --- | --- | --- |
+| BOFiP `BOI-RPPM-PVBMC-30-30` | **17,2 %** (global 30 %) | version 23/04/2024 | sans année de cession |
+| FAQ DGFiP actifs numériques | **18,6 %** (PFU 31,4 %) | modifiée le 17/07/2026 | sans année de cession |
+| Brochure nouveautés revenus 2025 | CSG 9,2 % → **10,6 %** sur revenus du patrimoine | déclaration 2026 | « à compter des revenus 2025 déclarés en 2026 » |
+
+La contradiction est **affichée** dans l'écran Fiscalité (bloc replié
+« Contradictions documentaires DGFiP ») et dans `bilanMiseAJour`. Elle n'est
+tranchée par aucune valeur inventée.
+
+### 3.3 Recoupement retenu, et ce qu'il ne fait pas
+
+`fiscal_crypto_ps_recoupement.js` compose A + B :
+
+> gains crypto privés = prélèvements sociaux **sur les revenus du patrimoine**
+> (A) ; la CSG sur les revenus du patrimoine passe de 9,2 % à 10,6 % **à compter
+> des revenus 2025**, actifs numériques absents de la liste d'exceptions (B) ;
+> donc 17,2 % + 1,4 point = **18,6 %** pour les cessions réalisées en 2025.
+
+Propriétés garanties par le code et par les tests :
+
+- statut **« recoupement »**, distinct d'« établi » ; `active: false` en dur ;
+- **aucun taux du moteur n'est modifié** : `comparerOptionsFoyer` renvoie
+  exactement les mêmes montants avant et après la collecte du recoupement
+  (`tests/test_fiscal_matrice_integration.js`) ;
+- la R2 des revenus 2025 **n'est pas remplacée** : un recoupement n'est pas une
+  révision publiée (`revisionActive(2025)` reste inchangé) ;
+- la FAQ courante n'intervient qu'en **corroboration** ; si elle contredit le
+  taux dérivé, le recoupement est **rétrogradé en « partiel »** et la
+  contradiction est signalée ;
+- huit maillons sont nommés et vérifiés un à un (BOFiP daté, qualification
+  « revenus du patrimoine », taux global publié, brochure du millésime,
+  calendrier de la hausse, taux CSG ancien et nouveau, liste d'exceptions lue,
+  actifs numériques hors exceptions) ;
+- refus par millésime : 2023 et 2024 (aucune source ne date le taux de ces
+  années, le BOFiP courant n'est pas attribué), 2026 et au-delà (documents non
+  publiés) ;
+- refus si le BOFiP qualifiait ces gains de **produits de placement** (date
+  d'effet 1.1.2026, pas revenus 2025), si la liste d'exceptions contenait les
+  actifs numériques, si un maillon manque, ou si le BOFiP affichait déjà 18,6 %
+  (la dérivation deviendrait incohérente) ;
+- **source sans redirection** : le BOFiP est lu par son permalien versionné
+  `bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423`, car le pont
+  Android (`NativeBridge.java`) ne suit une redirection `/doctrine/` que pour la
+  série `BOI-IR-LIQ-20-*`. La lecture fonctionne donc sur l'APK 2.2.2 déjà
+  publiée, sans modification native. Contrepartie assumée et documentée : la
+  version lue est figée au 23/04/2024 ; si la DGFiP republie ce BOI en datant le
+  taux par année de cession, l'URL devra être mise à jour. La date de publication
+  est relue sur la page et conservée avec l'extrait ;
+- caches **par compte, par document et par millésime**, extraits revalidés à la
+  relecture, rectifications et révisions d'un même millésime conservées,
+  aucun PDF brut ni HTML complet stocké, aucune écriture SQL.
+
+**Conséquence assumée : la catégorie « PS crypto privés » n'est pas « établie ».**
+Elle passe de « non disponible » à « recoupement » pour les seuls revenus 2025,
+et la bascule DGFiP totale reste **non**.
+
+---
+
+## 4. Point 4 — Échelle du FOYER pour la 2086
+
+Preuve DGFiP complémentaire relevée le 14/10/2026, **BOFiP
+`BOI-RPPM-PVBMC-30-10`** (version 02/09/2019) :
+<https://bofip.impots.gouv.fr/bofip/11967-PGP.html/identifiant=BOI-RPPM-PVBMC-30-10-20190902>
+
+> « Pour l'application de l'article 150 VH bis du CGI, il convient de retenir les
+> cessions d'actifs numériques ou de droits s'y rapportant réalisées **dans le
+> cadre du foyer fiscal**, c'est-à-dire les cessions réalisées tant par le
+> contribuable ou les époux soumis à une imposition commune (ou partenaires liés
+> par un pacte civil de solidarité - PACS) que par les autres membres du foyer
+> fiscal. »
+
+Ce texte fonde la règle, pas les données : `portee2086Foyer()` renvoie toujours
+`certifieFoyer: false`. Seule l'inférence à sens unique est admise :
+
+- total des prix de cession **du seul portefeuille** supérieur à 305 € ⇒
+  l'exonération du foyer est exclue (`exonereFoyer: false`) ;
+- total inférieur ou égal à 305 € ⇒ l'exonération du foyer **n'est pas prouvée**
+  (`exonereFoyer: null`, avertissement explicite) ;
+- cases 3AN/3BN `reportable` uniquement si le propriétaire atteste la complétude
+  du foyer ; l'attestation ne vaut pas certification.
+
+La distinction **3CN** (globale pour les actifs numériques du foyer,
+indépendante) et **2OP** (globale pour titres et RCM) est conservée dans le
+garde-fou et dans les lecteurs existants. Le cas d'égalité exacte à 305 €
+(« inférieur ou égal à » dans le formulaire, « inférieur à » dans un paragraphe
+de la notice) reste signalé, jamais tranché.
+
+---
+
+## 5. Points 2, 3 et 5 — ce qui reste non disponible
+
+| Point | État | Raison, sans invention |
+| --- | --- | --- |
+| 2. RCM : produit, année, précompte réel, 2OP du foyer, 2CG/2BH/2DF | **partiel** (revenus 2025) | les brochures établissent des règles ; produit, dates et précompte du foyer ne se lisent pas dans un document public. Aucune CSG déductible personnelle n'est calculée à partir de leur seule lecture. Le précompte doit être indiqué par le propriétaire, le pays du courtier ne suffit pas. |
+| 3. CSG : patrimoine 2024 payée en 2025, RCM précomptés en 2025, gains 2025 acquittés sur l'avis 2026 | **partiel** (revenus 2025) | les trois calendriers sont distincts dans `csgDeductible6DE()` ; la part 6,8 % × (2BH + 2DF) calculée automatiquement ne doit **jamais** être reportée en 6DE : un 6DE qui la contient est **bloqué** comme double compte. Aucun montant n'est produit sans saisie personnelle. |
+| 4. 2086 : formule, frais, seuil, cases au niveau du foyer | **partiel** | voir section 4 : formule, frais hors quotient, seuil et cases relus ; exhaustivité du foyer non certifiable. |
+| 5a. Cas QF particuliers, changements de formule, arrondis | **non disponible** | `casParticuliersQF()` bloque bilan et recommandation 2OP dès qu'un cas particulier est déclaré ou qu'une demi-part n'est pas expliquée par la règle générale. Les plafonds spéciaux ne sont pas modélisés. |
+| 5b. Divergence DGFiP sur les PS des titres 2025 | **signalée** | aide du simulateur 2026 : 18,6 % daté « en 2025 » (vérifié le 14/10/2026) ; notice 2042 : 17,2 % (lecture antérieure consignée dans `docs/COLLECTE-FISCALE.md`). Le lecteur retient l'aide du simulateur et affiche la divergence ; R2 prioritaire. |
+| 5c. Sources propres à 2023 et 2024 | **établiables, non établies avant clic** | BOFiP datés 18/06/2024 et 14/04/2025, aides des déclarations 2024 et 2025. Les PS crypto de ces millésimes restent « partiel » : aucune source ne date le taux par année de cession. |
+| 5d. Paramètres des revenus 2026 | **non disponible** | aucun document du millésime. `PROVENANCE_PS[2026]` dit explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche. `baremeDe` et `plafondQF` refusent 2026 sans preuve ; `comparerOptionsFoyer(…, 2026, …)` lève une erreur. |
+
+---
+
+## 6. Garde-fous transverses (rappel du cahier des charges)
+
+- **Jamais de reconduction silencieuse** : la matrice refuse une preuve dont
+  l'URL ou l'année ne correspond pas au millésime demandé (test : une aide de la
+  déclaration 2025 ne remplit pas la colonne revenus 2025) ; une preuve de 2025
+  passée pour 2026 ne remplit aucune case de 2026.
+- **Jamais de collecte partielle présentée comme révision complète** :
+  `couvertureDgfip(annee).complet` reste faux, `basculeComplete` reste faux, le
+  résumé court se termine par « Bascule DGFiP totale : non ».
+- **OpenFisca** : les anciennes collectes ne sont ni relues ni appliquées par la
+  simulation mobile ; la matrice n'accepte aucune valeur OpenFisca comme preuve
+  (test : après `synchroniserParametres(2026)`, `plafondQF(2026)` lève toujours
+  « non disponible » — `tests/test_fiscal_parametres_partiels.js`).
+- **R2 des revenus 2025** : prioritaire, non rejouée. Aucune migration 011/012,
+  aucune insertion, aucun secret.
+- **Séparation des données** : `perimetreDonnees()` distingue paramètres publics
+  (documents DGFiP) et données personnelles (salaires, intérêts, précompte réel,
+  montants 2BH/2DF/6DE, options du foyer, parts, PAS). Le PAS n'entre ni dans la
+  matrice ni dans les caches publics.
+
+---
+
+## 7. Tests
+
+Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
+
+| Fichier | Couvre |
+| --- | --- |
+| `tests/test_fiscal_matrice_couverture.js` | statuts par millésime et catégorie, refus de reconduction, recoupement distinct d'un texte explicite, contradictions, bascule jamais déclarée totale |
+| `tests/test_fiscal_crypto_ps_recoupement.js` | lecture du BOFiP (date de version, qualification, taux), huit maillons, refus par millésime et par maillon manquant, corroboration et contradiction de la FAQ, caches par compte/document/millésime, rectifications conservées, cache altéré refusé |
+| `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
+| `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
+
+Les suites déjà livrées (`test_fiscal_activation_2025.js`,
+`test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
+`test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
+modification : les 45 suites JavaScript sont vertes en local.
