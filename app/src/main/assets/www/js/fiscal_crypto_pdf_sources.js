@@ -44,25 +44,20 @@
     }
     function analyserBrochure(pages) {
         var t = normaliser(pages);
-        // Écarter la table des matières et les paragraphes voisins sur les titres.
-        var titres = /plus.values de cession d.actifs numeriques/ig, m, section = '';
-        while ((m = titres.exec(t))) {
-            if (/150\s*VH\s*bis/i.test(t.slice(m.index, m.index + 220))) {
-                // La table des matières reprend le même intitulé : garder
-                // la dernière rubrique accompagnée de « 150 VH bis ».
-                section = t.slice(m.index, m.index + 6500);
-            }
-        }
-        // Sur certaines pages PDF la colonne PEAC est dessinée avant la fin
-        // de la colonne crypto : ne pas couper au premier titre PEAC rencontré.
-        // Les preuves ci-dessous doivent elles-mêmes parler des cessions crypto.
+        // Le titre de cette rubrique peut être absent du texte PDF.js et la
+        // colonne PEAC peut être dessinée au milieu. Ancrer sur le paragraphe
+        // CRYPTO et borner ses preuves à sa proximité, jamais à la table des
+        // matières ou à un taux PS trouvé dans une autre rubrique.
+        var seuilRx = /foyers fiscaux realisant des cessions d.actifs numeriques dont la somme des prix n.excede pas\s*305\s*€/i;
+        var repere = seuilRx.exec(t);
+        var section = repere ? t.slice(Math.max(0, repere.index - 2200), repere.index + 2800) : '';
         var annee = preuve(section, /l.ensemble des cessions imposables realisees par les membres du foyer fiscal en 2025/i);
-        var seuil = preuve(section, /foyers fiscaux realisant des cessions d.actifs numeriques dont la somme des prix n.excede pas\s*305\s*€/i);
-        var ir = preuve(section, /cette plus.value est imposee au taux de\s*12[,.]8\s*%\s*et soumise aux prelevements sociaux/i);
+        var seuil = preuve(section, seuilRx);
+        var ir = preuve(section, /cette plus\s*-?\s*value est imposee au taux de\s*12[,.]8\s*%\s*et soumise aux prelevements sociaux/i);
         var annexe = preuve(section, /2086 doit etre jointe a la declaration de revenus y compris lorsque le montant des cessions est inferieur a\s*305\s*€/i);
         var option = preuve(section, /option expresse et irrevocable est globale[\s\S]{0,160}?foyer fiscal[\s\S]{0,340}?independante de celle pouvant etre exercee pour la taxation des revenus de capitaux mobiliers/i);
-        var morceaux = { rubrique: section && section.slice(0, Math.min(section.indexOf('150 VH bis') + 10, 210)),
-            millesime: annee, seuilFoyer: seuil, ir: ir, annexe: annexe, option3CN: option };
+        var morceaux = { millesime: annee, seuilFoyer: seuil, ir: ir,
+            annexe: annexe, option3CN: option };
         var absents = Object.keys(morceaux).filter(function (k) { return !morceaux[k]; });
         if (absents.length) return { etat: 'brochure crypto 2025 : preuves incomplètes (' + absents.join(', ') + ')' };
         return { etat: 'brochure crypto revenus 2025 : IR 12,8 %, PS non déterminés par ce lecteur',
