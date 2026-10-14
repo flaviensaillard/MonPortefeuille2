@@ -49,6 +49,6 @@ jobs:
           JS
           # Annotations consultables via api.github.com, sans stockage d'une
           # copie binaire du PDF ni commentaire sur la PR.
-          while IFS= read -r ligne; do
+          grep -E '^(Analyse officielle|HTTP |Octets )' diagnostic-public.txt | while IFS= read -r ligne; do
             echo "::warning::${ligne:0:850}"
-          done < diagnostic-public.txt
+          done
