@@ -10,7 +10,8 @@ const compte = '12345678-1234-4123-a123-123456789012';
 // la R2 ni devenir le taux universel des intérêts sans produit/précompte.
 const page = `<p>modifié le 08/04/2026</p><h2>La taxation aux prélèvements sociaux</h2>
 <p>La plupart des RCM ont été soumis aux prélèvements sociaux lors de leur encaissement en 2025 au taux de 17,2 %.</p>
-<p>Les produits qui n'auraient pas fait l'objet de ce prélèvement sont soumis aux prélèvements sociaux lors du traitement de la déclaration de revenus, au taux global de 18,7 % pour les revenus perçus en 2025.</p>`;
+<p>Les produits qui n'auraient pas fait l'objet de ce prélèvement sont soumis aux prélèvements sociaux lors du traitement de la déclaration de revenus, au taux global de 18,7 % pour les revenus perçus en 2025.</p>
+<p>Une partie de la CSG afférente aux RCM imposés au barème est déductible de votre revenu imposable de l'année de son paiement à hauteur de 6,8 %.</p>`;
 const ctx = vm.createContext({ PF: { ui: { h: String }, store: { reglages: () => ({}) },
     net: { auth: { utilisateur: () => ({ id: compte }) }, req: async () => ({ ok: true, body: page }) } },
     localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
@@ -26,6 +27,8 @@ for (const nom of ['util.js', 'fiscal.js', 'fiscal_rcm_sources.js'])
     assert.match(bilan, /18,7 % sur avis 2026 si non précomptés en 2025/);
     assert.match(bilan, /Produit, exception et précompte du foyer non déterminés ; taux non activés/);
     assert.doesNotMatch(bilan, /activés\.\./);
+    assert.match(bilan, /la simulation peut déjà employer une estimation CSG issue de la R2 ou du code embarqué/);
+    assert.doesNotMatch(bilan, /non millésimée ni activée/);
     assert.match(bilan, /notice 2042 \(17,2 % de PS\) contre notice dédiée 2074 et aide du simulateur 2026 \(18,6 %\)/);
     assert.match(bilan, /divergence non levée, R2 prioritaire/);
     assert.match(bilan, /Bascule DGFiP totale : non/);

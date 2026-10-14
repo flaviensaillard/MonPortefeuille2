@@ -1839,7 +1839,7 @@
                     + (rcm.valeurs.nonPrecompteAvis2026 * 100).toFixed(1).replace('.', ',')
                     + ' % sur avis 2026 si non précomptés en 2025 (page modifiée le '
                     + rcm.valeurs.dateModification + ', ' + rcm.url + '). Produit, exception et précompte du foyer non déterminés ; taux non activés'
-                    + (rcm.valeurs.csgConditionnelle ? '. CSG de 6,8 % au barème et dans l’année du paiement mentionnée sur la page courante, non millésimée ni activée' : '')
+                    + (rcm.valeurs.csgConditionnelle ? '. CSG de 6,8 % sous conditions mentionnée sur la page courante : cette lecture ne met pas à jour le moteur ; la simulation peut déjà employer une estimation CSG issue de la R2 ou du code embarqué, selon précompte déclaré. Éligibilité, produit et année de paiement non contrôlés par le bouton' : '')
                 : 'non disponible (' + (rcm.etat || 'non recherché') + ')') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
