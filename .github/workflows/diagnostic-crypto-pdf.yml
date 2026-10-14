@@ -46,6 +46,6 @@ jobs:
           })().catch(e=>{console.error(e);process.exitCode=1});
           JS
           # 10 annotations max ; tout le texte est public DGFiP, aucun compte.
-          head -n 10 diagnostic-public.txt | while IFS= read -r ligne; do
+          grep -E '^(notice|brochure) (HTTP|octets|pages|analyse)' diagnostic-public.txt | while IFS= read -r ligne; do
             echo "::warning::${ligne:0:950}"
           done
