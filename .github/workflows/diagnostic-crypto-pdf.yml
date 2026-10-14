@@ -39,6 +39,9 @@ jobs:
               console.log(type,'pages',pages.length);
               const a=type==='notice'?reader.analyserNotice(pages):reader.analyserBrochure(pages);
               console.log(type,'analyse',JSON.stringify({etat:a.etat,valeurs:a.valeurs||null}));
+              if(a.valeurs){const b=type==='notice'?reader.analyserNotice(a.extrait):reader.analyserBrochure(a.extrait);
+                console.log(type,'relecture',JSON.stringify({etat:b.etat,valeurs:b.valeurs||null}));
+                if(!b.valeurs || b.valeurs.psCrypto2025Attestes!==false)process.exitCode=1;}
               const t=pages.join(' ').replace(/\s+/g,' ');
               if(type==='brochure') console.log('brochure IR extrait',JSON.stringify(t.slice(126150,127000)));
               for(const motif of (type==='notice'?[]:[/plus.values de cession d.actifs num/i,/l.ensemble des cessions imposables/i,/foyers fiscaux r/i,/cette plus.value est impos/i,/2086 doit etre jointe/i,/option expresse/i])){
@@ -49,6 +52,6 @@ jobs:
           })().catch(e=>{console.error(e);process.exitCode=1});
           JS
           # 10 annotations max ; tout le texte est public DGFiP, aucun compte.
-          grep -E '^(notice analyse|brochure (analyse|IR extrait))' diagnostic-public.txt | while IFS= read -r ligne; do
+          grep -E '^(notice|brochure) (analyse|relecture)' diagnostic-public.txt | while IFS= read -r ligne; do
             echo "::warning::${ligne:0:950}"
           done
