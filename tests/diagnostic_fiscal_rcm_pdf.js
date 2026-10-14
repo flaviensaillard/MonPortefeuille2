@@ -27,8 +27,10 @@ for (const f of ['fiscal_brochure_sources.js', 'fiscal_rcm_pdf_sources.js'])
                 : ['6DE', 'CSG DÉDUCTIBLE CALCULÉE', '2BH'];
             for (const n of needles) {
                 const index = pages.findIndex(s => s.includes(n));
-                console.log('repere', n, 'page', index + 1,
-                    index < 0 ? '' : pages[index].slice(Math.max(0, pages[index].indexOf(n) - 100), pages[index].indexOf(n) + 850));
+                const extrait = index < 0 ? '' : pages[index].slice(Math.max(0, pages[index].indexOf(n) - 100), pages[index].indexOf(n) + 850);
+                console.log('repere', n, 'page', index + 1, extrait);
+                console.log('::warning title=PDF ' + type + ' ' + n + ' page ' + (index + 1)
+                    + '::' + extrait.replace(/[\r\n%]/g, ' ').slice(0, 900));
             }
         }
         assert.ok(analyse.valeurs, analyse.etat);
@@ -38,4 +40,6 @@ for (const f of ['fiscal_brochure_sources.js', 'fiscal_rcm_pdf_sources.js'])
         assert.equal(type === 'rcm' ? analyse.valeurs.tauxRcmPersonnelsAttestes :
             analyse.valeurs.deductionPersonnelleAttestee, false);
     }
-})().catch(e => { console.error(e); process.exitCode = 1; });
+})().catch(e => { console.error(e);
+    console.error('::error title=Diagnostic PDF DGFiP::' + String(e && e.stack || e).replace(/[\r\n%]/g, ' ').slice(0, 2500));
+    process.exitCode = 1; });
