@@ -53,8 +53,8 @@ APP="$ROOT/app/src/main"
 BUILD="$ROOT/build"
 OUT="$ROOT/dist"
 
-VERSION_NAME="${VERSION_NAME:-2.2.1}"
-VERSION_CODE="${VERSION_CODE:-31}"
+VERSION_NAME="${VERSION_NAME:-2.2.2}"
+VERSION_CODE="${VERSION_CODE:-32}"
 KEYSTORE="${KEYSTORE:-$ROOT/keystore/portefeuille.jks}"
 KEY_ALIAS="${KEY_ALIAS:-portefeuille}"
 # SÉCURITÉ 2.1.0 (revue S-02) : AUCUN mot de passe par défaut. La valeur
