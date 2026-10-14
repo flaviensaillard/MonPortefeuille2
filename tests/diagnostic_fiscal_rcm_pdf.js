@@ -9,7 +9,7 @@ const ctx = { PF: {}, Date, Promise, Number, String,
     Uint8Array, atob: s => Buffer.from(s, 'base64').toString('binary') };
 ctx.globalThis = ctx;
 ctx.pdfjsLib = require('../app/src/main/assets/www/vendor/pdfjs/pdf.min.js');
-ctx.pdfjsLib.GlobalWorkerOptions.workerSrc = require('node:path').resolve(base, 'vendor/pdfjs/pdf.worker.min.js');
+ctx.pdfjsWorkerSrc = require('node:path').resolve(base, 'vendor/pdfjs/pdf.worker.min.js');
 for (const f of ['fiscal_brochure_sources.js', 'fiscal_rcm_pdf_sources.js'])
     vm.runInNewContext(fs.readFileSync(base + 'js/' + f, 'utf8'), ctx);
 (async () => {
