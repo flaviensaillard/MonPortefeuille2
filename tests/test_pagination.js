@@ -179,6 +179,13 @@ async function principal() {
     verifier('l’écran lit les 1 050 transactions',
         ctx && ctx.transactions && ctx.transactions.length === 1050,
         'lu : ' + (ctx && ctx.transactions ? ctx.transactions.length : 'rien'));
+    verifier('lecture complète des transactions confirmée', ctx.transactionsChargees === true);
+    injecterEchecPage = { table: 'pf2_transactions', offset: 1000 };
+    const incomplet = await PF.portefeuille.charger();
+    verifier('une page de transactions en panne interdit de traiter un faux portefeuille vide comme une R2',
+        incomplet.transactionsChargees === false &&
+        incomplet.erreurs.some(e => /Transactions indisponibles/.test(e)));
+    injecterEchecPage = null;
 
     console.log(echecs === 0
         ? '\n✔ ' + reussis + ' réussis, 0 échec'

@@ -63,7 +63,7 @@
     var revisionsActives = Object.create(null), officiels = Object.create(null),
         fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
-    var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue';
+    var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue', compteRapports = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
     function franchiseCrypto(annee) {
@@ -83,6 +83,11 @@
         return p ? p.csg_deductible : CSG_DEDUCTIBLE;
     }
     function effacerRevisions() {
+        var courant = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+        if (compteRapports && (!courant || courant.id !== compteRapports)) {
+            rapportsControle = Object.create(null); // pas de rapport du compte précédent
+            compteRapports = null;
+        }
         ++sequenceLecture;
         revisionsActives = Object.create(null);
         officiels = Object.create(null);
@@ -105,7 +110,7 @@
         });
     }
     function perimetreR2(ctx) {
-        return ctx && Array.isArray(ctx.transactions) && PF.modele &&
+        return ctx && Array.isArray(ctx.transactions) && ctx.transactionsChargees !== false && PF.modele &&
             typeof PF.modele.classeDe === 'function' && !ctx.transactions.some(function (t) {
                 return PF.modele.classeDe(t.ticker) === 'or_physique';
             });
@@ -123,6 +128,7 @@
         // la couverture de cette révision comme intégrale pour ce portefeuille.
         if (!perimetreR2(ctx)) {
             etatR2 = !ctx || !Array.isArray(ctx.transactions) ? 'portefeuille non chargé'
+                : ctx.transactionsChargees === false ? 'transactions indisponibles'
                 : 'hors périmètre : or physique ou classe inconnue';
             return Promise.resolve(null);
         }
@@ -149,6 +155,15 @@
     }
     function actualiserCollectesDgfip(ctx) {
         var compte = PF.net && PF.net.auth && PF.net.auth.utilisateur();
+        if (!ctx || !Array.isArray(ctx.transactions) || ctx.transactionsChargees === false) {
+            // Le contexte local allégé est affiché pendant le chargement. Ne
+            // PAS effacer une lecture R2 en cours en tentant de la remplacer
+            // par ce contexte incomplet ; la collecte DGFiP reste possible.
+            chargerCachesDgfip(compte);
+            if (!paramsActifs(2025)) etatR2 = !ctx || !Array.isArray(ctx.transactions)
+                ? 'portefeuille non chargé (R2 en attente)' : 'transactions indisponibles (R2 non évaluée)';
+            return Promise.resolve(null);
+        }
         // La collecte publique ne doit PAS vider une R2 déjà vérifiée dans la
         // même session : une panne Supabase au clic provoquait un faux repli.
         if (paramsActifs(2025) && compte && compte.id === compteRevisions &&
@@ -1098,6 +1113,10 @@
         return auj;  // année demandée, même absente : jamais la dernière à sa place
     }
 
+    function texteRapport(annee) {
+        var r = rapportsControle[annee];
+        return r && typeof r === 'object' ? bilanMiseAJour(Number(annee), r) : (r || '');
+    }
     function vue(ctx) {
         var prefait = ctx && ctx.config ? appliquerConfig(ctx) : false;
         var r = PF.store.reglages();
@@ -1120,10 +1139,24 @@
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + (rapportsControle[annee] ? UI.h(rapportsControle[annee]) : '')
+                + (rapportsControle[annee] ? UI.h(texteRapport(annee)) : '')
                 + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
                     .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
-                        + UI.h(rapportsControle[an]) + '</div>'; }).join('') + '</div>';
+                        + UI.h(texteRapport(an)) + '</div>'; }).join('') + '</div>';
+        }
+
+        // Le cache d'accueil ne contient aucune transaction : tant que la
+        // table n'est pas relue avec succès, ne pas simuler un portefeuille
+        // vide ni présenter une R2 comme refusée. La collecte publique reste
+        // accessible indépendamment de cette synchronisation personnelle.
+        if (ctx && (!Array.isArray(ctx.transactions) || ctx.transactionsChargees === false)) {
+            return out + '<div class="info"><b>Portefeuille non chargé : simulation personnelle suspendue.</b> '
+                + 'La R2 sera évaluée après synchronisation des transactions ; réessayez ⟳ si le chargement a échoué. '
+                + 'Les documents publics DGFiP peuvent être consultés séparément.</div>'
+                + '<button class="btn sec" data-fisc="collecter">Vérifier cette année (DGFiP)</button>'
+                + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+                + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
+                + UI.h(texteRapport(annee)) + '</div>';
         }
 
         // --- Bandeau de mise à jour
@@ -1161,12 +1194,12 @@
             + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
             + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-            + (rapportsControle[annee] ? UI.h(rapportsControle[annee]) : '')
+            + (rapportsControle[annee] ? UI.h(texteRapport(annee)) : '')
             + '</div></div>';
         var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
         if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
             + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
-                + UI.h(rapportsControle[an]) + '</div>'; }).join('') + '</div>';
+                + UI.h(texteRapport(an)) + '</div>'; }).join('') + '</div>';
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
@@ -1768,7 +1801,10 @@
             + v.decote.dcPlafond + ' / ' + v.decote.dcPlafondCouple + ' €)';
         return 'Revenus ' + annee + ' (déclaration ' + (annee + 1) + ') : collecte partielle DGFiP, '
             + (revisionActive(annee) ? 'R2 déjà active prioritaire. '
-                : 'simulation indicative seulement. R2 2025 : ' + etatR2 + '. ')
+                : annee === 2025 && /portefeuille non chargé|transactions indisponibles/.test(etatR2)
+                    ? 'R2 2025 non évaluée : ' + etatR2 + '. Simulation personnelle en attente. '
+                    : 'simulation indicative seulement. '
+                        + (annee === 2025 ? 'R2 2025 : ' + etatR2 + '. ' : ''))
             + statut('IR', ir, sources.ir) + ' ; ' + statut('Décote', decote, sources.decote) + ' ; '
             + statut('Plafond QF général (hors plafonds spéciaux)', v.qf && v.qf + ' €/demi-part', sources.qf) + ' ; '
             + statut('Abattement salariés 10 % (min/max)', f.abatt && f.abatt.min + ' / ' + f.abatt.max + ' €', null) + ' ; '
@@ -1836,7 +1872,10 @@
                     return actualiserCollectesDgfip(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
-                        resultats.forEach(function (r) { rapportsControle[r.annee] = bilanMiseAJour(r.annee, r); });
+                        if (compteRapports && compteRapports !== proprietaire.id)
+                            rapportsControle = Object.create(null);
+                        compteRapports = proprietaire.id;
+                        resultats.forEach(function (r) { rapportsControle[r.annee] = r; });
                         PF.app.rendre();
                     });
                 }).catch(function (err) {

@@ -93,6 +93,22 @@ doit encore être vérifié sur téléphone : ne pas affirmer que les PS des tit
 ont été mis à jour dans l'APK. La collecte partielle ne vaut toujours pas
 révision complète.
 
+**Essai suivant de l'APK `457df66` (14/10/2026) :** le rapport reconnaît
+l'année, le paragraphe PFU et ses taux, mais refuse encore « option 2OP ou
+condition des titres anciens ». Le lecteur contrôle désormais séparément la
+case 2OP et le lien entre abattement, titres acquis et date du 1er janvier
+2018 dans la section titres, sans exiger une rédaction littérale de toute la
+phrase ; le prochain rapport indiquera quels repères publics manquent s'il
+échoue encore. La même collecte affichait « R2 2025 : portefeuille non chargé » :
+le cache d'accueil ne conserve **aucune transaction** et peut être présenté
+pendant la synchronisation. Le clic DGFiP ne doit pas interrompre une lecture
+R2 en cours. Tant que les transactions ne sont pas chargées, la simulation
+personnelle est suspendue et la R2 indiquée **non évaluée**, pas inactive.
+Une lecture de transactions échouée ne se fait plus passer pour une table vide ;
+une fois le chargement terminé, le rapport de collecte affiché est réévalué
+avec l'état réel de la R2. Ces deux corrections attendent encore un essai sur
+téléphone. Pas de modification SQL, ni de preuve d'une R2 perdue en base.
+
 **Ne pas confondre ce progrès avec une bascule complète.** Le rapport affiche
 « Bascule DGFiP totale : non » et les contrôles restants : RCM par produit,
 précompte et date ([DGFiP revenus mobiliers](https://www.impots.gouv.fr/particulier/les-revenus-mobiliers)),

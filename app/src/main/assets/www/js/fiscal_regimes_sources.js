@@ -53,10 +53,19 @@
         var passageTitres = t.slice(section > depart ? section : depart, depart + 4200);
         if (!new RegExp('Si, en\\s+' + annee + ',\\s+vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilieres', 'i').test(passageTitres))
             return { etat: 'revenus ' + annee + ' non mentionnés pour les titres' };
-        if (!/case\s*2OP/i.test(t.slice(depart, depart + 4200)) ||
-            !/Le mecanisme d.abattements/i.test(passageTitres) ||
-            !/titres acquis ou souscrits? avant le\s+1er janvier 2018/i.test(passageTitres))
-            return { etat: 'option 2OP ou condition des titres anciens non reconnue' };
+        var option = /case\s*2OP/i.test(t.slice(depart, depart + 4200));
+        // La formulation exacte de la phrase d'abattement n'est pas un taux :
+        // vérifier ensemble son objet, la condition d'acquisition et sa date,
+        // plutôt qu'exiger le mot-à-mot d'un seul libellé éditorial.
+        var condition = passageTitres.match(/abattement.{0,750}?avant\s+le\s+1er\s+janvier\s+2018/i);
+        var anciens = !!condition && /titres\s+(?:acquis|souscrits?)/i.test(condition[0]);
+        if (!option || !anciens)
+            return { etat: (option ? '' : 'case 2OP non reconnue ; ')
+                + (anciens ? '' : 'abattement des titres acquis avant 2018 non reconnu')
+                + ' (repères du document public : 2OP=' + /\b2OP\b/i.test(t)
+                + ', abattement=' + /abattement/i.test(passageTitres)
+                + ', titres acquis=' + /titres\s+(?:acquis|souscrits?)/i.test(passageTitres)
+                + ', avant 2018=' + /avant\s+le\s+1er\s+janvier\s+2018/i.test(passageTitres) + ')' };
         return { etat: 'taux IR/PS des titres et année explicites',
             valeurs: { ir: ir, ps: ps, pfu: pfu },
             // Extrait textuel du document public, sans données du portefeuille.

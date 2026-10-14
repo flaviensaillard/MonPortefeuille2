@@ -44,6 +44,13 @@ const src = ctx.PF.fiscalRegimesSources;
     assert.equal(src.lireTitres(pages[2025], 2026), null, 'déclaration 2026 ≠ revenus 2026');
     assert.equal(src.lireTitres(html(2025, '18,6', '30'), 2025), null, 'somme incohérente');
     assert.equal(src.lireTitres(html(2025).replace('2OP', '3CN'), 2025), null, 'option absente');
+    assert.match(src.analyserTitres(html(2025).replace('2OP', '3CN'), 2025).etat, /case 2OP non reconnue.*2OP=false/);
+    const reformulee = html(2025, '18,6', '31,4').replace(
+        'Le mécanisme d’abattements s\'applique uniquement pour les titres acquis ou souscrit avant le 1er janvier 2018',
+        'Un abattement pour durée de détention est possible pour les titres acquis avant le 1er janvier 2018');
+    assert.equal(src.lireTitres(reformulee, 2025).ps, .186, 'ne pas exiger le libellé littéral de l’abattement');
+    assert.match(src.analyserTitres(html(2025).replace('avant le 1er janvier 2018', 'avant le 1er janvier 2019'), 2025).etat,
+        /avant 2018 non reconnu.*avant 2018=false/);
     const ancien = storage.get('pf2.dgfip.regimes.v1.' + compte);
     await src.chercher(2024);
     assert.equal(storage.get('pf2.dgfip.regimes.v1.' + compte), ancien, 'pas de révision identique');

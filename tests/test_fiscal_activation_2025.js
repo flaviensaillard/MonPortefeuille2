@@ -84,7 +84,20 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     ];
     assert.equal(f.detail2086(txsCrypto, 2025, {}, {}).exonere_305, false);
     lignes = [faux(), active(p)];
-    const ctxActif = {transactions: []};
+    // Le cache local allégé est visible pendant que le portefeuille et la R2
+    // se chargent : cliquer DGFiP ne doit pas annuler la lecture R2 en vol.
+    let libererChargement;
+    enAttente = new Promise(res => { libererChargement = res; });
+    const enCours = f.actualiserRevisions({transactions: [], transactionsChargees: true});
+    assert.equal(await f.actualiserCollectesDgfip({snapshots: []}), null);
+    assert.match(f.bilanMiseAJour(2025, {boi: {}, frais: {}}), /R2 2025 non évaluée/);
+    assert.doesNotMatch(f.bilanMiseAJour(2025, {boi: {}, frais: {}}), /simulation indicative seulement/);
+    libererChargement([faux(), active(clone(origine))]);
+    assert.equal(await enCours, 2);
+    assert.equal(f.revisionActive(2025), true);
+    assert.match(f.bilanMiseAJour(2025, {boi: {}, frais: {}}), /R2 déjà active prioritaire/);
+    enAttente = null;
+    const ctxActif = {transactions: [], transactionsChargees: true};
     assert.equal(await f.actualiserRevisions(ctxActif), 2);
     assert.equal(f.revisionActive(2025), true);
     // Le bouton DGFiP recharge ses caches sans faire disparaître la R2 si
@@ -136,6 +149,9 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
         'une opération de métal physique sort du périmètre R2');
     assert.equal(f.revisionActive(2025), false);
     assert.equal(requetes.length, nbRequetes, 'pas de requête si le portefeuille est hors périmètre');
+    assert.equal(await f.actualiserRevisions({transactions: [], transactionsChargees: false}), null);
+    assert.equal(requetes.length, nbRequetes, 'une panne des transactions ne vaut pas portefeuille vide');
+    assert.match(f.bilanMiseAJour(2025, {boi: {}, frais: {}}), /transactions indisponibles/);
 
     // Une ligne active incomplète / R1 / une erreur réseau ne conserve jamais R2.
     const invalide = active(clone(origine));

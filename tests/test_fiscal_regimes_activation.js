@@ -11,14 +11,20 @@ let page = (ps, total) => '<p>Les plus-values de cession de valeurs mobilières 
     + '<p>Si, en 2024, vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières, des droits sociaux.</p>'
     + '<p>Le mécanisme d’abattements s’applique uniquement pour les titres acquis ou souscrit avant le 1er janvier 2018 en cas d’option pour le barème progressif.</p>';
 let reponse = page('18,6', '31,4');
+class DateFixe extends Date { constructor(...x) { super(...(x.length ? x : ['2026-10-14T12:00:00Z'])); } }
 const ctx = vm.createContext({ PF: { ui: { h: String }, store: { reglages: () => ({}) },
     net: { auth: { utilisateur: () => ({ id: compte }) }, req: async () => ({ ok: true, body: reponse }) } },
     localStorage: { getItem: k => storage.get(k) || null, setItem: (k,v) => storage.set(k,v) },
-    Date, Promise, Number, Object, String, Error });
+    Date: DateFixe, Promise, Number, Object, String, Error });
 for (const nom of ['util.js','fiscal.js','fiscal_regimes_sources.js'])
     vm.runInContext(fs.readFileSync(path.join(dir, nom), 'utf8'), ctx);
 (async () => {
     const f = ctx.PF.fiscal;
+    const attente = f.vue({snapshots: []});
+    assert.match(attente, /Portefeuille non chargé : simulation personnelle suspendue/);
+    assert.doesNotMatch(attente, /Simulation indicative 2025/);
+    const transactionsEchec = f.vue({transactions: [], transactionsChargees: false});
+    assert.match(transactionsEchec, /Portefeuille non chargé/);
     assert.equal(f.tauxPS(2024), .172);
     const r = await ctx.PF.fiscalRegimesSources.chercher(2024);
     assert.equal(r.valeurs.ps, .186);
