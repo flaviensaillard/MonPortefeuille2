@@ -1197,7 +1197,7 @@
         // Collectes sourcées partielles ; une révision complète garde priorité.
         out += '<div class="card tight" style="margin:10px 0">'
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
-            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; pages DGFiP pour les RCM et la crypto et brochure PDF DGFiP 2025 pour le calendrier CSG (preuves partielles). '
+            + '<div class="st" style="margin:6px 0">Documents DGFiP exclusivement : BOFiP pour IR, décote et QF ; simulateur impots.gouv.fr pour les frais salariés et les titres ; pages DGFiP pour les RCM et la crypto, et PDF DGFiP 2025 pour le calendrier CSG, la notice 2086 et la brochure crypto (preuves partielles). '
             + 'Si aucune révision complète n’est publiée, seules les valeurs compatibles alimentent une simulation indicative '
             + 'pour les années déjà compatibles avec cette APK ; rien n’est certifié pour la déclaration. '
             + 'Une loi rectificative crée une nouvelle collecte sans effacer la précédente.</div>'
@@ -1639,8 +1639,9 @@
 
         out += '<div style="font-size:11.5px;color:var(--txt-3);margin-top:8px">La ligne 221 retrace les fractions '
             + 'de capital déjà déduites lors des cessions précédentes : sans elle, le même capital serait déduit '
-            + 'deux fois. Chaque 224 s’obtient par 213 − (223 × 213 / valeur globale du portefeuille d’actifs '
-            + 'numériques au jour de la cession).</div>';
+            + 'deux fois. Chaque 224 s’obtient par 218 (prix net des frais et soultes) − '
+            + '(223 × 217 (prix avant frais, net des soultes) / 212 (valeur globale du portefeuille '
+            + 'au jour de la cession)).</div>';
 
         return out;
     }
@@ -1803,7 +1804,9 @@
 
     function bilanMiseAJour(annee, resultat) {
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
-            rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {};
+            rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {},
+            cryptoPdf = resultat.cryptoPdf || {}, notice2086 = cryptoPdf.notice || {},
+            brochureCrypto = cryptoPdf.brochure || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1855,6 +1858,14 @@
                 ? 'CSG patrimoine de 9,2 % à 10,6 % sur revenus 2025 déclarés en 2026 ; produits de placement à compter du 1.1.2026 ; exceptions à 9,2 % et CSG déductible 6,8 % mentionnées ('
                     + brochure.url + '). Cette lecture ne prouve ni le taux global PS crypto 2025, ni la CSG personnelle déductible ; aucun taux activé'
                 : 'non disponible (' + (brochure.etat || 'non recherchée') + ')') + '. '
+            + 'Notice 2086 DGFiP revenus 2025 (PDF, preuve partielle) : ' + (notice2086.valeurs
+                ? 'quotient sur prix avant frais et valeur globale du portefeuille ; frais dans le premier terme du gain ; ligne 51 et seuil du foyer 305 €, 3AN/3BN et option 3CN ('
+                    + notice2086.url + '). La formule et les cases du formulaire sont relues, mais ni toutes les cessions du foyer, ni un taux PS crypto 2025 ne sont attestés ; aucun paramètre activé'
+                : 'non disponible (' + (notice2086.etat || 'non recherchée') + ')') + '. '
+            + 'Brochure plus-values crypto DGFiP revenus 2025 (PDF, preuve partielle) : ' + (brochureCrypto.valeurs
+                ? 'IR forfaitaire 12,8 %, seuil du foyer 305 €, 2086 même en dessous du seuil, 3CN distincte de l’option RCM ('
+                    + brochureCrypto.url + '). Taux global PS crypto 2025 non déterminé par ce lecteur ; aucune activation'
+                : 'non disponible (' + (brochureCrypto.etat || 'non recherchée') + ')') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
@@ -1863,7 +1874,9 @@
             + ' ; titres ' + (titres.etat || titres.erreur || 'non recherché')
             + ' ; RCM ' + (rcm.etat || rcm.erreur || 'non recherché')
             + ' ; crypto ' + (crypto.etat || crypto.erreur || 'non recherchée')
-            + ' ; brochure PDF ' + (brochure.etat || brochure.erreur || 'non recherchée') + '. '
+            + ' ; brochure CSG PDF ' + (brochure.etat || brochure.erreur || 'non recherchée')
+            + ' ; notice 2086 PDF ' + (notice2086.etat || notice2086.erreur || 'non recherchée')
+            + ' ; brochure crypto PDF ' + (brochureCrypto.etat || brochureCrypto.erreur || 'non recherchée') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
             + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
     }
@@ -1882,7 +1895,7 @@
                 var etat = vue.querySelector('#etatCollecteFiscale');
                 if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
                     !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources
-                    || !PF.fiscalBrochureSources) {
+                    || !PF.fiscalBrochureSources || !PF.fiscalCryptoPdfSources) {
                     if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
@@ -1914,10 +1927,15 @@
                         }),
                         PF.fiscalBrochureSources.chercher(an).catch(function (err) {
                             return { erreur: String(err && err.message || err) };
+                        }),
+                        PF.fiscalCryptoPdfSources.chercher(an).catch(function (err) {
+                            return { notice: { erreur: String(err && err.message || err) },
+                                brochure: { erreur: String(err && err.message || err) } };
                         })
                     ]).then(function (resultats) {
                         return { annee: an, boi: resultats[0], frais: resultats[1],
-                            titres: resultats[2], rcm: resultats[3], crypto: resultats[4], brochure: resultats[5] };
+                            titres: resultats[2], rcm: resultats[3], crypto: resultats[4],
+                            brochure: resultats[5], cryptoPdf: resultats[6] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();

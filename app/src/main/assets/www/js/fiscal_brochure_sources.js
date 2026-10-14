@@ -115,5 +115,7 @@
                 enregistree: false, url: URL };
         });
     }
-    PF.fiscalBrochureSources = { analyser: analyser, lireCache: lireCache, chercher: chercher, url: URL };
+    // Même extraction binaire bornée pour la notice 2086 et la brochure des PV.
+    PF.fiscalBrochureSources = { analyser: analyser, lireCache: lireCache, chercher: chercher,
+        extrairePages: extraire, url: URL };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

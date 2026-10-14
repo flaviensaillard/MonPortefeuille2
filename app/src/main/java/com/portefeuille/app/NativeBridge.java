@@ -185,7 +185,9 @@ public class NativeBridge {
                     || !"www.impots.gouv.fr".equalsIgnoreCase(u.getHost())
                     || u.getPort() != -1 || u.getUserInfo() != null || u.getQuery() != null
                     || u.getRef() != null
-                    || !u.getPath().matches("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes\\.pdf"))
+                    || !(u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf")
+                         || u.getPath().equals("/www2/fichiers/documentation/brochure/ir_2026/pdf_som/09-plus_values_137a156.pdf")
+                         || u.getPath().equals("/sites/default/files/formulaires/2086/2026/2086_5515.pdf")))
                 return erreur("PDF DGFiP non autorisé");
             conn = (HttpURLConnection) u.openConnection();
             conn.setRequestMethod("GET");

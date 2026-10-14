@@ -92,6 +92,9 @@ const exposees = [...pont.matchAll(/@JavascriptInterface\s+public\s+\S+\s+(\w+)\
 verifier('pont PDF borné au document DGFiP, sans redirection et sans décodage UTF-8',
     /www\.impots\.gouv\.fr"\.equalsIgnoreCase\(u\.getHost\(\)\)/.test(pont)
     && /ir_2026\/pdf_som\/nouveautes/.test(pont)
+    && /ir_2026\/pdf_som\/09-plus_values_137a156/.test(pont)
+    && /formulaires\/2086\/2026\/2086_5515/.test(pont)
+    && /u\.getPath\(\)\.equals/.test(pont)
     && /final int maximum = 2 \* 1024 \* 1024/.test(pont)
     && pont.includes("pdf[0] != '%'")
     && /setInstanceFollowRedirects\(false\)/.test(pont)
