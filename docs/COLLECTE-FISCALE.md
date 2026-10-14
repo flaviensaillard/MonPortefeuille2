@@ -191,7 +191,13 @@ exiger les pièces correspondantes sans reconduire ces références 2025.
 les lignes 213/217 sont le prix de cession **avant frais** ; la fraction de
 capital utilise `223 × 217 / 212`. Le résultat ligne 224 déduit les frais via
 la ligne **218** (`218 − fraction de capital`), et la ligne **51** compare la
-somme des **218 du foyer**, *pas* la somme des 213, à **305 €**. La lecture
+somme des **218 du foyer**, *pas* la somme des 213, à **305 €**. La FAQ
+emploie aussi l'expression « montant annuel brut des cessions et non les
+plus-values » : cette formule oppose les **prix de cession** aux plus-values,
+mais ne détaille pas les lignes 213/214/218. Pour distinguer frais et quotient,
+le calcul suit les
+**lignes explicites de la 2086**, sans déduire de cette seule formule que les
+autres cessions du foyer sont connues. La lecture
 des frais par l'ancien calcul JS/Python confondait brut et net : elle utilisait
 le prix après frais dans le quotient, n'indiquait pas la ligne 214 et testait
 le seuil sur un total improprement nommé 213. Correction de ces deux moteurs
@@ -199,6 +205,24 @@ et tests hors réseau ajoutés, sans valider pour autant les soultes, tous les
 avoirs du foyer, la date d'effet du taux PS crypto ni l'ensemble des arrondis.
 Une 2086 générée par l'application demeure une **estimation non exhaustive**.
 Source : [formulaire et notice DGFiP 2086, revenus 2025](https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf).
+
+**Lecteur FAQ crypto partiel (étape suivante, contrôle mobile nécessaire) :**
+le bouton consulte aussi la [FAQ DGFiP sur les cessions d'actifs numériques](https://www.impots.gouv.fr/particulier/questions/comment-declarer-les-plus-ou-moins-values-sur-cessions-dactifs-numeriques)
+lors de la vérification des revenus **2025**. Il exige une date de modification,
+la section **gestion privée**, la décomposition du **PFU courant** en IR et PS
+avec somme cohérente, la franchise de cessions du foyer, la **3CN indépendante
+de l'option RCM** et la 2086/3AN/3BN. L'extrait public est recontrôlé en cache
+local **par compte**, avec une nouvelle révision si la FAQ est rectifiée ; la
+consultation pour 2025 est mémorisée séparément de l'**année d'effet**, qui
+reste explicitement `null`. La mention « depuis 2023 » en tête de la FAQ
+concerne la distinction vendeur privé/professionnel, **pas** la date d'effet
+de son PFU actuellement affiché. Le bouton n'en déduit donc **aucun taux PS
+crypto 2025**, n'écrase ni la R2 ni l'estimation embarquée et refuse de
+l'attribuer à 2023, 2024 ou 2026. Un extrait actuel n'atteste ni l'ensemble
+du portefeuille numérique du foyer ni la formule exhaustive de chaque 2086.
+Les brochures millésimées recoupées plus haut sont un audit documentaire,
+**pas encore une lecture automatique de leur PDF sur Android**. Aucun nouveau
+SQL et aucune activation fiscale des taux crypto ; « Bascule DGFiP totale : non ».
 
 **Lecteur RCM partiel (étape suivante) :** le bouton consulte désormais la
 page DGFiP des revenus mobiliers **uniquement pour les revenus encaissés en

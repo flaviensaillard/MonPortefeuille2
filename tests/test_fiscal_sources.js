@@ -82,6 +82,8 @@ const collecteur = contexte.PF.fiscalSources;
     assert.doesNotMatch(html, /<script src="js\/fiscal_sources\.js"/);
     assert.match(html, /js\/fiscal_dgfip_sources\.js/);
     assert.match(html, /js\/fiscal_rcm_sources\.js/);
+    assert.match(html, /js\/fiscal_crypto_sources\.js/);
+    assert.match(fiscal, /PF\.fiscalCryptoSources\.chercher\(an\)/);
     assert.match(fiscal, /data-fisc="collecter"/);
     assert.match(fiscal, /une simulation indicative/);
     assert.match(fiscal, /non vérifiés par ce lecteur/);
