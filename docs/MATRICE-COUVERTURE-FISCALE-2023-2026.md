@@ -51,9 +51,9 @@ confirmés sur Android + BOFiP + aides du simulateur 2026) :
 
 | Catégorie | Revenus 2023 | Revenus 2024 | Revenus 2025 | Revenus 2026 |
 | --- | --- | --- | --- | --- |
-| Barème IR | établiable (BOFiP 18/06/2024) | établiable (BOFiP 14/04/2025) | **établi** (BOFiP 07/04/2026) | non disponible |
-| Décote | établiable | établiable | **établi** | non disponible |
-| Plafond QF général | établiable | établiable | **établi** | non disponible |
+| Barème IR | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 11 294 / 28 797 / 82 341 / 177 106 €, **identique au code**) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 11 497 / 29 315 / 83 823 / 180 294 €, **divergent du code**, §5.3) | **établi** (BOFiP 07/04/2026) | non disponible |
+| Décote | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 873 € / 1 444 €, seuils 1 929 € / 3 191 €, **divergent du code**, §5.3) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 889 € / 1 470 €, seuils 1 965 € / 3 249 €, **divergent du code**, §5.3) | **établi** | non disponible |
+| Plafond QF général | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 1 759 € par demi-part, **identique au code**) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : **1 791 €** par demi-part, **divergent du code** qui porte 1 759 €, §5.3) | **établi** | non disponible |
 | Plafonds QF particuliers | non disponible | non disponible | non disponible | non disponible |
 | Abattement salariés 10 % | établiable (aide du millésime 2024 relue le 15/10/2026 : 495 € / 14 171 €, identique au code) | établiable (aide du millésime 2025 relue par indexation le 15/10/2026 : 504 € / 14 426 €, identique au code) | **établi** | non disponible |
 | Forfait repas | établiable (même aide : 5,20 € par repas, identique au code) | établiable, **valeur non recoupée** (extrait tronqué : le forfait 2024 n'a pas été relu) | **établi** | non disponible |
@@ -493,6 +493,78 @@ l'application qu'après lecture réussie, sur l'appareil, par le bouton annuel.
 
 ---
 
+### 5.3 Valeurs embarquées divergentes du BOFiP — constat du 16/10/2026
+
+Les trois permaliens que `fiscal_dgfip_sources.js` construit pour les revenus 2023
+et 2024 (`url('ir'|'decote'|'qf', annee)`) ont été relus le 16/10/2026. Le barème
+2023 et le plafond de quotient familial 2023 sont **identiques** au code. Quatre
+valeurs embarquées **divergent** de la source que l'application désigne elle-même :
+
+| Millésime | Catégorie | Embarqué | Officiel BOFiP | Source (permalien, publication, fin) |
+| --- | --- | --- | --- | --- |
+| revenus 2023 | Décote | 906 € / 1 493 € ; seuils 2 002 € / 3 300 € | **873 € / 1 444 €** ; seuils **1 929 € / 3 191 €** | `2495-PGP…-20240618`, 18/06/2024, fin 14/04/2025 |
+| revenus 2024 | Barème IR | 11 520 / 29 370 / 83 984 / 180 648 € | **11 497 / 29 315 / 83 823 / 180 294 €** | `2491-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
+| revenus 2024 | Décote | 924 € / 1 523 € ; seuils 2 042 € / 3 365 € | **889 € / 1 470 €** ; seuils **1 965 € / 3 249 €** | `2495-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
+| revenus 2024 | Plafond QF général | 1 759 € (valeur 2023) | **1 791 €** | `2494-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
+
+Passages probants (verbatim) :
+
+> revenus 2023, décote — « Pour l'imposition des revenus de 2023, cette décote est
+> accordée aux contribuables dont la cotisation d'impôt brut est inférieure à
+> 1 929 € pour les contribuables célibataires, divorcés ou veufs et à 3 191 € pour
+> les contribuables soumis à imposition commune (soit respectivement 1/45,25 % de
+> 873 € et 1/45,25 % de 1 444 €) » (loi n° 2023-1322 du 29 décembre 2023, art. 2).
+>
+> revenus 2024, barème — « Le barème pour l'imposition des revenus de l'année 2024
+> est présenté dans le tableau suivant : N'excédant pas 11 497 € 0 % ; Supérieure à
+> 11 497 € et inférieure ou égale à 29 315 € 11 % ; … 83 823 € 30 % ; … 180 294 €
+> 41 % ; Supérieure à 180 294 € 45 % », l'article 2 de la loi n° 2025-127 du
+> 14 février 2025 indexant les tranches « sur l'évolution de l'IPC hors tabac de
+> 2024 par rapport à 2023, soit **1,8 %** ».
+>
+> revenus 2024, décote — « … inférieure à 1 965 € … et à 3 249 € … (soit
+> respectivement 1/45,25 % de 889 € et 1/45,25 % de 1 470 €) ».
+>
+> revenus 2024, quotient familial — « Son montant est fixé à **1 791 €** par
+> demi-part supplémentaire à compter de l'imposition des revenus de l'année 2024 » ;
+> « On retranche l'avantage maximum en impôt procuré par les 6 demi-parts
+> supplémentaires soumises au plafonnement … soit 1 791 € x 6 = 10 746 € ».
+
+Lecture de l'écart : les seuils 2024 embarqués valent les seuils 2023 multipliés
+par **1,02**, alors que l'indexation officielle des revenus 2024 est de **1,8 %** ;
+la décote 2024 embarquée vaut la décote 2023 embarquée × 1,02 ; le plafond de
+quotient familial 2024 est la valeur 2023 reconduite. Ce sont des reconductions,
+pas des valeurs lues dans une source. Les seuils embarqués sont internes cohérents
+(seuil = base / 45,25 %), ce n'est donc pas une coquille de saisie.
+
+**Ce qui a été fait** : ces quatre écarts sont enregistrés dans
+`PF.fiscalCouverture.DIVERGENCES_CODE` (identifiant, catégorie, millésime,
+permalien, dates de publication et de fin de publication, loi, passage verbatim,
+valeur officielle, valeur embarquée, effet, arbitrage). La matrice les affiche :
+sans collecte, les cases concernées portent « valeur embarquée DIVERGENTE du
+BOFiP — … » à côté de « non disponible », et le bloc replié compte les
+divergences par millésime. Une fois le millésime collecté, la case passe à
+« établi » avec la valeur officielle et l'alerte disparaît.
+
+**Ce qui n'a PAS été fait, volontairement** : aucune constante du moteur n'a été
+modifiée. Les valeurs historiques restent figées par les suites existantes
+(`tests/test_fiscal_maj_indicative.js` : « aucun recopiage historique sans
+BOFiP » ; `tests/test_fiscal_dgfip_activation.js` : la collecte « corrige 11520
+historique » en 11 497 pour le seul compte concerné ;
+`tests/test_corrections_fiscales_2025.py` : plafond QF 2024 « hérité, PAS validé
+lors de l'audit »). Corriger l'historique changerait les simulations déjà
+produites pour 2023 et 2024 : c'est une décision du propriétaire, pas un effet de
+bord d'une relecture. Le registre donne les valeurs officielles et leur source pour
+que cette décision puisse être prise ; la collecte du millésime, elle, corrige déjà
+le compte qui la déclenche.
+
+Effet chiffré, sans collecte : pour un foyer dont l'impôt brut 2024 est sous le
+seuil, la décote embarquée est supérieure de 35 € (célibataire) ou 53 € (couple) à
+l'officielle, et le barème embarqué décale chaque seuil de 23 € à 354 € vers le
+haut ; le plafond de quotient familial retient 1 759 € au lieu de 1 791 € par
+demi-part. Les revenus 2025 (R2 publiée et activée) ne sont concernés par aucune
+de ces divergences.
+
 ## 6. Garde-fous transverses (rappel du cahier des charges)
 
 - **Jamais de reconduction silencieuse** : la matrice refuse une preuve dont
@@ -533,9 +605,10 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
+| `tests/test_fiscal_divergences_code.js` | registre des divergences valeurs embarquées / BOFiP : 4 écarts (décote 2023, barème 2024, décote 2024, plafond QF 2024), chacun avec le permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi, le passage verbatim citant l'année des revenus, la valeur officielle et la valeur embarquée ; le registre décrit le moteur sans le modifier (11 520, 906/1 493, 924/1 523 et 1 759 inchangés) ; cohérence interne de la décote officielle (seuil = base / 45,25 %) ; cases 2023/2024 « non disponible » avec l'alerte DIVERGENTE et la valeur officielle nommée, cases 2023 barème et QF sans alerte (identiques au BOFiP), 2025 et 2026 sans divergence ; après collecte du millésime 2024 les trois cases passent « établi » et l'alerte disparaît ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, comparaison 2OP/PFU inchangée) et bascule totale toujours `false` |
 | `tests/test_fiscal_frais_millesimes_reels.js` | **recoupement du moteur par les sources officielles** des revenus 2023 (aide frais.htm lue le 15/10/2026) et 2024 (lue par indexation) : plancher 495 €/plafond 14 171 € et forfait repas 5,20 € pour 2023, plancher 504 €/plafond 14 426 € et barème 3-4 CV pour 2024, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; forfait repas 2024 et tranches 5 à 7 CV 2024 explicitement **non recoupés** ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve d'un millésime sans effet sur les autres ; famille `frais` des vérifications distantes et limites de lecture 2024 |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 47 suites JavaScript sont vertes en local.
+modification : les 48 suites JavaScript sont vertes en local.

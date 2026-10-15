@@ -98,7 +98,8 @@
             if (futur || !valeur) {
                 return cellule(STATUTS.NON_DISPONIBLE, { note: futur
                     ? 'documents du millésime revenus ' + annee + ' non publiés : rien n’est établi'
-                    : EMBARQUE + ' ; ' + cheminMoteur + ' refuse ce millésime sans preuve' });
+                    : EMBARQUE + ' ; ' + cheminMoteur + ' refuse ce millésime sans preuve'
+                        + noteDivergence(nom, annee) });
             }
             var src = sourcesBoi[nom] || null;
             return cellule(STATUTS.ETABLI, { valeur: valeur, source: src && src.url || null,
@@ -320,6 +321,110 @@
                 + 'jamais résolu par une hypothèse.'
         }
     ];
+
+    /* Valeurs EMBARQUÉES dont la divergence avec le BOFiP a été constatée le
+       16/10/2026, sur les permaliens que `fiscal_dgfip_sources.js` construit
+       lui-même pour ces millésimes. Ce registre ne modifie AUCUNE constante :
+       les tests existants figent volontairement les valeurs historiques
+       (« aucun recopiage historique sans BOFiP »,
+       tests/test_fiscal_maj_indicative.js ; « corrige 11520 historique »,
+       tests/test_fiscal_dgfip_activation.js). Son rôle est d'afficher que, sans
+       collecte du millésime, la simulation repose sur une valeur qui N'EST PAS
+       celle de la DGFiP, et de donner la valeur officielle avec sa source. */
+    var DIVERGENCES_CODE = [
+        {
+            id: 'decote_2023', categorie: 'decote', doc: 'decote', anneeRevenus: 2023,
+            url: 'https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20240618',
+            publication: '2024-06-18', finPublication: '2025-04-14',
+            loi: 'loi n° 2023-1322 du 29 décembre 2023 de finances pour 2024, art. 2',
+            texteOfficiel: '« Pour l’imposition des revenus de 2023, cette décote est accordée aux '
+                + 'contribuables dont la cotisation d’impôt brut est inférieure à 1 929 € pour les '
+                + 'contribuables célibataires, divorcés ou veufs et à 3 191 € pour les contribuables '
+                + 'soumis à imposition commune (soit respectivement 1/45,25 % de 873 € et 1/45,25 % de '
+                + '1 444 €) » ; « le plafond applicable … (873 € pour les contribuables célibataires, '
+                + 'divorcés ou veufs et 1 444 € pour les contribuables soumis à imposition commune pour '
+                + 'l’imposition des revenus de 2023) »',
+            officiel: { dc: 873, dcPlafond: 1929, dcCouple: 1444, dcPlafondCouple: 3191 },
+            embarque: { dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
+            ecart: 'décote embarquée 906 € / 1 493 € au lieu de 873 € / 1 444 € (seuils 2 002 € / 3 300 € au lieu de 1 929 € / 3 191 €)',
+            ecartCourt: 'décote 906/1 493 € embarqués contre 873/1 444 € officiels',
+            effet: 'sans collecte, la décote 2023 est plus élevée que l’officielle : l’impôt 2023 des '
+                + 'foyers sous le seuil est sous-évalué',
+            arbitrage: 'la collecte du BOFiP « revenus 2023 » remplace les quatre nombres ; aucune '
+                + 'constante n’est modifiée par ce registre'
+        },
+        {
+            id: 'bareme_2024', categorie: 'ir_bareme', doc: 'ir', anneeRevenus: 2024,
+            url: 'https://bofip.impots.gouv.fr/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20250414',
+            publication: '2025-04-14', finPublication: '2026-04-07',
+            loi: 'loi n° 2025-127 du 14 février 2025 de finances pour 2025, art. 2, I-A et B',
+            texteOfficiel: '« Le barème pour l’imposition des revenus de l’année 2024 est présenté dans '
+                + 'le tableau suivant : N’excédant pas 11 497 € 0 % ; Supérieure à 11 497 € et '
+                + 'inférieure ou égale à 29 315 € 11 % ; … 83 823 € 30 % ; … 180 294 € 41 % ; '
+                + 'Supérieure à 180 294 € 45 % » ; « indexe les limites des tranches de revenus du '
+                + 'barème … sur l’évolution de l’IPC hors tabac de 2024 par rapport à 2023, soit 1,8 % »',
+            officiel: { tranches: [11497, 29315, 83823, 180294] },
+            embarque: { tranches: [11520, 29370, 83984, 180648] },
+            ecart: 'les quatre seuils embarqués correspondent aux seuils 2023 multipliés par 1,02, alors '
+                + 'que l’indexation officielle des revenus 2024 est de 1,8 % (11 497 / 29 315 / 83 823 / 180 294)',
+            ecartCourt: 'tranches 11 520/29 370/83 984/180 648 embarquées (= 2023 × 1,02) contre 11 497/29 315/83 823/180 294 officiels (indexation 1,8 %)',
+            effet: 'sans collecte, le barème 2024 est décalé vers le haut : l’impôt 2024 est sous-évalué '
+                + 'et la TMI peut basculer sur le mauvais seuil',
+            arbitrage: 'tests/test_fiscal_dgfip_activation.js vérifie déjà que la collecte corrige '
+                + '11 520 en 11 497 pour le compte concerné, sans toucher les autres comptes'
+        },
+        {
+            id: 'decote_2024', categorie: 'decote', doc: 'decote', anneeRevenus: 2024,
+            url: 'https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20250414',
+            publication: '2025-04-14', finPublication: '2026-04-07',
+            loi: 'loi n° 2025-127 du 14 février 2025 de finances pour 2025, art. 2',
+            texteOfficiel: '« Pour l’imposition des revenus de 2024, cette décote est accordée aux '
+                + 'contribuables dont la cotisation d’impôt brut est inférieure à 1 965 € pour les '
+                + 'contribuables célibataires, divorcés ou veufs et à 3 249 € pour les contribuables '
+                + 'soumis à imposition commune (soit respectivement 1/45,25 % de 889 € et 1/45,25 % de '
+                + '1 470 €) »',
+            officiel: { dc: 889, dcPlafond: 1965, dcCouple: 1470, dcPlafondCouple: 3249 },
+            embarque: { dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
+            ecart: 'décote embarquée 924 € / 1 523 € au lieu de 889 € / 1 470 € (seuils 2 042 € / 3 365 € au lieu de 1 965 € / 3 249 €)',
+            ecartCourt: 'décote 924/1 523 € embarqués contre 889/1 470 € officiels',
+            effet: 'sans collecte, la décote 2024 est plus élevée que l’officielle : l’impôt 2024 des '
+                + 'foyers sous le seuil est sous-évalué',
+            arbitrage: 'la collecte du BOFiP « revenus 2024 » remplace les quatre nombres'
+        },
+        {
+            id: 'qf_2024', categorie: 'qf_general', doc: 'qf', anneeRevenus: 2024,
+            url: 'https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20250414',
+            publication: '2025-04-14', finPublication: '2026-04-07',
+            loi: 'loi n° 2025-127 du 14 février 2025 de finances pour 2025, art. 2',
+            texteOfficiel: '« Son montant est fixé à 1 791 € par demi-part supplémentaire à compter de '
+                + 'l’imposition des revenus de l’année 2024 » ; « On retranche l’avantage maximum en '
+                + 'impôt procuré par les 6 demi-parts supplémentaires soumises au plafonnement … soit '
+                + '1 791 € x 6 = 10 746 € »',
+            officiel: { qf: 1791 },
+            embarque: { qf: 1759 },
+            ecart: 'plafond embarqué 1 759 € (valeur des revenus 2023) au lieu de 1 791 € pour les revenus 2024',
+            ecartCourt: 'plafond QF 1 759 € embarqué (valeur 2023) contre 1 791 € officiel',
+            effet: 'sans collecte, le plafonnement du quotient familial 2024 retient 1 759 € par '
+                + 'demi-part au lieu de 1 791 € : l’avantage plafonné est sous-évalué de 32 € par demi-part',
+            arbitrage: 'tests/test_corrections_fiscales_2025.py signalait déjà cette valeur comme '
+                + '« héritée, PAS validée lors de l’audit » ; la valeur officielle est désormais sourcée'
+        }
+    ];
+
+    function divergences(annee, categorie) {
+        return DIVERGENCES_CODE.filter(function (d) {
+            return (annee === undefined || d.anneeRevenus === annee)
+                && (!categorie || d.categorie === categorie);
+        });
+    }
+
+    function noteDivergence(doc, annee) {
+        var d = divergences(annee).filter(function (x) { return x.doc === doc; });
+        if (!d.length) return '';
+        return ' ; valeur embarquée DIVERGENTE du BOFiP — ' + d.map(function (x) {
+            return x.ecartCourt;
+        }).join(' ; ') + ' ; la collecte du millésime revenus ' + annee + ' la remplace';
+    }
 
     /* Vérifications distantes menées les 14 et 15/10/2026 sur les documents
        publics, hors application. Elles ne remplacent PAS la collecte du bouton :
@@ -579,6 +684,17 @@
         var contra = contradictions();
         if (contra.length) lignes.push('Contradictions DGFiP signalées : '
             + contra.map(function (c) { return c.resume + ' (' + c.millesime + ')'; }).join(' ; ') + '.');
+        var div = divergences();
+        if (div.length) {
+            var parAn = {};
+            div.forEach(function (d) { parAn[d.anneeRevenus] = (parAn[d.anneeRevenus] || 0) + 1; });
+            lignes.push('Valeurs embarquées divergentes du BOFiP (constat du 16/10/2026) : '
+                + Object.keys(parAn).sort().map(function (an) {
+                    return 'revenus ' + an + ' → ' + parAn[an];
+                }).join(', ')
+                + '. Elles ne sont PAS corrigées ici : la collecte du millésime les remplace, et sans '
+                + 'collecte la simulation n’utilise pas les chiffres de la DGFiP.');
+        }
         return lignes.join('\n');
     }
 
@@ -613,6 +729,7 @@
     PF.fiscalCouverture = {
         STATUTS: STATUTS, MILLESIMES: MILLESIMES, CATEGORIES: CATEGORIES,
         CONTRADICTIONS: CONTRADICTIONS, VERIFICATIONS_DISTANTES: VERIFICATIONS_DISTANTES,
+        DIVERGENCES_CODE: DIVERGENCES_CODE, divergences: divergences,
         categories: categories, millésime: millésime, millésimeDe: millésime,
         preuveDuMillesime: preuveDuMillesime, evaluer: evaluer, matrice: matrice,
         synthese: synthese, statutDe: statutDe, contradictions: contradictions,
