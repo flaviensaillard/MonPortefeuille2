@@ -109,7 +109,9 @@ assert.deepEqual(json(r.examiner([faux(), enveloppe.colonnes_proposees_sans_user
     assert.equal(f.revisionActive(2024), false);
     assert.equal(f.baremeDe(2025).tranches[0], p.bareme.tranches[0]);
     assert.equal(f.baremeDe(2025).taux[0], p.bareme.taux[0]);
-    assert.equal(f.baremeDe(2024).tranches[0], 11520);
+    // Constante embarquée des revenus 2024 : valeur officielle du BOFiP
+    // (11 497 €, indexation 1,8 %) depuis la correction du 16/10/2026.
+    assert.equal(f.baremeDe(2024).tranches[0], 11497);
     assert.equal(f.tauxPS(2025), .19);
     assert.equal(f.tauxPFU(2025), .318);
     assert.equal(f.tauxPS(2024), .172);

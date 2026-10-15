@@ -8,10 +8,17 @@
 
     // ------------------------------------------------------------------ barèmes
 
+    /* Barèmes et décotes recoupés au BOFiP le 16/10/2026, version par millésime :
+       revenus 2022 (publication 26/06/2023), 2023 (18/06/2024), 2024 (14/04/2025),
+       2025 (07/04/2026). Les valeurs historiques non conformes ont été REMPLACÉES
+       par les valeurs officielles ; l'écart et sa source sont consignés dans
+       PF.fiscalCouverture.CORRECTIONS_OFFICIELLES et dans
+       docs/MATRICE-COUVERTURE-FISCALE-2023-2026.md §5.3. 2026 reste provisoire :
+       aucun document « revenus 2026 » n'est publié. */
     var BAREMES = {
-        2022: { tranches: [10777, 27478, 78570, 168994], taux: [0.11, 0.30, 0.41, 0.45], dc: 846, dcPlafond: 1870, dcCouple: 1395, dcPlafondCouple: 3100 },
-        2023: { tranches: [11294, 28797, 82341, 177106], taux: [0.11, 0.30, 0.41, 0.45], dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
-        2024: { tranches: [11520, 29370, 83984, 180648], taux: [0.11, 0.30, 0.41, 0.45], dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
+        2022: { tranches: [10777, 27478, 78570, 168994], taux: [0.11, 0.30, 0.41, 0.45], dc: 833, dcPlafond: 1841, dcCouple: 1378, dcPlafondCouple: 3045 },
+        2023: { tranches: [11294, 28797, 82341, 177106], taux: [0.11, 0.30, 0.41, 0.45], dc: 873, dcPlafond: 1929, dcCouple: 1444, dcPlafondCouple: 3191 },
+        2024: { tranches: [11497, 29315, 83823, 180294], taux: [0.11, 0.30, 0.41, 0.45], dc: 889, dcPlafond: 1965, dcCouple: 1470, dcPlafondCouple: 3249 },
         2025: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 897, dcPlafond: 1982, dcCouple: 1483, dcPlafondCouple: 3277 },
         2026: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 898, dcPlafond: 1986, dcCouple: 1486, dcPlafondCouple: 3284 }
     };
@@ -21,9 +28,9 @@
     var SEUILS_KM_VOITURE = [5000, 20000];
     var MAJORATION_VOITURE_ELECTRIQUE = 0.20;
     var SOURCE_PAR_ANNEE = {
-        2022: 'Constantes embarquées historiques non vérifiées',
-        2023: 'Constantes embarquées historiques non vérifiées',
-        2024: 'Constantes embarquées historiques non vérifiées',
+        2022: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 26/06/2023)',
+        2023: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 18/06/2024)',
+        2024: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 14/04/2025)',
         2025: 'Tranches et décote recoupées BOFiP — autres règles à valider',
         2026: 'Hypothèses provisoires — revenus 2026 non vérifiés'
     };
@@ -258,7 +265,12 @@
        une activation. La R2 publiée reste prioritaire. */
     function psCryptoRecoupement(annee) { return recoupementsCrypto[annee] || null; }
 
-    var PLAFOND_QF_GENERAL = { 2022: 1759, 2023: 1759, 2024: 1759, 2025: 1807, 2026: 1807 }; // 2026 provisoire
+    /* Plafond général du quotient familial, par demi-part supplémentaire, recoupé
+       au BOFiP BOI-IR-LIQ-20-20-20 le 16/10/2026 : 1 678 € « à compter de
+       l'imposition des revenus de l'année 2022 », 1 759 € pour 2023, 1 791 € pour
+       2024, 1 807 € pour 2025. 2022 et 2024 portaient la valeur 2023 reconduite.
+       2026 reste provisoire : rien n'est publié pour les revenus 2026. */
+    var PLAFOND_QF_GENERAL = { 2022: 1678, 2023: 1759, 2024: 1791, 2025: 1807, 2026: 1807 };
     function plafondQF(annee) {
         var p = paramsActifs(annee);
         if (p) return p.quotient_familial.plafond_general_par_demi_part;

@@ -111,7 +111,7 @@
                 return cellule(STATUTS.NON_DISPONIBLE, { note: futur
                     ? 'documents du millésime revenus ' + annee + ' non publiés : rien n’est établi'
                     : EMBARQUE + ' ; ' + cheminMoteur + ' refuse ce millésime sans preuve'
-                        + noteDivergence(nom, annee) });
+                        + noteCorrection(nom, annee) });
             }
             var src = sourcesBoi[nom] || null;
             return cellule(STATUTS.ETABLI, { valeur: valeur, source: src && src.url || null,
@@ -334,16 +334,58 @@
         }
     ];
 
-    /* Valeurs EMBARQUÉES dont la divergence avec le BOFiP a été constatée le
-       16/10/2026, sur les permaliens que `fiscal_dgfip_sources.js` construit
-       lui-même pour ces millésimes. Ce registre ne modifie AUCUNE constante :
-       les tests existants figent volontairement les valeurs historiques
-       (« aucun recopiage historique sans BOFiP »,
-       tests/test_fiscal_maj_indicative.js ; « corrige 11520 historique »,
-       tests/test_fiscal_dgfip_activation.js). Son rôle est d'afficher que, sans
-       collecte du millésime, la simulation repose sur une valeur qui N'EST PAS
-       celle de la DGFiP, et de donner la valeur officielle avec sa source. */
-    var DIVERGENCES_CODE = [
+    /* Journal des CORRECTIONS appliquées aux valeurs embarquées le 16/10/2026,
+       sur décision du propriétaire. Chaque ligne conserve l'écart constaté : la
+       valeur qui était dans le code (`avantCorrection`), la valeur officielle
+       (`officiel`), le permalien exact que `fiscal_dgfip_sources.js` construit pour
+       ce millésime, ses dates de publication et de fin de publication, le passage
+       verbatim qui cite l'année des revenus, l'effet qu'avait l'écart, et la date
+       de correction. Les constantes du moteur (fiscal.js et core/fiscal_bars.py)
+       portent désormais les valeurs officielles.
+
+       Une correction n'est pas une collecte : les cases de la matrice restent
+       « non disponible » tant que le millésime n'a pas été collecté par le
+       propriétaire, et passent à « établi » à ce moment-là seulement. Le revenu
+       2022 est hors du périmètre de la matrice (2023-2026) mais pas hors du
+       moteur : ses constantes sont corrigées et tracées ici. */
+    var CORRECTIONS_OFFICIELLES = [
+        {
+            id: 'decote_2022', categorie: 'decote', doc: 'decote', anneeRevenus: 2022,
+            url: 'https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20230626',
+            publication: '2023-06-26', finPublication: '2024-06-18',
+            loi: 'référence de la loi de finances non relue dans l’extrait : les valeurs sont citées par le BOFiP lui-même',
+            texteOfficiel: '« Pour l’imposition des revenus de 2022, cette décote est accordée aux '
+                + 'contribuables dont la cotisation d’impôt brut est inférieure à 1 841 € pour les '
+                + 'contribuables célibataires, divorcés ou veufs et à 3 045 € pour les contribuables '
+                + 'soumis à imposition commune (soit respectivement 1/45,25 % de 833 € et 1/45,25 % de '
+                + '1 378 €) » ; « le plafond de la décote prévu pour les veufs (833 € à compter de '
+                + 'l’imposition des revenus de 2022) »',
+            officiel: { dc: 833, dcPlafond: 1841, dcCouple: 1378, dcPlafondCouple: 3045 },
+            avantCorrection: { dc: 846, dcPlafond: 1870, dcCouple: 1395, dcPlafondCouple: 3100 },
+            ecart: 'décote embarquée 846 € / 1 395 € au lieu de 833 € / 1 378 € (seuils 1 870 € / 3 100 € au lieu de 1 841 € / 3 045 €)',
+            ecartCourt: 'décote 846/1 395 € remplacée par 833/1 378 € officiels',
+            effet: 'la décote 2022 était plus élevée que l’officielle : l’impôt 2022 des foyers sous '
+                + 'le seuil était sous-évalué',
+            arbitrage: 'corrigé dans fiscal.js et core/fiscal_bars.py ; le barème 2022 (10 777 / 27 478 '
+                + '/ 78 570 / 168 994 €) était déjà identique au BOFiP',
+            corrigee: true, corrigeLe: '2026-10-16'
+        },
+        {
+            id: 'qf_2022', categorie: 'qf_general', doc: 'qf', anneeRevenus: 2022,
+            url: 'https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20230626',
+            publication: '2023-06-26', finPublication: '2024-06-18',
+            loi: 'référence de la loi de finances non relue dans l’extrait : la valeur est citée par le BOFiP lui-même',
+            texteOfficiel: '« Son montant est fixé à 1 678 € par demi-part supplémentaire à compter de '
+                + 'l’imposition des revenus de l’année 2022 » ; « (1 678 € x 7) + 1 673 €, soit 13 419 € »',
+            officiel: { qf: 1678 },
+            avantCorrection: { qf: 1759 },
+            ecart: 'plafond embarqué 1 759 € (valeur des revenus 2023, publiée un an plus tard) au lieu de 1 678 €',
+            ecartCourt: 'plafond QF 1 759 € remplacé par 1 678 € officiel',
+            effet: 'le plafonnement du quotient familial 2022 retenait 1 759 € par demi-part au lieu de '
+                + '1 678 € : l’avantage plafonné était surévalué de 81 € par demi-part',
+            arbitrage: 'corrigé dans les deux moteurs ; le plafond 2023 (1 759 €) était déjà conforme',
+            corrigee: true, corrigeLe: '2026-10-16'
+        },
         {
             id: 'decote_2023', categorie: 'decote', doc: 'decote', anneeRevenus: 2023,
             url: 'https://bofip.impots.gouv.fr/bofip/2495-PGP.html/identifiant=BOI-IR-LIQ-20-20-30-20240618',
@@ -357,13 +399,14 @@
                 + 'divorcés ou veufs et 1 444 € pour les contribuables soumis à imposition commune pour '
                 + 'l’imposition des revenus de 2023) »',
             officiel: { dc: 873, dcPlafond: 1929, dcCouple: 1444, dcPlafondCouple: 3191 },
-            embarque: { dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
+            avantCorrection: { dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
             ecart: 'décote embarquée 906 € / 1 493 € au lieu de 873 € / 1 444 € (seuils 2 002 € / 3 300 € au lieu de 1 929 € / 3 191 €)',
-            ecartCourt: 'décote 906/1 493 € embarqués contre 873/1 444 € officiels',
+            ecartCourt: 'décote 906/1 493 € remplacée par 873/1 444 € officiels',
             effet: 'sans collecte, la décote 2023 est plus élevée que l’officielle : l’impôt 2023 des '
                 + 'foyers sous le seuil est sous-évalué',
-            arbitrage: 'la collecte du BOFiP « revenus 2023 » remplace les quatre nombres ; aucune '
-                + 'constante n’est modifiée par ce registre'
+            arbitrage: 'corrigé dans fiscal.js et core/fiscal_bars.py ; la collecte du BOFiP « revenus '
+                + '2023 » reste le seul chemin vers une case « établi »',
+            corrigee: true, corrigeLe: '2026-10-16'
         },
         {
             id: 'bareme_2024', categorie: 'ir_bareme', doc: 'ir', anneeRevenus: 2024,
@@ -376,14 +419,16 @@
                 + 'Supérieure à 180 294 € 45 % » ; « indexe les limites des tranches de revenus du '
                 + 'barème … sur l’évolution de l’IPC hors tabac de 2024 par rapport à 2023, soit 1,8 % »',
             officiel: { tranches: [11497, 29315, 83823, 180294] },
-            embarque: { tranches: [11520, 29370, 83984, 180648] },
+            avantCorrection: { tranches: [11520, 29370, 83984, 180648] },
             ecart: 'les quatre seuils embarqués correspondent aux seuils 2023 multipliés par 1,02, alors '
                 + 'que l’indexation officielle des revenus 2024 est de 1,8 % (11 497 / 29 315 / 83 823 / 180 294)',
-            ecartCourt: 'tranches 11 520/29 370/83 984/180 648 embarquées (= 2023 × 1,02) contre 11 497/29 315/83 823/180 294 officiels (indexation 1,8 %)',
+            ecartCourt: 'tranches 11 520/29 370/83 984/180 648 (= 2023 × 1,02) remplacées par 11 497/29 315/83 823/180 294 officiels (indexation 1,8 %)',
             effet: 'sans collecte, le barème 2024 est décalé vers le haut : l’impôt 2024 est sous-évalué '
                 + 'et la TMI peut basculer sur le mauvais seuil',
-            arbitrage: 'tests/test_fiscal_dgfip_activation.js vérifie déjà que la collecte corrige '
-                + '11 520 en 11 497 pour le compte concerné, sans toucher les autres comptes'
+            arbitrage: 'corrigé dans les deux moteurs : les quatre seuils officiels remplacent la '
+                + 'reconduction à 1,02 ; tests/test_fiscal_dgfip_activation.js vérifie que la collecte '
+                + 'd’un compte ne modifie pas les autres',
+            corrigee: true, corrigeLe: '2026-10-16'
         },
         {
             id: 'decote_2024', categorie: 'decote', doc: 'decote', anneeRevenus: 2024,
@@ -396,12 +441,13 @@
                 + 'soumis à imposition commune (soit respectivement 1/45,25 % de 889 € et 1/45,25 % de '
                 + '1 470 €) »',
             officiel: { dc: 889, dcPlafond: 1965, dcCouple: 1470, dcPlafondCouple: 3249 },
-            embarque: { dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
+            avantCorrection: { dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
             ecart: 'décote embarquée 924 € / 1 523 € au lieu de 889 € / 1 470 € (seuils 2 042 € / 3 365 € au lieu de 1 965 € / 3 249 €)',
-            ecartCourt: 'décote 924/1 523 € embarqués contre 889/1 470 € officiels',
+            ecartCourt: 'décote 924/1 523 € remplacée par 889/1 470 € officiels',
             effet: 'sans collecte, la décote 2024 est plus élevée que l’officielle : l’impôt 2024 des '
                 + 'foyers sous le seuil est sous-évalué',
-            arbitrage: 'la collecte du BOFiP « revenus 2024 » remplace les quatre nombres'
+            arbitrage: 'corrigé dans fiscal.js et core/fiscal_bars.py',
+            corrigee: true, corrigeLe: '2026-10-16'
         },
         {
             id: 'qf_2024', categorie: 'qf_general', doc: 'qf', anneeRevenus: 2024,
@@ -413,29 +459,34 @@
                 + 'impôt procuré par les 6 demi-parts supplémentaires soumises au plafonnement … soit '
                 + '1 791 € x 6 = 10 746 € »',
             officiel: { qf: 1791 },
-            embarque: { qf: 1759 },
+            avantCorrection: { qf: 1759 },
             ecart: 'plafond embarqué 1 759 € (valeur des revenus 2023) au lieu de 1 791 € pour les revenus 2024',
-            ecartCourt: 'plafond QF 1 759 € embarqué (valeur 2023) contre 1 791 € officiel',
+            ecartCourt: 'plafond QF 1 759 € (valeur 2023) remplacé par 1 791 € officiel',
             effet: 'sans collecte, le plafonnement du quotient familial 2024 retient 1 759 € par '
                 + 'demi-part au lieu de 1 791 € : l’avantage plafonné est sous-évalué de 32 € par demi-part',
-            arbitrage: 'tests/test_corrections_fiscales_2025.py signalait déjà cette valeur comme '
-                + '« héritée, PAS validée lors de l’audit » ; la valeur officielle est désormais sourcée'
+            arbitrage: 'tests/test_corrections_fiscales_2025.py signalait cette valeur comme « héritée, '
+                + 'PAS validée lors de l’audit » : elle est remplacée par la valeur officielle sourcée',
+            corrigee: true, corrigeLe: '2026-10-16'
         }
     ];
 
-    function divergences(annee, categorie) {
-        return DIVERGENCES_CODE.filter(function (d) {
+    function corrections(annee, categorie) {
+        return CORRECTIONS_OFFICIELLES.filter(function (d) {
             return (annee === undefined || d.anneeRevenus === annee)
                 && (!categorie || d.categorie === categorie);
         });
     }
 
-    function noteDivergence(doc, annee) {
-        var d = divergences(annee).filter(function (x) { return x.doc === doc; });
+    /* Note portée par la case tant que le millésime n'est pas collecté : la
+       valeur du moteur est la valeur officielle, mais elle n'a pas été LUE par
+       l'application pour ce compte — la case ne devient « établi » qu'au clic. */
+    function noteCorrection(doc, annee) {
+        var d = corrections(annee).filter(function (x) { return x.doc === doc && x.corrigee; });
         if (!d.length) return '';
-        return ' ; valeur embarquée DIVERGENTE du BOFiP — ' + d.map(function (x) {
-            return x.ecartCourt;
-        }).join(' ; ') + ' ; la collecte du millésime revenus ' + annee + ' la remplace';
+        return ' ; valeur embarquée corrigée le ' + d[0].corrigeLe.split('-').reverse().join('/')
+            + ' d’après le BOFiP — ' + d.map(function (x) { return x.ecartCourt; }).join(' ; ')
+            + ' ; correction ≠ collecte : la case passe à « établi » à la collecte du millésime revenus '
+            + annee;
     }
 
     /* Vérifications distantes menées les 14 et 15/10/2026 sur les documents
@@ -702,16 +753,16 @@
                 return 'revenus ' + l.anneeRevenus + ' ' + l.lisibles + '/' + l.total;
             }).join(', ')
             + '. Aucune URL n’est inventée pour un millésime non vérifié : il reste « non disponible ».');
-        var div = divergences();
-        if (div.length) {
+        var corr = corrections();
+        if (corr.length) {
             var parAn = {};
-            div.forEach(function (d) { parAn[d.anneeRevenus] = (parAn[d.anneeRevenus] || 0) + 1; });
-            lignes.push('Valeurs embarquées divergentes du BOFiP (constat du 16/10/2026) : '
+            corr.forEach(function (d) { parAn[d.anneeRevenus] = (parAn[d.anneeRevenus] || 0) + 1; });
+            lignes.push('Valeurs embarquées corrigées d’après le BOFiP le 16/10/2026 : '
                 + Object.keys(parAn).sort().map(function (an) {
                     return 'revenus ' + an + ' → ' + parAn[an];
                 }).join(', ')
-                + '. Elles ne sont PAS corrigées ici : la collecte du millésime les remplace, et sans '
-                + 'collecte la simulation n’utilise pas les chiffres de la DGFiP.');
+                + '. Le moteur porte les valeurs officielles ; une correction n’est pas une collecte, '
+                + 'et chaque case reste « non disponible » tant que le millésime n’a pas été collecté.');
         }
         return lignes.join('\n');
     }
@@ -747,7 +798,7 @@
     PF.fiscalCouverture = {
         STATUTS: STATUTS, MILLESIMES: MILLESIMES, CATEGORIES: CATEGORIES,
         CONTRADICTIONS: CONTRADICTIONS, VERIFICATIONS_DISTANTES: VERIFICATIONS_DISTANTES,
-        DIVERGENCES_CODE: DIVERGENCES_CODE, divergences: divergences,
+        CORRECTIONS_OFFICIELLES: CORRECTIONS_OFFICIELLES, corrections: corrections,
         categories: categories, millésime: millésime, millésimeDe: millésime,
         preuveDuMillesime: preuveDuMillesime, evaluer: evaluer, matrice: matrice,
         synthese: synthese, statutDe: statutDe, contradictions: contradictions,

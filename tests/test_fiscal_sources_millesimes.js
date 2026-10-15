@@ -192,15 +192,23 @@ assert.match(t2024, /aucune URL inventée/);
 assert.match(t2024, /Calendrier :/);
 assert.match(S.texte(2026), /0\/11/);
 assert.equal(S.texte(2027), 'Millésime hors inventaire : 2027.');
-// Chaque famille dont le constat dit « DIVERGENT » a son écart dans la matrice.
+// Chaque famille dont le constat dit « corrigé le 16/10/2026 » a sa correction
+// tracée dans le journal, avec la valeur officielle et la valeur d'avant.
 S.millésimes().forEach(an => S.toutes(an).forEach(s => {
-    if (!/DIVERGENT/.test(s.constat)) return;
+    if (!/corrigé le 16\/10\/2026/.test(s.constat)) return;
     const cat = s.famille === 'boi_ir' ? 'ir_bareme'
         : s.famille === 'boi_decote' ? 'decote' : 'qf_general';
-    assert.ok(C.divergences(an, cat).length >= 1,
-        `revenus ${an} · ${s.famille} : divergence consignée dans la matrice`);
+    const c = C.corrections(an, cat);
+    assert.ok(c.length >= 1, `revenus ${an} · ${s.famille} : correction consignée`);
+    assert.equal(c[0].corrigee, true);
+    assert.equal(c[0].corrigeLe, '2026-10-16');
+    assert.notEqual(JSON.stringify(c[0].officiel), JSON.stringify(c[0].avantCorrection));
 }));
-assert.equal(C.divergences().length, 4, 'quatre divergences, pas une de plus');
+assert.equal(C.corrections().length, 6,
+    'six corrections : décote et QF 2022, décote 2023, barème, décote et QF 2024');
+assert.equal(C.corrections(2022).length, 2, 'le millésime 2022 est hors matrice mais pas hors moteur');
+assert.equal(C.corrections(2025).length, 0, 'revenus 2025 : déjà recoupés, rien à corriger');
+assert.equal(C.corrections(2026).length, 0, 'revenus 2026 : rien de publié, rien à corriger');
 
 // --------------------------------------------------------- calendrier pérenne
 const cal26 = S.calendrier(2026);

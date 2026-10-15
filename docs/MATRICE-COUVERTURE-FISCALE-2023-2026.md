@@ -59,9 +59,9 @@ preuves et refuse sans elles (§7.1).
 
 | Catégorie | Revenus 2023 | Revenus 2024 | Revenus 2025 | Revenus 2026 |
 | --- | --- | --- | --- | --- |
-| Barème IR | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 11 294 / 28 797 / 82 341 / 177 106 €, **identique au code**) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 11 497 / 29 315 / 83 823 / 180 294 €, **divergent du code**, §5.3) | **établi** (BOFiP 07/04/2026) | non disponible |
-| Décote | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 873 € / 1 444 €, seuils 1 929 € / 3 191 €, **divergent du code**, §5.3) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 889 € / 1 470 €, seuils 1 965 € / 3 249 €, **divergent du code**, §5.3) | **établi** | non disponible |
-| Plafond QF général | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 1 759 € par demi-part, **identique au code**) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : **1 791 €** par demi-part, **divergent du code** qui porte 1 759 €, §5.3) | **établi** | non disponible |
+| Barème IR | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 11 294 / 28 797 / 82 341 / 177 106 €, identique au code) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 11 497 / 29 315 / 83 823 / 180 294 €, **appliqué au code le 16/10/2026**, §5.3) | **établi** (BOFiP 07/04/2026) | non disponible |
+| Décote | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 873 € / 1 444 €, seuils 1 929 € / 3 191 €, **appliqué au code le 16/10/2026**, §5.3) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 889 € / 1 470 €, seuils 1 965 € / 3 249 €, **appliqué au code le 16/10/2026**, §5.3) | **établi** | non disponible |
+| Plafond QF général | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 1 759 € par demi-part, identique au code) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : **1 791 €** par demi-part, **appliqué au code le 16/10/2026**, §5.3) | **établi** | non disponible |
 | Plafonds QF particuliers | non disponible | non disponible | non disponible | non disponible |
 | Abattement salariés 10 % | établiable (aide du millésime 2024 relue le 15/10/2026 : 495 € / 14 171 €, identique au code) | établiable (aide du millésime 2025 relue par indexation le 15/10/2026 : 504 € / 14 426 €, identique au code) | **établi** | non disponible |
 | Forfait repas | établiable (même aide : 5,20 € par repas, identique au code) | établiable, **valeur non recoupée** (extrait tronqué : le forfait 2024 n'a pas été relu) | **établi** | non disponible |
@@ -546,27 +546,41 @@ l'application qu'après lecture réussie, sur l'appareil, par le bouton annuel.
 
 ---
 
-### 5.3 Valeurs embarquées divergentes du BOFiP — constat du 16/10/2026
+### 5.3 Valeurs historiques corrigées d'après le BOFiP — 16/10/2026
 
-Les trois permaliens que `fiscal_dgfip_sources.js` construit pour les revenus 2023
-et 2024 (`url('ir'|'decote'|'qf', annee)`) ont été relus le 16/10/2026. Le barème
-2023 et le plafond de quotient familial 2023 sont **identiques** au code. Quatre
-valeurs embarquées **divergent** de la source que l'application désigne elle-même :
+Les permaliens que `fiscal_dgfip_sources.js` construit pour chaque millésime
+(`url('ir'|'decote'|'qf', annee)`) ont été relus le 16/10/2026, y compris dans leur
+version « revenus 2022 » (publication du 26/06/2023). Barème 2022, barème 2023 et
+plafond de quotient familial 2023 étaient **identiques** au code. **Six valeurs
+embarquées divergeaient** de la source que l'application désigne elle-même : sur
+décision du propriétaire, elles sont **remplacées par les valeurs officielles** dans
+les deux moteurs (`fiscal.js` et `core/fiscal_bars.py`).
 
-| Millésime | Catégorie | Embarqué | Officiel BOFiP | Source (permalien, publication, fin) |
+| Millésime | Catégorie | Avant correction | Officiel BOFiP, appliqué | Source (permalien, publication, fin) |
 | --- | --- | --- | --- | --- |
+| revenus 2022 | Décote | 846 € / 1 395 € ; seuils 1 870 € / 3 100 € | **833 € / 1 378 €** ; seuils **1 841 € / 3 045 €** | `2495-PGP…-20230626`, 26/06/2023, fin 18/06/2024 |
+| revenus 2022 | Plafond QF général | 1 759 € (valeur 2023) | **1 678 €** | `2494-PGP…-20230626`, 26/06/2023, fin 18/06/2024 |
 | revenus 2023 | Décote | 906 € / 1 493 € ; seuils 2 002 € / 3 300 € | **873 € / 1 444 €** ; seuils **1 929 € / 3 191 €** | `2495-PGP…-20240618`, 18/06/2024, fin 14/04/2025 |
-| revenus 2024 | Barème IR | 11 520 / 29 370 / 83 984 / 180 648 € | **11 497 / 29 315 / 83 823 / 180 294 €** | `2491-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
+| revenus 2024 | Barème IR | 11 520 / 29 370 / 83 984 / 180 648 € (= 2023 × 1,02) | **11 497 / 29 315 / 83 823 / 180 294 €** | `2491-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
 | revenus 2024 | Décote | 924 € / 1 523 € ; seuils 2 042 € / 3 365 € | **889 € / 1 470 €** ; seuils **1 965 € / 3 249 €** | `2495-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
 | revenus 2024 | Plafond QF général | 1 759 € (valeur 2023) | **1 791 €** | `2494-PGP…-20250414`, 14/04/2025, fin 07/04/2026 |
 
 Passages probants (verbatim) :
 
+> revenus 2022, décote — « Pour l'imposition des revenus de 2022, cette décote est
+> accordée aux contribuables dont la cotisation d'impôt brut est inférieure à
+> 1 841 € pour les contribuables célibataires, divorcés ou veufs et à 3 045 € pour
+> les contribuables soumis à imposition commune (soit respectivement 1/45,25 % de
+> 833 € et 1/45,25 % de 1 378 €) ».
+>
+> revenus 2022, quotient familial — « Son montant est fixé à **1 678 €** par
+> demi-part supplémentaire à compter de l'imposition des revenus de l'année 2022 » ;
+> « (1 678 € x 7) + 1 673 €, soit 13 419 € ».
+>
 > revenus 2023, décote — « Pour l'imposition des revenus de 2023, cette décote est
 > accordée aux contribuables dont la cotisation d'impôt brut est inférieure à
-> 1 929 € pour les contribuables célibataires, divorcés ou veufs et à 3 191 € pour
-> les contribuables soumis à imposition commune (soit respectivement 1/45,25 % de
-> 873 € et 1/45,25 % de 1 444 €) » (loi n° 2023-1322 du 29 décembre 2023, art. 2).
+> 1 929 € … et à 3 191 € … (soit respectivement 1/45,25 % de 873 € et 1/45,25 % de
+> 1 444 €) » (loi n° 2023-1322 du 29 décembre 2023 de finances pour 2024, art. 2).
 >
 > revenus 2024, barème — « Le barème pour l'imposition des revenus de l'année 2024
 > est présenté dans le tableau suivant : N'excédant pas 11 497 € 0 % ; Supérieure à
@@ -583,40 +597,56 @@ Passages probants (verbatim) :
 > « On retranche l'avantage maximum en impôt procuré par les 6 demi-parts
 > supplémentaires soumises au plafonnement … soit 1 791 € x 6 = 10 746 € ».
 
-Lecture de l'écart : les seuils 2024 embarqués valent les seuils 2023 multipliés
+Lecture de l'écart : les seuils 2024 embarqués valaient les seuils 2023 multipliés
 par **1,02**, alors que l'indexation officielle des revenus 2024 est de **1,8 %** ;
-la décote 2024 embarquée vaut la décote 2023 embarquée × 1,02 ; le plafond de
-quotient familial 2024 est la valeur 2023 reconduite. Ce sont des reconductions,
-pas des valeurs lues dans une source. Les seuils embarqués sont internes cohérents
-(seuil = base / 45,25 %), ce n'est donc pas une coquille de saisie.
+les décotes 2022, 2023 et 2024 embarquées étaient chacune supérieures à l'officielle
+(et leurs seuils, cohérents avec elles : seuil = base / 45,25 %, donc pas une
+coquille mais des valeurs d'une autre provenance) ; les plafonds de quotient
+familial 2022 et 2024 étaient la valeur **2023** reconduite.
 
-**Ce qui a été fait** : ces quatre écarts sont enregistrés dans
-`PF.fiscalCouverture.DIVERGENCES_CODE` (identifiant, catégorie, millésime,
-permalien, dates de publication et de fin de publication, loi, passage verbatim,
-valeur officielle, valeur embarquée, effet, arbitrage). La matrice les affiche :
-sans collecte, les cases concernées portent « valeur embarquée DIVERGENTE du
-BOFiP — … » à côté de « non disponible », et le bloc replié compte les
-divergences par millésime. Une fois le millésime collecté, la case passe à
-« établi » avec la valeur officielle et l'alerte disparaît.
+**Effet chiffré de la correction** (célibataire, impôt brut de 1 000 €) : la décote
+2024 passe de 471,50 € à **436,50 €** (–35 €), la décote 2023 de 453,50 € à
+**420,50 €** (–33 €), la décote 2022 de 393,50 € à **380,50 €** (–13 €). Les seuils
+du barème 2024 sont abaissés de 23 € (première tranche) à 354 € (dernière). Le
+plafond de quotient familial passe de 1 759 € à **1 791 €** par demi-part pour 2024
+et de 1 759 € à **1 678 €** pour 2022.
 
-**Ce qui n'a PAS été fait, volontairement** : aucune constante du moteur n'a été
-modifiée. Les valeurs historiques restent figées par les suites existantes
-(`tests/test_fiscal_maj_indicative.js` : « aucun recopiage historique sans
-BOFiP » ; `tests/test_fiscal_dgfip_activation.js` : la collecte « corrige 11520
-historique » en 11 497 pour le seul compte concerné ;
-`tests/test_corrections_fiscales_2025.py` : plafond QF 2024 « hérité, PAS validé
-lors de l'audit »). Corriger l'historique changerait les simulations déjà
-produites pour 2023 et 2024 : c'est une décision du propriétaire, pas un effet de
-bord d'une relecture. Le registre donne les valeurs officielles et leur source pour
-que cette décision puisse être prise ; la collecte du millésime, elle, corrige déjà
-le compte qui la déclenche.
+**Ce qui a été fait**
 
-Effet chiffré, sans collecte : pour un foyer dont l'impôt brut 2024 est sous le
-seuil, la décote embarquée est supérieure de 35 € (célibataire) ou 53 € (couple) à
-l'officielle, et le barème embarqué décale chaque seuil de 23 € à 354 € vers le
-haut ; le plafond de quotient familial retient 1 759 € au lieu de 1 791 € par
-demi-part. Les revenus 2025 (R2 publiée et activée) ne sont concernés par aucune
-de ces divergences.
+- les six valeurs corrigées dans `BAREMES` et `PLAFOND_QF_GENERAL` (`fiscal.js`) et
+  dans `BAREMES` et `PLAFOND_QF_GENERAL_PAR_ANNEE` (`core/fiscal_bars.py`) ;
+- la provenance affichée par millésime (`SOURCE_PAR_ANNEE` / `source_de`) nomme
+  désormais le BOFiP et la date du 16/10/2026 au lieu de « Constantes embarquées
+  historiques non vérifiées » ;
+- le journal `PF.fiscalCouverture.CORRECTIONS_OFFICIELLES` conserve, pour chaque
+  correction : identifiant, catégorie, millésime, permalien, dates de publication et
+  de fin de publication, référence de la loi (ou l'aveu qu'elle n'a pas été relue),
+  passage verbatim citant l'année des revenus, valeur officielle, valeur **avant**
+  correction, écart, effet, arbitrage, `corrigee` et `corrigeLe` ;
+- la matrice affiche la correction tant que le millésime n'est pas collecté :
+  « valeur embarquée corrigée le 16/10/2026 d'après le BOFiP — … ; **correction ≠
+  collecte** : la case passe à « établi » à la collecte du millésime » ;
+- tests : `tests/test_fiscal_corrections_officielles.js` (journal, valeurs du
+  moteur, notes de la matrice, collecte qui établit, R2 intacte) et
+  `tests/test_valeurs_officielles_corrigees.py` (jumeau Python, cohérence de la
+  décote, plafonds QF distincts, **parité JS ↔ Python** lue dans `fiscal.js`,
+  calculs avec les valeurs officielles, revenus 2025 inchangés). Les suites qui
+  figeaient les anciennes valeurs ont été mises à jour :
+  `test_fiscal_activation_2025.js`, `test_fiscal_dgfip_activation.js`,
+  `test_fiscal_maj_indicative.js`, `test_corrections_fiscales_2025.py`.
+
+**Ce que la correction ne fait pas**
+
+- elle n'établit aucune case : sans collecte du propriétaire, les cases de 2022 à
+  2024 restent « non disponible » et `basculeComplete` reste `false` ;
+- elle ne touche ni les revenus 2025 (R2 publiée et activée : 11 600 / 29 579 /
+  84 577 / 181 917 €, décote 897 € / 1 483 €, plafond QF 1 807 €) ni les revenus
+  2026 (provisoires, rien de publié) ;
+- elle ne réécrit aucune donnée stockée : aucune migration n'est ajoutée, les
+  lignes déjà enregistrées conservent leurs nombres, et toute simulation ou révision
+  produite après ce changement utilise les valeurs officielles ;
+- elle ne change ni les taux de prélèvements sociaux, ni les frais professionnels,
+  ni les règles RCM/CSG, ni la franchise de 305 €.
 
 ## 6. Garde-fous transverses (rappel du cahier des charges)
 
@@ -758,11 +788,12 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
-| `tests/test_fiscal_divergences_code.js` | registre des divergences valeurs embarquées / BOFiP : 4 écarts (décote 2023, barème 2024, décote 2024, plafond QF 2024), chacun avec le permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi, le passage verbatim citant l'année des revenus, la valeur officielle et la valeur embarquée ; le registre décrit le moteur sans le modifier (11 520, 906/1 493, 924/1 523 et 1 759 inchangés) ; cohérence interne de la décote officielle (seuil = base / 45,25 %) ; cases 2023/2024 « non disponible » avec l'alerte DIVERGENTE et la valeur officielle nommée, cases 2023 barème et QF sans alerte (identiques au BOFiP), 2025 et 2026 sans divergence ; après collecte du millésime 2024 les trois cases passent « établi » et l'alerte disparaît ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, comparaison 2OP/PFU inchangée) et bascule totale toujours `false` |
+| `tests/test_fiscal_corrections_officielles.js` | **journal des corrections du 16/10/2026** : 6 entrées (décote et plafond QF 2022, décote 2023, barème, décote et plafond QF 2024), chacune avec son permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi (ou l'aveu qu'elle n'a pas été relue), le passage verbatim citant l'année des revenus, la valeur officielle, la valeur **avant** correction, l'écart, l'effet et l'arbitrage ; le moteur porte désormais les valeurs officielles ; cohérence interne des décotes (seuil = base / 45,25 %) ; chaque millésime garde ses propres seuils (10 777 / 11 294 / 11 497 / 11 600) et son propre plafond QF (1 678 / 1 759 / 1 791 / 1 807) ; **correction ≠ collecte** : cases 2023/2024 toujours « non disponible » sans collecte, avec la mention « corrigée le 16/10/2026 » et « correction ≠ collecte », aucune alerte de divergence subsistante, cases 2023 barème et QF sans mention (déjà conformes) ; après collecte du millésime 2024 les trois cases passent « établi » et la mention laisse place à la preuve lue ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, `tauxPFU` 31,4 %, comparaison 2OP/PFU stable) et bascule totale toujours `false` |
+| `tests/test_valeurs_officielles_corrigees.py` | **jumeau Python** : barèmes et décotes officiels 2022-2024, plafonds QF 1 678/1 759/1 791/1 807, valeurs d'avant correction absentes, provenance affichée (« BOFiP », « 16/10/2026 », plus de « non vérifiées ») ; **parité JS ↔ Python** lue directement dans `fiscal.js` (tranches, décotes, plafond QF, 2026 provisoire des deux côtés) ; calculs avec les valeurs officielles (décote 2024 = 436,50 € pour 1 000 € d'impôt brut, écart de 35 € avec l'ancienne valeur, revenu sous la première tranche sans impôt, plafonnement QF 2024 = 2 × 1 791 €) ; millésimes non reconduits ; refus de 2027 ; revenus 2025 inchangés |
 | `tests/test_fiscal_crypto_pdf_sources.js` | notice 2086 et chapitre plus-values : preuves indépendantes, millésime exact, rectifications, non-activation — **étendu à la pérennité** : notices 16043\*05 (revenus 2023) et 16043\*06 (revenus 2024) repérées dans les brochures, ancres paramétrées par année de cessions (un texte 2024 lu pour 2024, jamais par défaut ni pour 2023), collecte 2024 réussie **sans modifier le lecteur**, chapitre plus-values ir_2025 non repéré → refus sans URL inventée, revenus 2026 → aucun appel réseau, caches isolés par millésime, ancienne clé sans millésime toujours lue pour 2025 et jamais reportée, `psCrypto2025Attestes` et `annexeFoyerComplete` toujours `false` |
 | `tests/test_fiscal_sources_millesimes.js` | **inventaire pérenne des sources** : 11 familles × 4 millésimes, année de revenus ≠ année de déclaration, dates de publication BOFiP distinctes ; chaque entrée porte une date de vérification et un constat écrit ; aucune URL hors des trois hôtes DGFiP, aucune URL à joker, `null` partout pour les revenus 2026, `source(2022)`/`source(2027)` hors inventaire ; un document **repéré** mais dont le jeu de preuves n'est pas vérifié (chapitre RCM ir_2024) ne donne aucune URL lisible ; inventaire 11/11 en 2025, 6/11 en 2023 et 2024, 0/11 en 2026 ; **cohérence obligatoire** avec les URL que construisent réellement `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()/repasUrl()`, `fiscal_regimes_sources.url()`, `fiscal_rcm_pdf_sources.urls`/`urlPour()` et `fiscal_crypto_pdf_sources.urls`/`urlPour()` ;
         quatre états (`lisible-vérifiée`, `lisible-sous-réserve`, `repérée-non-autorisée`, `absente`) avec
-        autorisation ≠ vérification (les réserves écrites, le nombre de preuves exigées nommé) ; toute famille marquée « DIVERGENT » a son écart dans `DIVERGENCES_CODE` ; calendrier du millésime à venir (fenêtres observées, jamais une valeur devinée) ; et non-régression : un inventaire n'établit rien par lui-même (`etablis` = 0, bascule `false`) |
+        autorisation ≠ vérification (les réserves écrites, le nombre de preuves exigées nommé) ; toute famille dont le constat porte une correction du 16/10/2026 a son entrée dans `CORRECTIONS_OFFICIELLES` (6 au total, dont 2 pour le millésime 2022 hors matrice mais pas hors moteur) ; calendrier du millésime à venir (fenêtres observées, jamais une valeur devinée) ; et non-régression : un inventaire n'établit rien par lui-même (`etablis` = 0, bascule `false`) |
 | `tests/test_fiscal_rcm_pdf_sources.js` | textes réels des brochures revenus 2025, transport PDF simulé, cache, rectifications, non-activation — **étendu à la pérennité** : URL par millésime prises dans l'inventaire, comportement 2025 inchangé, refus 2023 (document repéré, preuves non vérifiées) / 2024 et 2026 (non repérés) **sans aucun appel réseau** et sans valeur produite, motif à vérifier fourni, ancres paramétrées par année (un texte 2023 n'est lu que pour 2023, jamais pour 2024 ni par défaut), ancienne clé de cache sans millésime toujours lue pour 2025 et jamais reportée sur une autre année ; **de bout en
         en** : chapitres charges des revenus 2023 (`12-charges_ded_rev_219a230.pdf`) et 2024
         (`12-charges_ded_rev_215a226.pdf`) collectés → cases CSG « partiel » avec l'URL et l'année d'effet de leur
@@ -773,4 +804,4 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 49 suites JavaScript sont vertes en local.
+modification : les 49 suites JavaScript sont vertes en local, et 936 tests Python.
