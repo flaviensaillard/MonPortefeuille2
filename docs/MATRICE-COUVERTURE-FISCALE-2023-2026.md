@@ -55,9 +55,9 @@ confirmés sur Android + BOFiP + aides du simulateur 2026) :
 | Décote | établiable | établiable | **établi** | non disponible |
 | Plafond QF général | établiable | établiable | **établi** | non disponible |
 | Plafonds QF particuliers | non disponible | non disponible | non disponible | non disponible |
-| Abattement salariés 10 % | établiable (aide du millésime 2024 relue le 15/10/2026 : 495 € / 14 171 €, identique au code) | établiable (sonde en échec le 15/10/2026) | **établi** | non disponible |
-| Forfait repas | établiable (même aide : 5,20 € par repas, identique au code) | établiable (sonde en échec le 15/10/2026) | **établi** | non disponible |
-| Barème kilométrique | établiable (même aide : barème 3 à 7 CV et majoration électrique 20 % identiques au code) | établiable (sonde en échec le 15/10/2026) | **établi** | non disponible |
+| Abattement salariés 10 % | établiable (aide du millésime 2024 relue le 15/10/2026 : 495 € / 14 171 €, identique au code) | établiable (aide du millésime 2025 relue par indexation le 15/10/2026 : 504 € / 14 426 €, identique au code) | **établi** | non disponible |
+| Forfait repas | établiable (même aide : 5,20 € par repas, identique au code) | établiable, **valeur non recoupée** (extrait tronqué : le forfait 2024 n'a pas été relu) | **établi** | non disponible |
+| Barème kilométrique | établiable (même aide : barème 3 à 7 CV et majoration électrique 20 % identiques au code) | établiable (3 CV et 4 CV relus, identiques au code ; 5 à 7 CV non relus) | **établi** | non disponible |
 | PS plus-values de titres | établiable (aide du millésime 2024 relue à distance le 14/10/2026 : 17,2 %) | établiable (aide du millésime 2025 relue à distance le 15/10/2026 : 17,2 %) | **établi** (divergence signalée) | non disponible |
 | PS cessions crypto privées | partiel | partiel | **recoupement** (non activé) | non disponible |
 | RCM : produit, année, précompte, 2OP, 2CG/2BH/2DF | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
@@ -378,7 +378,7 @@ professionnels » du simulateur, millésime déclaration 2024) — relue le
 > 2041 GP pour le télétravail.
 
 Recoupement avec le code, vérifié hors réseau par
-`tests/test_fiscal_frais_revenus_2023_reel.js` :
+`tests/test_fiscal_frais_millesimes_reels.js` :
 
 | Paramètre revenus 2023 | Page officielle | Moteur embarqué | Verdict |
 | --- | --- | --- | --- |
@@ -397,12 +397,32 @@ aussi les refus : `forfaitRepas(2026)` renvoie `null`, `fraisKilometriques(…,
 kilométrique », et une preuve des revenus 2023 ne remplit **aucune** case frais
 de 2024, 2025 ou 2026.
 
-**Revenus 2024 — frais professionnels** : la sonde du 15/10/2026 sur
-`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/frais.htm`
-n'a **pas abouti** (échec d'accès distant, et non absence de publication).
-Aucune valeur des revenus 2024 n'est donc relue : les trois cases frais de 2024
-restent « établiables » et ne deviennent « établi » qu'après lecture réussie par
-le bouton. Rien n'est déduit de l'échec, et aucune valeur de 2023 n'est reportée.
+**Revenus 2024 — frais professionnels** (aide du millésime déclaration 2025) —
+`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/frais.htm`.
+L'accès direct a **échoué** le 15/10/2026 ; le texte a été lu par indexation, et
+l'extrait est **tronqué** :
+
+> « Pour les revenus perçus en **2024**, le minimum de déduction est de
+> **504 €**, le maximum de **14 426 €** » ; frais « payés au cours de l'année
+> **2024** », cases 1AK à 1DK ; barème automobiles — 3 CV et moins : d ×
+> **0,529** / (d × **0,316**) + **1 065** / d × **0,370** ; 4 CV : 0,606 / 0,340
+> + 1 330 / 0,407 ; seuils 5 000 et 20 000 km ; « Le barème pour les véhicules
+> 100 % électriques correspond au barème applicable ci-dessous **majoré de
+> 20 %** » ; tarif 2 roues 1 ou 2 CV : 0,395 / (0,099) + 891 / 0,248.
+
+Recoupement : `PLANCHER_ABATTEMENT_10[2024]` = 504 et
+`PLAFOND_ABATTEMENT_10[2024]` = 14 426 sont **identiques** à la source, comme le
+barème 3 CV et 4 CV et la majoration électrique de 20 %.
+
+**Ce qui n'a PAS été relu pour 2024, et n'est donc pas recoupé** : le forfait
+repas (l'extrait indexé s'arrête avant) et les tranches 5 CV, 6 CV et 7 CV et
+plus. Le code porte `FORFAIT_REPAS[2024]` = 5.35 et les tranches 5 à 7 CV : ces
+valeurs restent des **hypothèses embarquées**, non confirmées par une source au
+15/10/2026. `tests/test_fiscal_frais_millesimes_reels.js` les fige en le disant
+explicitement — un test qui fige le code ne prouve pas la valeur officielle.
+Rien n'est déduit de l'échec d'accès, et aucune valeur de 2023 n'est reportée sur
+2024 (le forfait repas 2023 est 5,20 €, celui de 2024 est 5,35 € dans le code :
+le test vérifie qu'ils diffèrent).
 
 ### 5.2 Points 2 et 3 — libellés officiels des cases RCM et CSG, relus le 15/10/2026
 
@@ -513,7 +533,7 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
-| `tests/test_fiscal_frais_revenus_2023_reel.js` | **recoupement du moteur par la source officielle** des revenus 2023 (aide frais.htm lue le 15/10/2026) : plancher 495 €/plafond 14 171 €, forfait repas 5,20 €, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve 2023 sans effet sur 2024/2025/2026 ; famille `frais` des vérifications distantes et trace de la sonde 2024 en échec |
+| `tests/test_fiscal_frais_millesimes_reels.js` | **recoupement du moteur par les sources officielles** des revenus 2023 (aide frais.htm lue le 15/10/2026) et 2024 (lue par indexation) : plancher 495 €/plafond 14 171 € et forfait repas 5,20 € pour 2023, plancher 504 €/plafond 14 426 € et barème 3-4 CV pour 2024, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; forfait repas 2024 et tranches 5 à 7 CV 2024 explicitement **non recoupés** ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve d'un millésime sans effet sur les autres ; famille `frais` des vérifications distantes et limites de lecture 2024 |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,

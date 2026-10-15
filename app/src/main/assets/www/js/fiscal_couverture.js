@@ -372,11 +372,19 @@
                 + 'et refuse toute page d’une autre année' },
         { date: '2026-10-15', millesime: 2024, categorie: 'frais',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/frais.htm',
-            constate: 'sonde en échec le 15/10/2026 : ni l’abattement 10 %, ni le forfait repas, ni le barème '
-                + 'kilométrique des revenus 2024 n’ont pu être relus à distance',
-            portée: 'les trois cases frais des revenus 2024 restent à établir par le bouton ; aucune valeur de '
-                + '2023 n’est reportée sur 2024',
-            limite: 'échec d’accès distant et non absence de publication : à re-vérifier, sans rien déduire' },
+            constate: '« Pour les revenus perçus en 2024, le minimum de déduction est de 504 €, le maximum de '
+                + '14 426 € » ; frais « payés au cours de l’année 2024 », cases 1AK à 1DK ; barème automobiles '
+                + '3 CV et moins : d × 0,529 / (d × 0,316) + 1 065 / d × 0,370 ; 4 CV : 0,606 / 0,340 + 1 330 / '
+                + '0,407 ; seuils 5 000 et 20 000 km ; « Le barème pour les véhicules 100 % électriques correspond '
+                + 'au barème applicable ci-dessous majoré de 20 % » ; tarif 2 roues 1 ou 2 CV : 0,395 / '
+                + '(0,099) + 891 / 0,248',
+            portée: 'identique aux constantes embarquées PLANCHER_ABATTEMENT_10[2024] = 504, '
+                + 'PLAFOND_ABATTEMENT_10[2024] = 14 426 et au barème km 3 CV et 4 CV : pour ces cases '
+                + 'l’hypothèse recopiée cesse d’en être une. Le lecteur lireKm exige de toute façon '
+                + '« Pour les revenus perçus en 2024 » sur la page du millésime déclaration 2025',
+            limite: 'accès direct en échec le 15/10/2026, texte lu par indexation et extrait tronqué : le forfait '
+                + 'repas 2024 et les tranches 5 CV à 7 CV et plus n’ont PAS été relus. FORFAIT_REPAS[2024] = 5.35 '
+                + 'reste non recoupé par une source, à vérifier au clic' },
         { date: '2026-10-14', millesime: 2025, categorie: 'ps_titres',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm',
             constate: 'PFU de 12,8 % + PS de 18,6 % = 31,4 % ; « Si, en 2025 … »',
