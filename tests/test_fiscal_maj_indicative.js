@@ -71,7 +71,11 @@ const transactions = { transactions: [] };
     assert.match(bilan, /collecte partielle DGFiP/);
     assert.doesNotMatch(bilan, /12000|OpenFisca/);
     assert.match(bilan, /non disponible/);
-    assert.throws(() => f.baremeDe(2027), /Aucun barème enregistré/);
+    // Un millésime postérieur au dernier embarqué n'est pas « absent du code » : il
+    // est refusé tant que la DGFiP ne l'a pas publié et qu'il n'a pas été collecté.
+    assert.throws(() => f.baremeDe(2027), /Revenus 2027 : barème, décote ou plafond QF DGFiP non disponible/);
+    assert.equal(f.annéeSimulable(2027), false, 'revenus 2027 non simulables sans collecte');
+    assert.ok(f.annéesSimulables().indexOf(2027) < 0, 'revenus 2027 absents de l’écran');
     compte = 'b';
     await f.actualiserRevisions(transactions);
     assert.throws(() => f.baremeDe(2026), /non disponible/);

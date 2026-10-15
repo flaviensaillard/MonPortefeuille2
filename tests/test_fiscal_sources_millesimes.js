@@ -82,9 +82,40 @@ S.familles().forEach(f => assert.equal(S.source(2026, f).url, null,
     `revenus 2026 · ${f} : rien n’est publié, aucune URL`));
 S.familles().forEach(f => assert.equal(S.url(2026, f), null));
 assert.equal(S.source(2022, 'boi_ir'), null, 'millésime hors inventaire');
-assert.equal(S.source(2027, 'boi_ir'), null, 'millésime futur hors inventaire');
+// Un millésime à venir est DÉCRIT, jamais inventé : les 11 familles sont absentes,
+// aucune adresse n'est fabriquée, aucune lecture n'est autorisée.
+const s27 = S.source(2027, 'boi_ir');
+assert.equal(s27.url, null, 'revenus 2027 : aucune adresse inventée');
+assert.equal(s27.lectureVerifiee, false);
+assert.equal(s27.lectureAutorisee, false);
+assert.equal(s27.publiee, false);
+assert.equal(S.etatDe(s27), 'absente');
+assert.equal(s27.anneeDeclaration, 2028, 'revenus 2027 = déclaration 2028');
+assert.match(s27.constat, /printemps 2028/);
+assert.match(s27.constat, /adresse à construire d’après le motif/);
 assert.equal(S.url(2027, 'boi_ir'), null);
-assert.equal(S.calendrier(2027), null);
+assert.equal(S.toutes(2027).length, 11, 'les 11 familles sont décrites pour 2027');
+assert.equal(S.lisibles(2027).length, 0, 'rien n’est lisible avant publication');
+assert.equal(S.manquantes(2027).length, 11);
+assert.equal(S.millésimes().join(','), '2023,2024,2025,2026',
+    'les comptes de l’inventaire ne bougent pas : 2027 n’est pas un millésime décrit');
+const cal27 = S.calendrier(2027);
+assert.equal(cal27.anneeDeclaration, 2028);
+assert.equal(cal27.publié, false);
+assert.match(cal27.bofip, /attendue au printemps 2028/);
+assert.match(cal27.brochures, /ir_2028/);
+assert.match(cal27.simulateur, /calcul_impot\/2028/);
+assert.match(cal27.formulaire2086, /notice 2086 du millésime 2028/);
+const h27 = S.horizon(2027);
+assert.equal(h27.anneeDeclaration, 2028);
+assert.equal(h27.automatique.join(','), 'boi_ir,boi_decote,boi_qf,aide_frais,aide_gains,aide_repas',
+    'six familles se collectent sans inscription nouvelle');
+assert.equal(h27.aInscrire.join(','),
+    'brochure_rcm,brochure_charges,brochure_plus_values,notice_2086,nouveautes',
+    'cinq familles PDF exigent une inscription : leur nom de fichier ne se devine pas');
+assert.match(h27.rappel, /refusent sans appel réseau/);
+assert.equal(S.horizon(2026), null, 'horizon réservé aux millésimes à venir');
+assert.equal(S.millésime(2022), null, 'millésime antérieur à l’inventaire');
 
 // Trois états : vérifiée, autorisée sous réserve, absente.
 assert.equal(S.etatDe(S.source(2025, 'brochure_charges')), 'lisible-vérifiée');
@@ -191,7 +222,11 @@ assert.match(t2024, /dont 6\/11 au jeu de preuves vérifié/);
 assert.match(t2024, /aucune URL inventée/);
 assert.match(t2024, /Calendrier :/);
 assert.match(S.texte(2026), /0\/11/);
-assert.equal(S.texte(2027), 'Millésime hors inventaire : 2027.');
+assert.equal(S.texte(2022), 'Millésime hors inventaire : 2022.', 'millésime antérieur');
+assert.match(S.texte(2027), /revenus 2027 \(déclaration 2028\) : 0\/11 familles lisibles/,
+    'millésime à venir : décrit, rien de lisible');
+assert.match(S.texte(2027), /attendue au printemps 2028/);
+assert.doesNotMatch(S.texte(2027), /https?:\/\//, 'aucune adresse inventée dans le texte');
 // Chaque famille dont le constat dit « corrigé le 16/10/2026 » a sa correction
 // tracée dans le journal, avec la valeur officielle et la valeur d'avant.
 S.millésimes().forEach(an => S.toutes(an).forEach(s => {

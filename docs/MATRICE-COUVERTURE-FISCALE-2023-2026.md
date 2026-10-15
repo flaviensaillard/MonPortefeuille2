@@ -775,7 +775,77 @@ URL de ce millésime (`urlSource`), jamais celles d'une autre année.
 Aucune constante du moteur, aucune migration, aucune donnée personnelle, aucune
 version d'APK. Un inventaire de sources n'établit rien par lui-même : sans collecte
 du propriétaire, les 52 cases restent « non disponible », `basculeComplete` reste
-`false`, et les divergences du §5.3 restent affichées comme divergences.
+`false`, et les corrections du §5.3 restent affichées comme corrections : une valeur
+officielle appliquée au code n'est pas une preuve lue par l'application.
+
+### 7.6 Revenus 2027, 2028, 2029 : ce qui se passe quand vous cliquez
+
+Question du propriétaire le 16/10/2026 : « pour 2027, 2028, 2029, etc., j'aurai bien
+les données en cliquant sur le bouton ? » Réponse vérifiée dans le code et démontrée
+par `tests/test_fiscal_millesime_futur.js` (printemps 2028 simulé, revenus 2027
+fictifs : barème 11 700 / 29 800 / 85 200 / 183 300 €, décote 905 € / 1 496 €,
+plafond QF 1 823 € — ces nombres prouvent le chemin, ils n'annoncent rien).
+
+**Six familles se collectent sans aucune modification de code** :
+
+| Famille | Adresse demandée | Garde qui empêche d'inventer |
+| --- | --- | --- |
+| Barème IR | `bofip.impots.gouv.fr/doctrine/BOI-IR-LIQ-20-10` (version en vigueur) | « Le barème pour l'imposition des revenus de l'année **2027** » + `Identifiant juridique` + tableau à 4 seuils croissants |
+| Décote | `…/doctrine/BOI-IR-LIQ-20-20-30` | « Pour l'imposition des revenus de **2027**, cette décote … » + seuil = base / 45,25 % |
+| Plafond QF | `…/doctrine/BOI-IR-LIQ-20-20-20` | « … à compter de l'imposition des revenus de l'année **2027** » |
+| Frais km et abattement 10 % | `simulateur-ir-ifi.impots.gouv.fr/calcul_impot/**2028**/aides/frais.htm` | « Pour les revenus perçus en **2027** », « Tarif : automobiles », seuils 5 000 et 20 000 km, majoration de 20 % des électriques, cinq lignes de barème |
+| Forfait repas | `impots.gouv.fr/particulier/frais-de-repas` | « Pour l'imposition des revenus **2027**, la valeur d'un repas pris au foyer est de … » |
+| PS des plus-values de titres | `…/calcul_impot/**2028**/aides/gains.htm` | « Si, en **2027**, vous ou les membres de votre foyer fiscal avez vendu des valeurs mobilières … » + PFU, case 2OP, titres antérieurs au 01/01/2018 |
+
+L'adresse courte `/doctrine/<identifiant>` a été vérifiée le 16/10/2026 : elle
+redirige, sur le même hôte, vers le permalien verrouillé de la version en vigueur
+(`/bofip/2491-PGP.html/identifiant=BOI-IR-LIQ-20-10-20260407`). C'est la seule
+famille de liens que le pont Android résout (`NativeBridge.java` : redirections
+désactivées, puis résolution explicite de
+`https://bofip.impots.gouv.fr/doctrine/BOI-IR-LIQ-20-` vers
+`/bofip/(2491|2494|2495)-PGP.html/identifiant=BOI-IR-LIQ-20-.*`). À partir des
+revenus 2026, le lecteur exige en plus la ligne « Date de début de publication du
+BOI : JJ/MM/AAAA » et **déduit** de cette date le permalien verrouillé qu'il
+conserve : aucune date de version n'est codée en dur pour un millésime futur.
+
+**Cinq verrous ont sauté ce round** — sans eux, le clic de 2028 n'aurait rien donné :
+
+1. les caches n'étaient relus que pour les années embarquées (`annees()`, soit les
+   clés de `BAREMES`) : un millésime collecté en 2028 n'aurait jamais été chargé.
+   La borne est glissante (`annéesCachables()` : 2023 → année courante) ;
+2. `baremeDe(2027)` refusait « Aucun barème enregistré » **avant** de regarder la
+   collecte. À partir des revenus 2026, un millésime complet — barème, décote,
+   plafond QF et frais salariés — est calculable sans aucune constante embarquée
+   (`millésimeComplet`, `annéeSimulable`, `annéesSimulables`) ;
+3. mêmes verrous sur `abattement10` et `fraisKilometriques` : les plancher, plafond
+   et barème kilométrique **collectés** ouvrent désormais le millésime ;
+4. le bouton « tout vérifier » parcourait `[2023, 2024, 2025, 2026]` écrit en dur et
+   l'écran affichait « Vérifier les revenus 2023 à 2026 » : la plage
+   (`plageCollecte()`) et les trois libellés (`libelléPlage()`) sont construits et
+   s'étendent seuls au 1er janvier ;
+5. `verifierMaj` comparait l'année civile au dernier millésime connu et nommait
+   **2028** alors que le millésime visé est 2027 : la garde porte désormais sur le
+   millésime demandé.
+
+**Cinq familles exigent toujours une inscription dans l'inventaire** :
+`brochure_rcm`, `brochure_charges`, `brochure_plus_values`, `notice_2086`,
+`nouveautes`. Leur nom de fichier change chaque millésime (`08-RCM_121a136.pdf`,
+`12-charges_ded_rev_225a236.pdf`, `2086_5515.pdf`) et ne se devine pas. Sans adresse
+vérifiée, le lecteur **refuse sans appel réseau** et dit quoi chercher :
+`horizon(2027).aInscrire` liste ces cinq familles, chaque famille porte son `motif`
+de construction, et `calendrier(2027)` donne les fenêtres attendues (BOFiP au
+printemps 2028, brochure `ir_2028`, aides `calcul_impot/2028`, notice 2086 du
+millésime 2028). C'est une inscription de données dans `fiscal_sources_millesimes.js`,
+pas une modification de moteur ni de lecteur — et les comptes de l'inventaire
+(`millésimes()` = 2023 à 2026) ne bougent pas.
+
+**Ce qui ne change pas** : sans publication, le clic renvoie « année des revenus 2027
+absente ou texte illisible » et la simulation reste suspendue ; une collecte
+partielle (BOFiP sans frais salariés) n'ouvre rien ; les taux de PS des revenus
+mobiliers (RCM) d'un millésime futur ne se déduisent pas de l'aide « gains » — sans
+révision publiée, `tauxPSRevenuMobilier(2027, …)` refuse ; aucune valeur d'une autre
+année n'est recopiée ; `basculeComplete` reste `false` tant que les 52 cases ne sont
+pas établies.
 
 ## 8. Tests
 
@@ -788,6 +858,7 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
+| `tests/test_fiscal_millesime_futur.js` | **millésime futur de bout en bout** (printemps 2028 simulé, revenus 2027 fictifs) : avant collecte, refus explicite (« Revenus 2027 : barème, décote ou plafond QF DGFiP non disponible »), millésime absent de l'écran, aucune constante ajoutée (`annees()` reste 2022-2026), plage du bouton déjà étendue à 2023-2027 et libellé construit (plus aucun « 2023 à 2026 » en dur) ; collecte des trois documents BOFiP **par l'adresse courte `/doctrine/`**, avec le permalien verrouillé et la date de publication **déduits** de la page lue (11/04/2028), plus frais salariés et PS des titres ; après collecte, `baremeDe`, `plafondQF`, `tauxPS`, `forfaitRepas`, `abattement10` (plancher 520 €, plafond 14 900 €) et `fraisKilometriques` calculent les revenus 2027 sans constante embarquée, la puce 2027 apparaît, `verifierMaj` ne dit plus « absents », `revisionPubliee` reste `false` ; collecte partielle (BOFiP seul, aides du simulateur absentes) → millésime incomplet, `baremeDe` refuse, l'écran dit « calcul fiscal indisponible » ; non-régressions : revenus 2026 toujours suspendus sans collecte, R2 2025 intacte (11 600 / 29 579 / 84 577 / 181 917 €, décote 897 €, QF 1 807 €), valeurs officielles 2024 conservées (11 497 €, QF 1 791 €) ; inventaire : `horizon(2027)` = 6 familles automatiques et 5 familles PDF à inscrire, `toutes(2027)` = 11 familles absentes, aucune URL inventée, comptes de l'inventaire inchangés |
 | `tests/test_fiscal_corrections_officielles.js` | **journal des corrections du 16/10/2026** : 6 entrées (décote et plafond QF 2022, décote 2023, barème, décote et plafond QF 2024), chacune avec son permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi (ou l'aveu qu'elle n'a pas été relue), le passage verbatim citant l'année des revenus, la valeur officielle, la valeur **avant** correction, l'écart, l'effet et l'arbitrage ; le moteur porte désormais les valeurs officielles ; cohérence interne des décotes (seuil = base / 45,25 %) ; chaque millésime garde ses propres seuils (10 777 / 11 294 / 11 497 / 11 600) et son propre plafond QF (1 678 / 1 759 / 1 791 / 1 807) ; **correction ≠ collecte** : cases 2023/2024 toujours « non disponible » sans collecte, avec la mention « corrigée le 16/10/2026 » et « correction ≠ collecte », aucune alerte de divergence subsistante, cases 2023 barème et QF sans mention (déjà conformes) ; après collecte du millésime 2024 les trois cases passent « établi » et la mention laisse place à la preuve lue ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, `tauxPFU` 31,4 %, comparaison 2OP/PFU stable) et bascule totale toujours `false` |
 | `tests/test_valeurs_officielles_corrigees.py` | **jumeau Python** : barèmes et décotes officiels 2022-2024, plafonds QF 1 678/1 759/1 791/1 807, valeurs d'avant correction absentes, provenance affichée (« BOFiP », « 16/10/2026 », plus de « non vérifiées ») ; **parité JS ↔ Python** lue directement dans `fiscal.js` (tranches, décotes, plafond QF, 2026 provisoire des deux côtés) ; calculs avec les valeurs officielles (décote 2024 = 436,50 € pour 1 000 € d'impôt brut, écart de 35 € avec l'ancienne valeur, revenu sous la première tranche sans impôt, plafonnement QF 2024 = 2 × 1 791 €) ; millésimes non reconduits ; refus de 2027 ; revenus 2025 inchangés |
 | `tests/test_fiscal_crypto_pdf_sources.js` | notice 2086 et chapitre plus-values : preuves indépendantes, millésime exact, rectifications, non-activation — **étendu à la pérennité** : notices 16043\*05 (revenus 2023) et 16043\*06 (revenus 2024) repérées dans les brochures, ancres paramétrées par année de cessions (un texte 2024 lu pour 2024, jamais par défaut ni pour 2023), collecte 2024 réussie **sans modifier le lecteur**, chapitre plus-values ir_2025 non repéré → refus sans URL inventée, revenus 2026 → aucun appel réseau, caches isolés par millésime, ancienne clé sans millésime toujours lue pour 2025 et jamais reportée, `psCrypto2025Attestes` et `annexeFoyerComplete` toujours `false` |
@@ -804,4 +875,4 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 49 suites JavaScript sont vertes en local, et 936 tests Python.
+modification : les 50 suites JavaScript sont vertes en local, et 936 tests Python.

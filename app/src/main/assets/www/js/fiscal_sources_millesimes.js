@@ -224,14 +224,45 @@
         }
     };
 
+    /* Familles dont l'adresse se construit à partir de l'année des revenus, sans
+       qu'aucune valeur ne soit devinée : permaliens BOFiP (repli sur la version en
+       vigueur, `/bofip/doctrine/<identifiant>`, avec ancre sur l'année) et aides du
+       simulateur (`calcul_impot/<année+1>/aides/…`, page des frais de repas). */
+    var AUTOMATIQUES = ['boi_ir', 'boi_decote', 'boi_qf', 'aide_frais', 'aide_gains', 'aide_repas'];
+
     function familles() { return Object.keys(SOURCES); }
     function millésimes() { return Object.keys(MILLESIMES).map(Number); }
 
+    /* Millésime à venir (revenus 2027 et suivants) : la table ne contient rien, et
+       rien n'est inventé. L'entrée générée dit seulement quelle déclaration
+       correspond, que les documents ne sont pas attendus avant le printemps de
+       cette déclaration, et que l'adresse se construira d'après le `motif` de la
+       famille une fois le document publié. `millésimes()` reste limité aux
+       millésimes décrits : les comptes (lisibles, vérifiées) ne bougent pas. */
+    function millésime(annee) {
+        if (!Number.isInteger(annee) || annee < 2023) return null;
+        if (MILLESIMES[annee]) return MILLESIMES[annee];
+        return { declaration: annee + 1, publicationBoi: null, documentsAttendus: false,
+            aVenir: true };
+    }
+    function millésimesÀVenir() {
+        var connus = millésimes(), borne = new Date().getFullYear(), liste = [];
+        for (var an = connus[connus.length - 1] + 1; an <= borne; an++) liste.push(an);
+        return liste;
+    }
+
     function source(annee, famille) {
         var f = SOURCES[famille];
-        if (!f || !MILLESIMES[annee]) return null;
+        var m = millésime(annee);
+        if (!f || !m) return null;
         var s = f.parAnnee[annee];
-        if (!s) return null;
+        if (!s) {
+            if (!m.aVenir) return null;
+            s = { url: null, verifieeLe: null, lectureVerifiee: false, lectureAutorisee: false,
+                constat: 'millésime revenus ' + annee + ' : aucun document publié ni repéré ; à '
+                    + 'chercher au printemps ' + m.declaration + ', adresse à construire d’après le '
+                    + 'motif une fois le document publié' };
+        }
         /* `lectureVerifiee` : le jeu de preuves du lecteur a été confirmé sur le
            document réel de ce millésime. `lectureAutorisee` : la lecture peut être
            tentée parce que l'ancre portante (l'année des revenus) a été vérifiée
@@ -240,7 +271,7 @@
            Par défaut, autoriser = avoir vérifié. */
         var verifiee = !!s.lectureVerifiee;
         return { famille: famille, libelle: f.libelle, lecteur: f.lecteur, motif: f.motif,
-            anneeRevenus: annee, anneeDeclaration: MILLESIMES[annee].declaration,
+            anneeRevenus: annee, anneeDeclaration: m.declaration,
             url: s.url, verifieeLe: s.verifieeLe, lectureVerifiee: verifiee,
             lectureAutorisee: s.lectureAutorisee !== undefined ? !!s.lectureAutorisee : verifiee,
             publiee: !!s.url, constat: s.constat };
@@ -281,7 +312,7 @@
     /* Fenêtres de publication observées, pour savoir QUAND chercher — jamais
        pour fabriquer une URL ou une valeur. */
     function calendrier(annee) {
-        var m = MILLESIMES[annee];
+        var m = millésime(annee);
         if (!m) return null;
         return {
             anneeRevenus: annee, anneeDeclaration: m.declaration,
@@ -301,6 +332,31 @@
                 return { famille: s.famille, libelle: s.libelle, motif: s.motif,
                     urlReperee: s.url, lectureVerifiee: s.lectureVerifiee, manque: s.constat };
             });
+    }
+
+    /* Ligne d'horizon : pour les revenus à venir, ce qui est automatique (les
+       lecteurs construisent leurs adresses et leurs ancres par année) et ce qui
+       exige une inscription dans cette table (les brochures PDF, dont le nom de
+       fichier change chaque année et ne se devine pas). */
+    function horizon(annee) {
+        var m = millésime(annee);
+        if (!m || !m.aVenir) return null;
+        var cal = calendrier(annee);
+        return {
+            anneeRevenus: annee, anneeDeclaration: m.declaration,
+            /* Adresses construites par année par le lecteur lui-même : aucune
+               inscription dans cette table n'est nécessaire pour les collecter. */
+            automatique: AUTOMATIQUES.filter(function (fam) { return !!SOURCES[fam]; }),
+            /* Brochures et notices PDF : le nom de fichier change chaque millésime
+               (08-RCM_121a136.pdf, 12-charges_ded_rev_225a236.pdf, 2086_5515.pdf…)
+               et ne se devine pas. Sans inscription, le lecteur refuse sans appel
+               réseau et dit quoi chercher. */
+            aInscrire: familles().filter(function (fam) { return AUTOMATIQUES.indexOf(fam) < 0; }),
+            fenetres: cal,
+            automatiques: AUTOMATIQUES.slice(),
+            rappel: 'les lecteurs refusent sans appel réseau tant que le document n’est pas repéré ; '
+                + 'aucune adresse n’est devinée et aucune valeur d’une autre année n’est recopiée'
+        };
     }
 
     function inventaire() {
@@ -336,6 +392,7 @@
 
     PF.fiscalSourcesMillesimes = {
         MILLESIMES: MILLESIMES, SOURCES: SOURCES, familles: familles, millésimes: millésimes,
+        millésime: millésime, millésimesÀVenir: millésimesÀVenir, horizon: horizon,
         source: source, toutes: toutes, lisibles: lisibles, verifiees: verifiees, etatDe: etatDe,
         manquantes: manquantes, url: url,
         motif: motif, prochainMillésime: prochainMillésime, calendrier: calendrier,

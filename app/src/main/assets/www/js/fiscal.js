@@ -118,21 +118,35 @@
         contexteRevisions = null;
         etatR2 = 'non lue';
     }
+    /* Millésimes dont un cache DGFiP peut exister : les années embarquées, plus
+       tout millésime jusqu'à l'année courante — les documents des revenus N
+       paraissent en N+1, donc un millésime postérieur au dernier embarqué peut
+       avoir été collecté sans que le code ait changé. Lire un cache absent ne
+       coûte rien et n'invente rien : la valeur vient du document lu, jamais d'une
+       autre année. */
+    function annéesCachables() {
+        var embarquees = annees();
+        var borne = Math.max(embarquees[embarquees.length - 1], new Date().getFullYear());
+        var liste = [];
+        for (var an = 2023; an <= borne; an++) liste.push(an);
+        return liste;
+    }
     function chargerCachesDgfip(compte) {
         if (!compte || !compte.id) return;
-        if (PF.fiscalFraisSources) annees().forEach(function (an) {
-            if (an >= 2023) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+        var cibles = annéesCachables();
+        if (PF.fiscalFraisSources) cibles.forEach(function (an) {
+            fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
         });
-        if (PF.fiscalDgfipSources) annees().forEach(function (an) {
-            if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
+        if (PF.fiscalDgfipSources) cibles.forEach(function (an) {
+            officiels[an] = PF.fiscalDgfipSources.lireCache(an);
         });
-        if (PF.fiscalRegimesSources) annees().forEach(function (an) {
-            if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
+        if (PF.fiscalRegimesSources) cibles.forEach(function (an) {
+            titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
         });
         // Le recoupement PS crypto est relu et REVALIDÉ à chaque lecture : une
         // ligne en cache n'est jamais une preuve en soi.
-        if (PF.fiscalCryptoPsRecoupement) annees().forEach(function (an) {
-            if (an >= 2023) recoupementsCrypto[an] = PF.fiscalCryptoPsRecoupement.lireCache(an);
+        if (PF.fiscalCryptoPsRecoupement) cibles.forEach(function (an) {
+            recoupementsCrypto[an] = PF.fiscalCryptoPsRecoupement.lireCache(an);
         });
     }
     function perimetreR2(ctx) {
@@ -203,6 +217,45 @@
 
     function annees() { return Object.keys(BAREMES).map(Number).sort(function (a, b) { return a - b; }); }
     function derniereAnnee() { var a = annees(); return a[a.length - 1]; }
+
+    /* Un millésime est complet quand les quatre familles que le moteur exige ont
+       été LUES pour cette année de revenus : barème, décote, plafond QF (BOFiP) et
+       frais salariés (aide du simulateur). À partir des revenus 2026, c'est la
+       seule voie : aucune constante embarquée n'est utilisée, aucune valeur d'une
+       autre année n'est recopiée. */
+    function millésimeComplet(annee) {
+        var o = officiels[annee] || {}, fr = fraisOfficiels[annee] || {};
+        return !!(o.ir && o.decote && o.qf && fr.repas && fr.km && fr.abatt);
+    }
+    function annéeSimulable(annee) {
+        if (paramsActifs(annee)) return true;
+        if (annee >= 2026) return millésimeComplet(annee);
+        return !!BAREMES[annee];
+    }
+    /* Années proposées à l'écran et au bilan : les millésimes embarqués, plus ceux
+       qu'une collecte complète a rendus utilisables (revenus 2027 collectés au
+       printemps 2028, 2029 collectés en 2030, etc.). */
+    /* Plage parcourue par le bouton « tout vérifier » : du premier millésime décrit
+       (2023) jusqu'à l'année des revenus en cours de déclaration. Elle s'étend seule
+       au 1er janvier : au printemps 2028 le bouton proposera les revenus 2027 sans
+       qu'aucune constante, aucun libellé ni aucune liste n'ait été modifié. */
+    function plageCollecte() {
+        var borne = Math.max(derniereAnnee(), new Date().getFullYear() - 1);
+        var liste = [];
+        for (var an = 2023; an <= borne; an++) liste.push(an);
+        return liste;
+    }
+    function libelléPlage() {
+        var p = plageCollecte();
+        return p.length > 1 ? p[0] + ' à ' + p[p.length - 1] : String(p[0]);
+    }
+    function annéesSimulables() {
+        var liste = annees().slice();
+        annéesCachables().forEach(function (an) {
+            if (liste.indexOf(an) < 0 && annéeSimulable(an)) liste.push(an);
+        });
+        return liste.sort(function (a, b) { return a - b; });
+    }
     function baremeDe(annee) {
         var p = paramsActifs(annee);
         if (p) {
@@ -211,14 +264,17 @@
                 dcPlafond: b.decote_plafond_celibataire, dcCouple: b.decote_base_couple,
                 dcPlafondCouple: b.decote_plafond_couple };
         }
-        if (!BAREMES[annee]) throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : ' + annees().join(', ') + '.');
         var officiel = officiels[annee] || {};
-        var embarque = BAREMES[annee];
-        // 2026 ne peut pas simuler l'IR avec le barème recopié de 2025.
-        if (annee >= 2026 && (!officiel.ir || !officiel.decote || !officiel.qf ||
-            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
-            !fraisOfficiels[annee].abatt))
+        var embarque = BAREMES[annee] || {};
+        // À partir des revenus 2026, un millésime n'existe que s'il a été collecté :
+        // ni constante provisoire, ni barème recopié d'une autre année. Un millésime
+        // postérieur au dernier embarqué (2027, 2028…) devient donc calculable par la
+        // seule collecte, sans modification du code.
+        if (annee >= 2026 && !millésimeComplet(annee))
             throw new Error('Revenus ' + annee + ' : barème, décote ou plafond QF DGFiP non disponible ; simulation suspendue.');
+        if (!BAREMES[annee] && !millésimeComplet(annee))
+            throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : '
+                + annéesSimulables().join(', ') + '.');
         return { tranches: officiel.ir ? officiel.ir.tranches : embarque.tranches,
             taux: officiel.ir ? officiel.ir.taux : embarque.taux,
             dc: officiel.decote ? officiel.decote.dc : embarque.dc,
@@ -344,11 +400,15 @@
     }
 
     function abattement10(salaire, annee) {
-        if (!paramsActifs(annee) && (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined))
+        /* Plancher et plafond : révision publiée, aide officielle du millésime
+           collectée, ou à défaut constante embarquée. Un millésime futur (2027 et
+           suivants) n'a pas de constante : seule sa collecte l'ouvre. */
+        var frais = fraisOfficiels[annee] && fraisOfficiels[annee].abatt;
+        if (!paramsActifs(annee) && !frais &&
+            (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined))
             throw new Error('Aucun abattement 10 % pour les revenus ' + annee + '.');
         var sal = Math.max(0, U.num(salaire, 0));
         if (sal <= 0) return 0;
-        var frais = fraisOfficiels[annee] && fraisOfficiels[annee].abatt;
         var plancher = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plancher : frais ? frais.min : PLANCHER_ABATTEMENT_10[annee];
         var plafond = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plafond : frais ? frais.max : PLAFOND_ABATTEMENT_10[annee];
         return euro2025(Math.min(Math.max(sal * (paramsActifs(annee) ? paramsActifs(annee).abattement_10.taux : TAUX_ABATTEMENT_SALAIRES), Math.min(sal, plancher)), plafond), annee);
@@ -402,12 +462,14 @@
     }
 
     function fraisKilometriques(km, cv, electrique, annee) {
-        if (!paramsActifs(annee) && !BAREME_KM_PAR_ANNEE[annee])
+        /* Même règle : révision publiée, barème officiel du millésime collecté, ou
+           constante embarquée. Un millésime futur s'ouvre par sa seule collecte. */
+        var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
+        if (!paramsActifs(annee) && !sourceKm && !BAREME_KM_PAR_ANNEE[annee])
             throw new Error('Aucun barème kilométrique pour les revenus ' + annee + '.');
         var d = Math.max(0, U.num(km, 0));
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
-        var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
         if (annee >= 2026 && !sourceKm && !paramsActifs(annee))
             throw new Error('Barème kilométrique DGFiP des revenus ' + annee + ' non disponible.');
         var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle]
@@ -534,10 +596,16 @@
         var an = auj.getFullYear();
         var cible = anneeCible || an;
         var derniere = derniereAnnee();
-        if (an > derniere || cible > derniere) {
+        var simulables = annéesSimulables();
+        var borne = Math.max(derniere, simulables[simulables.length - 1]);
+        /* La garde porte sur le MILLÉSIME DEMANDÉ, pas sur l'année civile : en 2028
+           le millésime à déclarer est 2027, et c'est 2027 qui doit être nommé. Un
+           millésime connu mais non collecté tombe dans les branches suivantes, qui
+           disent exactement ce qui manque. */
+        if (cible > borne) {
             return {
-                disponible: true, derniere_annee: derniere, url: URL_MAJ_BAREMES,
-                message: 'Revenus ' + Math.max(an, cible) + ' absents (dernier millésime : ' + derniere
+                disponible: true, derniere_annee: borne, url: URL_MAJ_BAREMES,
+                message: 'Revenus ' + cible + ' absents (dernier millésime : ' + borne
                     + '). Vérifiez leur publication officielle avant tout ajout.'
             };
         }
@@ -1210,20 +1278,17 @@
         var out = '';
         var maj = verifierMaj(annee);
 
-        out += '<div class="chips">' + annees().map(function (a) {
+        out += '<div class="chips">' + annéesSimulables().map(function (a) {
             return '<button class="chip' + (a === annee ? ' actif' : '') + '" data-fisc="annee" data-valeur="' + a + '">Revenus ' + a + '</button>';
         }).join('') + '</div>';
-        if (!BAREMES[annee] || (annee >= 2026 && (!officiels[annee] ||
-            !officiels[annee].ir || !officiels[annee].decote || !officiels[annee].qf ||
-            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
-            !fraisOfficiels[annee].abatt))) {
+        if (!annéeSimulable(annee)) {
             return out + '<div class="info"><b>Revenus ' + UI.h(annee)
                 + ' : calcul fiscal indisponible.</b> IR, décote, plafond QF ou frais salariés officiels de ce millésime non réunis. '
                 + 'Le barème isolé d’une source externe ne suffit pas à produire un bilan ; '
                 + 'les chiffres d’une autre année ne sont pas réutilisés. Déclaration ' + UI.h(annee + 1) + ' ≠ revenus ' + UI.h(annee) + '.'
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="collecter">'
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
-                + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
+                + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus ' + UI.h(libelléPlage()) + ' (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
                 + htmlRapport(annee) + htmlMatrice()
                 + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
@@ -1240,7 +1305,7 @@
                 + 'La R2 sera évaluée après synchronisation des transactions ; réessayez ⟳ si le chargement a échoué. '
                 + 'Les documents publics DGFiP peuvent être consultés séparément.</div>'
                 + '<button class="btn sec" data-fisc="collecter">Vérifier cette année (DGFiP)</button>'
-                + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+                + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
                 + htmlRapport(annee) + '</div>';
         }
@@ -1275,7 +1340,7 @@
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
             + '<div class="st" style="margin:6px 0">Sources DGFiP uniquement. Collecte partielle : les paramètres non vérifiés restent signalés, les révisions précédentes conservées. Résumé ci-dessous ; détails disponibles au besoin.</div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
-            + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+            + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
             + htmlRapport(annee)
             + '</div>' + htmlMatrice() + '</div>';
@@ -1944,7 +2009,7 @@
     function matriceCouverture() {
         if (!PF.fiscalCouverture) return null;
         var preuves = {};
-        annees().forEach(function (an) { if (an >= 2023) preuves[an] = preuvesParAnnee(an); });
+        annéesCachables().forEach(function (an) { preuves[an] = preuvesParAnnee(an); });
         return PF.fiscalCouverture.matrice(preuves);
     }
 
@@ -2128,7 +2193,7 @@
                     return;
                 }
                 var années = collecte.getAttribute('data-fisc') === 'collecter-tout'
-                    ? [2023, 2024, 2025, 2026] : [anneeEnCours()];
+                    ? plageCollecte() : [anneeEnCours()];
                 collecte.disabled = true;
                 if (etat) etat.textContent = 'Lecture DGFiP des revenus ' + années.join(', ') + '…';
                 Promise.all(années.map(function (an) {
@@ -2223,7 +2288,10 @@
                     aide: 'À envoyer à l’assistant Arena : il régénère core/fiscal_bars.py avec les sources citées.',
                     corps: '<textarea id="fiscPrompt" rows="10" style="width:100%;background:rgba(255,255,255,.05);'
                         + 'border:1px solid var(--line);border-radius:13px;color:var(--txt);font-size:12.5px;padding:12px;font-family:monospace">'
-                        + UI.h(PROMPT_MAJ.replace('{ANNEE}', String(derniereAnnee() + 1))) + '</textarea>',
+                        + UI.h(PROMPT_MAJ.replace('{ANNEE}', String((function () {
+                            var sim = annéesSimulables();
+                            return Math.max(derniereAnnee(), sim[sim.length - 1]) + 1;
+                          })()))) + '</textarea>',
                     boutons: [
                         { texte: 'Copier', sorte: '', garder: true, action: function () { copier('fiscPrompt'); } },
                         { texte: 'Ouvrir l’assistant', sorte: 'sec', action: function () {
@@ -2269,6 +2337,9 @@
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
         PROVENANCE_PS: PROVENANCE_PS, tauxPSEtabli: tauxPSEtabli, psCryptoRecoupement: psCryptoRecoupement,
         preuvesParAnnee: preuvesParAnnee, matriceCouverture: matriceCouverture, htmlMatrice: htmlMatrice,
+        annéesCachables: annéesCachables, plageCollecte: plageCollecte, libelléPlage: libelléPlage,
+        millésimeComplet: millésimeComplet,
+        annéeSimulable: annéeSimulable, annéesSimulables: annéesSimulables,
         csgDeductible6DE: function (d) { return PF.fiscalGardesFoyer.csgDeductible6DE(d); },
         portee2086Foyer: function (d) { return PF.fiscalGardesFoyer.portee2086Foyer(d); },
         casParticuliersQF: function (d) { return PF.fiscalGardesFoyer.casParticuliersQF(d); },
