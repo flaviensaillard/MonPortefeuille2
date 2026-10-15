@@ -49,6 +49,9 @@ attendu, les constantes embarquées ne comptent pas comme preuves.
 Après collecte des documents du millésime **revenus 2025** (les cinq PDF déjà
 confirmés sur Android + BOFiP + aides du simulateur 2026) :
 
+Familles de documents lisibles par l'application au 16/10/2026 (§7) : revenus 2023
+6/11, revenus 2024 6/11, revenus 2025 11/11, revenus 2026 0/11.
+
 | Catégorie | Revenus 2023 | Revenus 2024 | Revenus 2025 | Revenus 2026 |
 | --- | --- | --- | --- | --- |
 | Barème IR | établiable (BOFiP 18/06/2024 relu le 16/10/2026 : 11 294 / 28 797 / 82 341 / 177 106 €, **identique au code**) | établiable (BOFiP 14/04/2025 relu le 16/10/2026 : 11 497 / 29 315 / 83 823 / 180 294 €, **divergent du code**, §5.3) | **établi** (BOFiP 07/04/2026) | non disponible |
@@ -594,7 +597,77 @@ de ces divergences.
 
 ---
 
-## 7. Tests
+## 7. Pérennité : ce qui se passe les années suivantes
+
+L'objectif n'est pas seulement d'avoir les revenus 2023 à 2025, mais que chaque
+millésime suivant tombe dans le même mécanisme, sans réécriture et sans valeur
+devinée. Trois pièces y veillent.
+
+### 7.1 Un inventaire unique des sources, `fiscal_sources_millesimes.js`
+
+Une table décrit, pour chaque année de **revenus** (2023 → 2026) et chaque famille
+de documents (11 familles : barème, décote et quotient familial au BOFiP ; aides du
+simulateur pour les frais, les repas et les gains ; chapitres RCM, charges
+déductibles et plus-values des brochures ; notice 2086 ; nouveautés), quatre faits :
+
+| Champ | Rôle |
+| --- | --- |
+| `url` | l'adresse **vérifiée**, ou `null`. Jamais une adresse construite à la volée. |
+| `verifieeLe` | la date de la vérification effectuée hors application. |
+| `lectureVerifiee` | le lecteur sait-il reconnaître **ce** millésime (ancres et passages confirmés sur le document réel) ? |
+| `constat` | ce qui a été lu, ou ce qui manque, en clair. |
+
+`url(annee, famille)` ne renvoie une adresse que si elle est vérifiée **et** si la
+lecture l'est pour cette année. Autrement dit : un document repéré mais non vérifié
+ne déclenche rien. C'est le cas du chapitre RCM du millésime 2024
+(`ir_2024/pdf_som/08-RCM_123a137.pdf`, revenus 2023) : quatre passages ont été
+vérifiés, le jeu de huit preuves du lecteur ne l'a pas été — l'adresse est nommée,
+la lecture est refusée, aucune valeur n'est produite.
+
+État au 16/10/2026 : **revenus 2025 → 11/11** familles lisibles ; **revenus 2023 →
+6/11** ; **revenus 2024 → 6/11** ; **revenus 2026 → 0/11** (rien de publié).
+
+### 7.2 Les lecteurs ne sont plus figés sur un millésime
+
+`fiscal_rcm_pdf_sources.js` et `fiscal_crypto_pdf_sources.js` prenaient leurs URL
+dans une constante unique (brochures ir_2026, notice 2086/2026) et répondaient
+« millésime non pris en charge » pour toute autre année. Ils lisent maintenant
+l'inventaire :
+
+- les ancres de preuve sont construites avec l'année des revenus demandée, donc un
+  document d'une autre année est refusé — le refus 2025 ↔ 2024 déjà testé continue
+  de passer ;
+- un millésime sans adresse vérifiée est refusé **sans appel réseau**, avec le motif
+  à chercher (`ir_<N+1>/pdf_som/08-RCM_<référence>.pdf`,
+  `formulaires/2086/<N+1>/2086_<numéro>.pdf`, `2495-PGP…-<AAAAMMJJ>`) : le motif
+  dit où chercher, il ne prétend pas savoir ;
+- la clé de cache porte le millésime, et l'ancienne clé (sans année) reste lue pour
+  les revenus 2025 : le cache déjà constitué sur Android n'est pas perdu, et jamais
+  reporté sur une autre année ;
+- le comportement par défaut (revenus 2025) est inchangé, vérifié par les suites
+  existantes.
+
+Ajouter un millésime devient alors une **inscription dans l'inventaire** — adresse
+vérifiée, date, jeu de preuves confirmé — et non une modification de moteur.
+
+### 7.3 Le calendrier dit quand chercher, jamais quoi croire
+
+`calendrier(annee)` donne, pour le millésime à venir, les fenêtres **observées** :
+indexation BOFiP le 18/06/2024 pour les revenus 2023, le 14/04/2025 pour 2024, le
+07/04/2026 pour 2025 — donc attente au printemps 2027 pour les revenus 2026 ;
+brochure `ir_<N+1>` au printemps ; aides du simulateur `calcul_impot/<N+1>` à
+l'ouverture de la déclaration ; notice 2086 du millésime correspondant. Ces dates
+servent à savoir **quand** revenir chercher une preuve. Elles ne produisent ni URL,
+ni valeur, ni statut « établi ».
+
+### 7.4 Ce que cela ne change pas
+
+Aucune constante du moteur, aucune migration, aucune donnée personnelle, aucune
+version d'APK. Un inventaire de sources n'établit rien par lui-même : sans collecte
+du propriétaire, les 52 cases restent « non disponible », `basculeComplete` reste
+`false`, et les divergences du §5.3 restent affichées comme divergences.
+
+## 8. Tests
 
 Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 
@@ -606,9 +679,11 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
 | `tests/test_fiscal_divergences_code.js` | registre des divergences valeurs embarquées / BOFiP : 4 écarts (décote 2023, barème 2024, décote 2024, plafond QF 2024), chacun avec le permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi, le passage verbatim citant l'année des revenus, la valeur officielle et la valeur embarquée ; le registre décrit le moteur sans le modifier (11 520, 906/1 493, 924/1 523 et 1 759 inchangés) ; cohérence interne de la décote officielle (seuil = base / 45,25 %) ; cases 2023/2024 « non disponible » avec l'alerte DIVERGENTE et la valeur officielle nommée, cases 2023 barème et QF sans alerte (identiques au BOFiP), 2025 et 2026 sans divergence ; après collecte du millésime 2024 les trois cases passent « établi » et l'alerte disparaît ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, comparaison 2OP/PFU inchangée) et bascule totale toujours `false` |
+| `tests/test_fiscal_sources_millesimes.js` | **inventaire pérenne des sources** : 11 familles × 4 millésimes, année de revenus ≠ année de déclaration, dates de publication BOFiP distinctes ; chaque entrée porte une date de vérification et un constat écrit ; aucune URL hors des trois hôtes DGFiP, aucune URL à joker, `null` partout pour les revenus 2026, `source(2022)`/`source(2027)` hors inventaire ; un document **repéré** mais dont le jeu de preuves n'est pas vérifié (chapitre RCM ir_2024) ne donne aucune URL lisible ; inventaire 11/11 en 2025, 6/11 en 2023 et 2024, 0/11 en 2026 ; **cohérence obligatoire** avec les URL que construisent réellement `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()/repasUrl()`, `fiscal_regimes_sources.url()`, `fiscal_rcm_pdf_sources.urls` et `fiscal_crypto_pdf_sources.urls` ; toute famille marquée « DIVERGENT » a son écart dans `DIVERGENCES_CODE` ; calendrier du millésime à venir (fenêtres observées, jamais une valeur devinée) ; et non-régression : un inventaire n'établit rien par lui-même (`etablis` = 0, bascule `false`) |
+| `tests/test_fiscal_rcm_pdf_sources.js` | textes réels des brochures revenus 2025, transport PDF simulé, cache, rectifications, non-activation — **étendu à la pérennité** : URL par millésime prises dans l'inventaire, comportement 2025 inchangé, refus 2023 (document repéré, preuves non vérifiées) / 2024 et 2026 (non repérés) **sans aucun appel réseau** et sans valeur produite, motif à vérifier fourni, ancres paramétrées par année (un texte 2023 n'est lu que pour 2023, jamais pour 2024 ni par défaut), ancienne clé de cache sans millésime toujours lue pour 2025 et jamais reportée sur une autre année |
 | `tests/test_fiscal_frais_millesimes_reels.js` | **recoupement du moteur par les sources officielles** des revenus 2023 (aide frais.htm lue le 15/10/2026) et 2024 (lue par indexation) : plancher 495 €/plafond 14 171 € et forfait repas 5,20 € pour 2023, plancher 504 €/plafond 14 426 € et barème 3-4 CV pour 2024, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; forfait repas 2024 et tranches 5 à 7 CV 2024 explicitement **non recoupés** ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve d'un millésime sans effet sur les autres ; famille `frais` des vérifications distantes et limites de lecture 2024 |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 48 suites JavaScript sont vertes en local.
+modification : les 49 suites JavaScript sont vertes en local.

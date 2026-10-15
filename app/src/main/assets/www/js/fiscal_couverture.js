@@ -684,6 +684,12 @@
         var contra = contradictions();
         if (contra.length) lignes.push('Contradictions DGFiP signalées : '
             + contra.map(function (c) { return c.resume + ' (' + c.millesime + ')'; }).join(' ; ') + '.');
+        var inv = root.PF && root.PF.fiscalSourcesMillesimes;
+        if (inv) lignes.push('Sources DGFiP par millésime (familles lisibles par l’application) : '
+            + inv.inventaire().map(function (l) {
+                return 'revenus ' + l.anneeRevenus + ' ' + l.lisibles + '/' + l.total;
+            }).join(', ')
+            + '. Aucune URL n’est inventée pour un millésime non vérifié : il reste « non disponible ».');
         var div = divergences();
         if (div.length) {
             var parAn = {};

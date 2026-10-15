@@ -9,6 +9,28 @@
         brochure: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/09-plus_values_137a156.pdf'
     };
     var CLE = 'pf2.dgfip.crypto.pdf.v1.';
+    var ANNEE_PAR_DEFAUT = 2025;
+    var FAMILLE = { notice: 'notice_2086', brochure: 'brochure_plus_values' };
+    /* PÉRENNITÉ : l'inventaire `fiscal_sources_millesimes` est la seule source
+       d'URL par millésime. Un millésime sans document vérifié est refusé avec le
+       motif à chercher, sans appel réseau et sans valeur produite. */
+    function registre() { return PF.fiscalSourcesMillesimes || null; }
+    function urlPour(type, annee) {
+        var r = registre();
+        if (!r) return annee === ANNEE_PAR_DEFAUT ? DOCS[type] : null;
+        return r.url(annee, FAMILLE[type]);
+    }
+    function etatRefus(type, annee) {
+        var r = registre(), s = r && r.source(annee, FAMILLE[type]);
+        if (!s) return { etat: 'millésime revenus ' + annee
+            + ' hors inventaire des sources DGFiP : aucune lecture', url: null, enregistree: false };
+        if (!s.url) return { etat: 'document du millésime revenus ' + annee
+            + ' non repéré : aucune URL inventée — ' + s.constat,
+            url: null, motif: s.motif, enregistree: false };
+        return { etat: 'document repéré pour les revenus ' + annee
+            + ' mais jeu de preuves non vérifié sur ce millésime : lecture refusée, '
+            + 'aucune valeur produite — ' + s.constat, url: s.url, motif: s.motif, enregistree: false };
+    }
 
     function normaliser(pages) {
         return (Array.isArray(pages) ? pages : [pages]).map(function (p) { return String(p || ''); })
@@ -113,11 +135,12 @@
             return Promise.reject(new Error('Année crypto PDF invalide.'));
         var id = compte();
         if (!id) return Promise.reject(new Error('Session requise pour les PDF crypto.'));
-        if (annee !== 2025) return Promise.resolve({ notice: { etat: 'millésime non pris en charge' },
-            brochure: { etat: 'millésime non pris en charge' } });
+        if (annee !== ANNEE_PAR_DEFAUT) return Promise.resolve({
+            notice: etatRefus('notice', annee), brochure: etatRefus('brochure', annee) });
         return Promise.all([chercherDoc('notice', id), chercherDoc('brochure', id)])
             .then(function (r) { return { notice: r[0], brochure: r[1] }; });
     }
     PF.fiscalCryptoPdfSources = { analyserNotice: analyserNotice, analyserBrochure: analyserBrochure,
-        chercher: chercher, lireCache: lireCache, urls: DOCS };
+        chercher: chercher, lireCache: lireCache, urls: DOCS, urlPour: urlPour,
+        etatRefus: etatRefus, ANNEE_PAR_DEFAUT: ANNEE_PAR_DEFAUT, familles: FAMILLE };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
