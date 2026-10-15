@@ -171,6 +171,33 @@ assert.match(parUrl(2025, 'crypto_2086_foyer', notice).constate, /3CN/);
 assert.match(parUrl(2025, 'crypto_2086_foyer', notice).portée, /annexeFoyerComplete:false/);
 assert.match(parUrl(2025, 'ps_crypto', notice).constate, /aucun taux de PS chiffré/);
 assert.match(parUrl(2025, 'ps_crypto', notice).portée, /psCrypto2025Attestes:false/);
+// CSG et RCM revenus 2025 : les deux calendriers officiels et les cases sont relus.
+const csg25 = parUrl(2025, 'csg_deductible', '12-charges_ded_rev_225a236');
+assert.match(csg25.constate, /REVENUS 2024, PAYÉE EN 2025/);
+assert.match(csg25.constate, /REVENUS 2025, PAYÉE EN 2025/, 'les deux calendriers du point 3');
+assert.match(csg25.constate, /6,8 % des revenus déclarés ligne 2BH/);
+assert.match(csg25.constate, /6,8 % des revenus déclarés ligne 2DF quelle que soit l’option/);
+assert.match(csg25.constate, /ni l’indiquer ligne 6DE/, 'anti double compte officiel');
+assert.match(csg25.portée, /CSG_DEDUCTIBLE = 0\.068/);
+assert.match(csg25.limite, /plafonnement .*n’est PAS modélisé/);
+const rcm25 = parUrl(2025, 'rcm_precompte', 'Brochure-IR-2026');
+assert.match(rcm25.constate, /2BH/);
+assert.match(rcm25.constate, /corrigez case 6DE/);
+assert.match(rcm25.portée, /Ne dit rien des produits/);
+// Revenus 2023 : la source RCM/CSG existe mais n'est pas lue par l'application.
+const rcm23 = parUrl(2023, 'rcm_precompte', 'ir_2024/pdf_som/08-RCM_123a137');
+assert.match(rcm23.constate, /revenus perçus en 2023/);
+assert.match(rcm23.constate, /revenu global de l’année 2023/);
+assert.match(rcm23.portée, /n’est PAS lue par l’application/);
+assert.match(rcm23.portée, /restent donc « non disponible »/);
+assert.ok(rcm23.limite, 'la portée de la lecture est bornée');
+assert.ok(C.verificationsDistantes(2023, 'csg_deductible').some(v => v.url === rcm23.url),
+    'une entrée peut couvrir plusieurs cases (rcm_precompte et csg_deductible)');
+// Non-régression : les vérifications distantes n'alimentent JAMAIS la matrice.
+const sansPreuve = C.matrice({});
+[2023, 2024].forEach(an => ['rcm_precompte', 'csg_deductible'].forEach(cat =>
+    assert.equal(sansPreuve.cellules[an][cat].statut, NON_DISPONIBLE,
+        `revenus ${an} · ${cat} : une source relue hors application n'établit rien`)));
 // Le BOFiP n'a pas été mis à jour : la contradiction n'est pas levée.
 const bofip15 = verifs.filter(v => v.date === '2026-10-15' && /BOI-RPPM-PVBMC-30-30/.test(v.url));
 assert.equal(bofip15.length, 1);

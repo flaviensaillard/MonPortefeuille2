@@ -46,7 +46,15 @@
             'Gains ' + (annee || 'N') + ' imposés forfaitairement : PS acquittés sur l’avis '
                 + ((annee || 0) + 1) + ', aucune déduction sur le revenu ' + (annee || 'N') + '.',
             'CSG des lignes 2BH/2DF prélevée en ' + (annee || 'N') + ' : calculée automatiquement, '
-                + 'à ne pas ajouter en 6DE.'
+                + 'à ne pas ajouter en 6DE.',
+            // Brochure charges du millésime revenus 2025, vérifiée le 15/10/2026 :
+            // « Un plafond s'applique pour le calcul de la CSG déductible afférente
+            // aux plus-values … à hauteur du rapport entre le montant de la
+            // plus-value soumise à l'impôt sur le revenu et le montant de la
+            // plus-value soumise à la CSG. » Non modélisé : signalé, jamais calculé.
+            'Plafond de la CSG déductible afférente aux plus-values de titres avec abattement (rapport entre '
+                + 'plus-value soumise à l’IR et plus-value soumise à la CSG) : règle officielle NON modélisée ici, '
+                + 'à lire sur l’avis d’imposition.'
         ];
         if (!annee) return { etat: NON_DISPONIBLE, disponible: false, montant6DE: null,
             doubleCompte: null, regles: regles, blocages: ['année des revenus absente'], avertissements: [] };

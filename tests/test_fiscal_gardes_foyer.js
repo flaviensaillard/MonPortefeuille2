@@ -19,10 +19,16 @@ assert.equal(rien.etat, 'non disponible');
 assert.equal(rien.disponible, false);
 assert.equal(rien.montant6DE, null);
 assert.match(rien.blocages[0], /lecture des brochures/);
-assert.equal(rien.regles.length, 5);
+assert.equal(rien.regles.length, 6);
 assert.ok(rien.regles.some(r => /2BH\/2DF/.test(r) && /ne pas ajouter en 6DE/.test(r)));
 assert.ok(rien.regles.some(r => /patrimoine 2024 payée en 2025/.test(r)), 'calendrier N-1 payé en N');
 assert.ok(rien.regles.some(r => /avis 2026/.test(r)), 'gains 2025 acquittés sur l’avis 2026');
+// Brochure charges revenus 2025 vérifiée le 15/10/2026 : le plafond de la CSG
+// déductible afférente aux plus-values de titres avec abattement existe, il n'est
+// pas modélisé — il doit être annoncé, jamais calculé.
+assert.ok(rien.regles.some(r => / NON modélisée ici/.test(r) && /avis d’imposition/.test(r)),
+    'plafond officiel signalé comme non modélisé');
+assert.equal(rien.montant6DE, null, 'aucun montant produit par la seule lecture des règles');
 assert.equal(G.csgDeductible6DE({}).etat, 'non disponible');
 assert.match(G.csgDeductible6DE({}).blocages[0], /année des revenus absente/);
 

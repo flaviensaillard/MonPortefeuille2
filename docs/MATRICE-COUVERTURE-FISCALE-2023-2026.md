@@ -292,8 +292,8 @@ de la notice) reste signalé, jamais tranché.
 
 | Point | État | Raison, sans invention |
 | --- | --- | --- |
-| 2. RCM : produit, année, précompte réel, 2OP du foyer, 2CG/2BH/2DF | **partiel** (revenus 2025) | les brochures établissent des règles ; produit, dates et précompte du foyer ne se lisent pas dans un document public. Aucune CSG déductible personnelle n'est calculée à partir de leur seule lecture. Le précompte doit être indiqué par le propriétaire, le pays du courtier ne suffit pas. |
-| 3. CSG : patrimoine 2024 payée en 2025, RCM précomptés en 2025, gains 2025 acquittés sur l'avis 2026 | **partiel** (revenus 2025) | les trois calendriers sont distincts dans `csgDeductible6DE()` ; la part 6,8 % × (2BH + 2DF) calculée automatiquement ne doit **jamais** être reportée en 6DE : un 6DE qui la contient est **bloqué** comme double compte. Aucun montant n'est produit sans saisie personnelle. |
+| 2. RCM : produit, année, précompte réel, 2OP du foyer, 2CG/2BH/2DF | **partiel** (revenus 2025) ; **non disponible** (2023, 2024) | les brochures établissent des règles ; produit, dates et précompte du foyer ne se lisent pas dans un document public. Aucune CSG déductible personnelle n'est calculée à partir de leur seule lecture. Le précompte doit être indiqué par le propriétaire, le pays du courtier ne suffit pas. Les libellés officiels des cases 2BH/2DF/6DE ont été relus le 15/10/2026 (section 5.2). Pour 2023 et 2024, la source existe (brochure ir_2024) mais **n'est pas lue par l'application** : les lecteurs RCM/charges sont figés sur le millésime ir_2026. |
+| 3. CSG : patrimoine 2024 payée en 2025, RCM précomptés en 2025, gains 2025 acquittés sur l'avis 2026 | **partiel** (revenus 2025) | les trois calendriers sont distincts dans `csgDeductible6DE()` et **confirmés mot à mot** par la brochure charges du millésime revenus 2025 (deux intitulés « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2024, PAYÉE EN 2025 » et « … REVENUS 2025, PAYÉE EN 2025 », section 5.2) ; la part 6,8 % × (2BH + 2DF) calculée automatiquement ne doit **jamais** être reportée en 6DE : un 6DE qui la contient est **bloqué** comme double compte, comme l'exige la brochure (« Vous ne devez pas le calculer vous-même ni l'indiquer ligne 6DE »). Aucun montant n'est produit sans saisie personnelle. Le plafond officiel de la CSG déductible afférente aux plus-values de titres avec abattement n'est **pas modélisé** : il est annoncé comme règle non calculée. |
 | 4. 2086 : formule, frais, seuil, cases au niveau du foyer | **partiel** | voir section 4 : formule, frais hors quotient, seuil et cases relus ; exhaustivité du foyer non certifiable. |
 | 5a. Cas QF particuliers, changements de formule, arrondis | **non disponible** | `casParticuliersQF()` bloque bilan et recommandation 2OP dès qu'un cas particulier est déclaré ou qu'une demi-part n'est pas expliquée par la règle générale. Les plafonds spéciaux ne sont pas modélisés. |
 | 5b. Divergence DGFiP sur les PS des titres 2025 | **signalée, non levée** | aide du simulateur 2026 : 18,6 % daté « en 2025 » (vérifié le 14/10/2026) ; notice 2042 : 17,2 % (lecture antérieure consignée dans `docs/COLLECTE-FISCALE.md`) ; **et la page d'accueil du même simulateur 2026 affiche encore « Flat Tax de 30% (12.8% d'impôt sur le revenu et 17.2% de prélèvements sociaux) »** — la contradiction est donc interne au millésime 2026. Les trois termes sont consignés dans `CONTRADICTIONS.ps_titres_2025` ; seul le passage qui date explicitement l'année (« Si, en 2025 … ») et dont la somme est cohérente (12,8 + 18,6 = 31,4) est retenu. Aucun taux intermédiaire n'est inventé ; R2 2025 publiée reste prioritaire. |
@@ -403,6 +403,67 @@ n'a **pas abouti** (échec d'accès distant, et non absence de publication).
 Aucune valeur des revenus 2024 n'est donc relue : les trois cases frais de 2024
 restent « établiables » et ne deviennent « établi » qu'après lecture réussie par
 le bouton. Rien n'est déduit de l'échec, et aucune valeur de 2023 n'est reportée.
+
+### 5.2 Points 2 et 3 — libellés officiels des cases RCM et CSG, relus le 15/10/2026
+
+**Brochure « Charges déductibles » du millésime revenus 2025** (déclaration 2026),
+même URL que le lecteur `analyserCharges` —
+`https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf` :
+
+> « **CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2024, PAYÉE EN 2025** » ; « Le
+> montant déductible est égal à **6,8 points** de CSG calculée (au taux de
+> 9,2 %) » ; « La déduction s'opère sur les revenus de **l'année du paiement** de
+> la CSG » ; « **Aucune CSG** calculée sur les revenus du patrimoine n'est
+> déductible lorsque ces revenus ont été imposés à l'impôt sur le revenu **à un
+> taux forfaitaire** » ; « rayez le montant préimprimé et inscrivez ligne **6DE**
+> le montant exact de CSG déductible » ; exemple chiffré « 736 € (8 000 € ×
+> 9,2 %). La CSG déductible s'élève à 544 € (8 000 € × **6,8 %**) » ;
+> puis le second calendrier : « **CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2025,
+> PAYÉE EN 2025** … Le montant de CSG déductible est égal à **6,8 % des revenus
+> déclarés ligne 2BH** de la 2042 **si vous optez pour l'imposition au barème** et
+> à **6,8 % des revenus déclarés ligne 2DF quelle que soit l'option** … Ce montant
+> de CSG déductible **n'est pas inclus** dans le montant de CSG déductible
+> préimprimé … **Vous ne devez pas le calculer vous-même ni l'indiquer ligne
+> 6DE** en corrigeant le montant prérempli. Le montant de CSG déductible afférent
+> aux revenus déclarés ligne 2BH et 2DF **sera calculé automatiquement** » ;
+> enfin « **Un plafond s'applique** pour le calcul de la CSG déductible afférente
+> aux plus-values … à hauteur du **rapport entre le montant de la plus-value
+> soumise à l'impôt sur le revenu et le montant de la plus-value soumise à la
+> CSG** ».
+
+Portée : les **sept preuves** exigées par `analyserCharges` sont présentes dans le
+document réel, et les deux calendriers du point 3 y sont distingués par la DGFiP
+elle-même — exactement comme dans `csgDeductible6DE()`. La fraction déductible
+reste **6,8 %** alors que la CSG passe à 10,6 % sur les revenus du patrimoine
+(brochure nouveautés) : cohérent avec `CSG_DEDUCTIBLE = 0.068`, aucun changement
+de moteur. **Limite** : le plafonnement afférent aux plus-values de titres avec
+abattement n'est pas modélisé ; il est ajouté aux règles affichées comme « NON
+modélisée ici, à lire sur l'avis d'imposition » (contrôlé par
+`tests/test_fiscal_gardes_foyer.js`), et aucun montant n'est produit à ce titre.
+
+**Libellés des cases** (brochure intégrale ir_2026, lue par extrait indexé le
+15/10/2026) : « Revenus déjà soumis aux prélèvements sociaux avec CSG déductible
+**si option barème** … **2BH** » ; « Autres revenus déjà soumis aux prélèvements
+sociaux avec CSG déductible … **2DF** » ; « CSG déductible connue, calculée sur
+les revenus du patrimoine — *Si ce montant est inexact, corrigez case **6DE*** ».
+Ces libellés confirment la distinction opérée par le garde-fou : 2BH dépend de
+l'option du foyer, 2DF non, 6DE ne sert qu'à corriger un préremplissage inexact.
+Ils ne disent **rien** des produits détenus, des années de versement ni du
+précompte réellement subi : ces éléments restent à saisir par le propriétaire
+(case « partiel », jamais « établi »).
+
+**Revenus 2023 et 2024 (RCM/CSG)** : la brochure du millésime ir_2024
+(`…/brochure/ir_2024/pdf_som/08-RCM_123a137.pdf`) date bien ses règles des
+revenus 2023 — « Inscrivez ligne 2BH le montant des revenus **perçus en 2023** …
+(case 2OP cochée) », « **N'indiquez pas** cette fraction de CSG déductible ligne
+6DE », « ligne 2DF … retenu pour le calcul du montant de CSG à déduire du revenu
+global de **l'année 2023** ». Mais `DOCS.rcm` et `DOCS.charges` sont **figés sur
+le millésime ir_2026** et `analyserCharges` exige la mention littérale
+« REVENUS 2024, PAYEE EN 2025 » : l'application ne peut donc pas établir ces
+règles pour 2023 ni 2024, et **ne les reporte pas** depuis 2025. Les cases RCM et
+CSG de ces deux années restent « non disponible » ; le millésime ir_2025 n'a pas
+été sondé. Rendre ces lecteurs millésimés exigerait, pour chaque année, la
+brochure correspondante et ses preuves propres — pas une transposition.
 
 **Limite assumée** : ces vérifications distantes ne remplacent pas la collecte.
 Elles sont consignées telles quelles, avec leur date et leur portée, dans

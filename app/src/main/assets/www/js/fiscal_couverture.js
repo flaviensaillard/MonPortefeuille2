@@ -438,6 +438,55 @@
                 + 'recoupement reste la seule chaîne DGFiP qui date les revenus 2025',
             limite: 'constat d’absence fondé sur les sources indexées, pas sur une interrogation exhaustive du '
                 + 'BOFiP ; à re-vérifier à chaque campagne' },
+        { date: '2026-10-15', millesime: 2025, categorie: 'csg_deductible',
+            url: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf',
+            constate: '« CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2024, PAYÉE EN 2025 » ; « Le montant déductible '
+                + 'est égal à 6,8 points de CSG calculée (au taux de 9,2 %) » ; « La déduction s’opère sur les '
+                + 'revenus de l’année du paiement de la CSG » ; « Aucune CSG calculée sur les revenus du patrimoine '
+                + 'n’est déductible lorsque ces revenus ont été imposés à l’impôt sur le revenu à un taux '
+                + 'forfaitaire » ; « rayez le montant préimprimé et inscrivez ligne 6DE le montant exact de CSG '
+                + 'déductible » ; second calendrier « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2025, PAYÉE EN 2025 » '
+                + ': « Le montant de CSG déductible est égal à 6,8 % des revenus déclarés ligne 2BH de la 2042 si '
+                + 'vous optez pour l’imposition au barème et à 6,8 % des revenus déclarés ligne 2DF quelle que soit '
+                + 'l’option » ; « Ce montant de CSG déductible n’est pas inclus dans le montant de CSG déductible '
+                + 'préimprimé » ; « Vous ne devez pas le calculer vous-même ni l’indiquer ligne 6DE en corrigeant le '
+                + 'montant prérempli … sera calculé automatiquement » ; exemple « 736 € (8 000 € × 9,2 %). La CSG '
+                + 'déductible s’élève à 544 € (8 000 € × 6,8 %) » ; plafond applicable à la CSG afférente aux '
+                + 'plus-values de titres avec abattement, à hauteur du rapport entre plus-value soumise à l’IR et '
+                + 'plus-value soumise à la CSG',
+            portée: 'les sept preuves exigées par analyserCharges sont présentes dans le document réel ; les deux '
+                + 'calendriers du point 3 (patrimoine 2024 payé en 2025, RCM précomptés en 2025) sont distincts '
+                + 'dans le texte officiel comme dans csgDeductible6DE() ; la fraction déductible reste 6,8 % alors '
+                + 'que la CSG passe à 10,6 % (brochure nouveautés), cohérent avec CSG_DEDUCTIBLE = 0.068',
+            limite: 'le plafonnement de la CSG déductible afférente aux plus-values de titres avec abattement '
+                + 'n’est PAS modélisé : signalé comme règle non calculée, aucun montant n’est produit à ce titre' },
+        { date: '2026-10-15', millesime: 2025, categorie: 'rcm_precompte',
+            url: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_integral/Brochure-IR-2026.pdf',
+            constate: 'libellés des cases — « Revenus déjà soumis aux prélèvements sociaux avec CSG déductible si '
+                + 'option barème … 2BH » ; « Autres revenus déjà soumis aux prélèvements sociaux avec CSG '
+                + 'déductible … 2DF » ; « CSG déductible connue, calculée sur les revenus du patrimoine — Si ce '
+                + 'montant est inexact, corrigez case 6DE … 6DE »',
+            portée: 'confirme la sémantique des trois cases distinguées par le garde-fou : 2BH soumise à l’option '
+                + 'du foyer, 2DF non, 6DE seulement en correction d’un préremplissage inexact. Ne dit rien des '
+                + 'produits, des années de versement ni du précompte réellement subi par le foyer',
+            limite: 'extrait indexé lu le 15/10/2026 ; le chapitre RCM 08-RCM_121a136.pdf, celui du lecteur, n’a '
+                + 'pas pu être relu directement à cette date' },
+        { date: '2026-10-15', millesime: 2023, categories: ['rcm_precompte', 'csg_deductible'],
+            categorie: 'rcm_precompte',
+            url: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2024/pdf_som/08-RCM_123a137.pdf',
+            constate: 'brochure du millésime ir_2024 (revenus 2023) : « Inscrivez ligne 2BH le montant des revenus '
+                + 'perçus en 2023 sur … (case 2OP cochée) » ; « Le montant de CSG déductible sera alors calculé '
+                + '(6,8 % du montant …) … ajouté au montant de CSG déductible prérempli sur votre déclaration des '
+                + 'revenus de 2023 » ; « N’indiquez pas cette fraction de CSG déductible ligne 6DE » ; « Le montant '
+                + 'des revenus indiqué ligne 2DF est exclu de la base de calcul des prélèvements sociaux et retenu '
+                + 'pour le calcul du montant de CSG à déduire du revenu global de l’année 2023 »',
+            portée: 'la source des revenus 2023 existe et date ses règles, mais elle n’est PAS lue par '
+                + 'l’application : DOCS.rcm et DOCS.charges sont figés sur le millésime ir_2026 et analyserCharges '
+                + 'exige la mention littérale « REVENUS 2024, PAYEE EN 2025 ». Les cases RCM et CSG des revenus '
+                + '2023 et 2024 restent donc « non disponible » : aucune règle n’est reportée d’un millésime à '
+                + 'l’autre',
+            limite: 'extrait lu par indexation le 15/10/2026 (mise en page en colonnes), sans lecture PDF complète ; '
+                + 'le millésime ir_2025 (revenus 2024) n’a pas été sondé' },
         { date: '2026-10-14', millesime: 2026, categorie: 'toutes',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2027/aides/frais.htm',
             constate: 'aucune aide ni brochure du millésime « revenus 2026 » (déclaration 2027) publiée ou '
@@ -447,11 +496,13 @@
                 + 'constat fondé sur l’absence de publication indexée et sur docs/COLLECTE-FISCALE.md (13/10/2026)' }
     ];
 
-    /* Une entrée peut porter une catégorie précise, la famille 'frais' (les
-       trois cases lues sur la même page d'aide) ou 'toutes'. */
+    /* Une entrée peut porter une catégorie précise, une liste `categories`
+       (une même page établit plusieurs cases), la famille 'frais' (les trois
+       cases lues sur la même page d'aide) ou 'toutes'. */
     function categorieConcernee(v, categorie) {
         if (categorie === undefined) return true;
         if (v.categorie === categorie || v.categorie === 'toutes') return true;
+        if (Array.isArray(v.categories) && v.categories.indexOf(categorie) >= 0) return true;
         return v.categorie === 'frais' && String(categorie).indexOf('frais_') === 0;
     }
 
