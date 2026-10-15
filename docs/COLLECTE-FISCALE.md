@@ -325,6 +325,11 @@ migrations déjà exécutées**, et ne décrivent plus le bouton actuel.
 - `pf2_fiscal_collectes` reçoit historiquement le barème IR transmis par
   OpenFisca-France. Il s'agit d'une **source partielle**, pas d'un millésime prêt
   pour une déclaration. Les données d'un autre utilisateur sont invisibles (RLS).
+  Depuis la migration **013** (voir ci-dessous), elle reçoit aussi l'historique des
+  **collectes DGFiP** du bouton de l'APK : onze sources documentaires, chacune avec
+  l'adresse officiellement lue et les paramètres publics du document. Aucune donnée
+  personnelle n'y entre, et une ligne historisée n'est **pas** une règle publiée :
+  `pf2_fiscal_annees` reste insérable uniquement côté serveur.
 - Une rectification des chiffres d'une même année crée la **révision N+1**.
   C'est elle qui devient la plus récente ; la révision N reste consultable pour
   comprendre ce qui a changé. Une année différente ne change pas. La collecte
@@ -433,6 +438,44 @@ installer un APK signé avec une clé de développement par-dessus l'application
 
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.
+
+## Migration 013 : historique des collectes DGFiP — **À EXÉCUTER, pas encore appliquée**
+
+Constat au 16/10/2026 : les cinq lecteurs DGFiP de l'APK n'écrivaient **que dans le
+`localStorage` de l'appareil**. La table `pf2_fiscal_collectes`, limitée par 009 puis
+012 aux deux sources OpenFisca et à leurs deux adresses exactes, **refusait** toute
+ligne DGFiP ; `pf2_fiscal_annees` n'est accessible à l'APK qu'en lecture. Une
+réinstallation ou un changement d'appareil faisait donc perdre les preuves collectées.
+
+[`migrations/013_collectes_dgfip.sql`](../migrations/013_collectes_dgfip.sql)
+élargit les deux contraintes aux onze sources réellement lues par l'application,
+chacune n'étant acceptée qu'avec son adresse officielle (hôte DGFiP exact en `https`,
+chemin imposé, permalien BOFiP verrouillé sur la version lue ou adresse courte
+`/doctrine/` de la version en vigueur). Les sources OpenFisca historiques restent
+autorisées : aucune ligne existante ne devient orpheline.
+
+**Ce que la migration ne fait pas** : elle ne publie aucune règle et n'active aucun
+calcul ; elle n'autorise ni UPDATE ni DELETE (la table reste append-only, une
+rectification crée la révision suivante) ; elle n'élargit pas la RLS (chaque compte
+ne lit et n'écrit que ses lignes, `anon` n'a rien) ; elle ne touche pas à
+`pf2_fiscal_annees`, dont l'écriture reste `service_role`.
+
+**Mode d'emploi** : à exécuter dans Supabase SQL Editor **APRÈS 012**, une seule
+fois, avec l'accord du propriétaire et après une sauvegarde chiffrée récente
+restaurée et comparée. Le script est rejouable (il ne supprime ni ne modifie aucune
+ligne), mais ne pas rejouer 009, 010, 011, 012 ni le SQL R2 2025. Tant qu'elle n'est
+pas appliquée, l'APK continue de fonctionner : l'historisation échoue proprement,
+le motif nomme la migration 013, et la collecte locale reste la référence du moteur.
+
+Côté application, l'écriture est faite par `js/fiscal_historique_supabase.js`
+(`PF.fiscalHistorique`), appelé par le bouton de collecte après le rechargement des
+caches, un millésime après l'autre. Le détail de ce qui s'écrit et de ce qui ne
+s'écrit pas est dans
+[`MATRICE-COUVERTURE-FISCALE-2023-2026.md`](MATRICE-COUVERTURE-FISCALE-2023-2026.md) §7.7.
+Deux jeux de tests la verrouillent : `tests/test_fiscal_sql_dgfip.py` (009 → 013
+rejouées sur un PostgreSQL embarqué, adresses inventées refusées, append-only, RLS
+inchangée) et `tests/test_fiscal_historique_supabase.js` (hors réseau, avec contrôle
+de **parité** entre les lignes produites par le module et les contraintes du SQL).
 
 ## Historique : extension des paramètres isolés (APK antérieures)
 

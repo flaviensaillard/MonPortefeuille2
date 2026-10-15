@@ -83,6 +83,10 @@
         fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null),
         recoupementsCrypto = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
+    /* Résultat de l'historisation Supabase (table pf2_fiscal_collectes) par
+       millésime. Ce n'est qu'un état affiché : le moteur ne relit jamais cette
+       table, il n'utilise que le cache local revérifié à chaque ouverture. */
+    var historiques = Object.create(null);
     var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue', compteRapports = null;
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
@@ -106,6 +110,7 @@
         var courant = PF.net && PF.net.auth && PF.net.auth.utilisateur();
         if (compteRapports && (!courant || courant.id !== compteRapports)) {
             rapportsControle = Object.create(null); // pas de rapport du compte précédent
+            historiques = Object.create(null);      // ni état d'historisation
             compteRapports = null;
         }
         ++sequenceLecture;
@@ -1244,6 +1249,19 @@
     }
     // Un compte rendu utile sur téléphone doit tenir en quelques lignes.
     // L'audit intégral reste accessible, mais n'est plus affiché d'emblée.
+    /* Une clause, pas une page : le résumé copiable doit rester sous 600
+       caractères et sans adresse. Absente tant qu'aucune historisation n'a été
+       tentée (rapport antérieur, module non chargé). */
+    function clauseSupabase(h) {
+        if (!h || !h.etat) return '';
+        if (h.etat === 'historisée') return ' Supabase : '
+            + (h.ajoutees.length + h.corrigees.length) + ' document(s) historisé(s)'
+            + (h.ignorees && h.ignorees.length ? ', ' + h.ignorees.length + ' inchangé(s)' : '') + '.';
+        if (h.etat === 'inchangée') return ' Supabase : déjà historisé à l’identique.';
+        if (h.etat === 'rien à historiser') return ' Supabase : rien à historiser.';
+        return ' Supabase : NON historisé, collecte conservée sur l’appareil.';
+    }
+
     function resumeRapport(annee, r) {
         if (!r || typeof r !== 'object') return String(r || '');
         var boi = r.boi && r.boi.valeurs || {}, frais = r.frais && r.frais.valeurs || {};
@@ -1260,7 +1278,8 @@
             + ', notice 2086 ' + lu(crypto.notice) + ', brochure crypto ' + lu(crypto.brochure)
             + ', RCM ' + lu(rcm.rcm) + ', charges/CSG ' + lu(rcm.charges)
             + '. RCM personnels, PS crypto 2025 et déduction CSG du foyer non vérifiés ; '
-            + 'aucun nouveau taux activé. Bascule DGFiP totale : non.';
+            + 'aucun nouveau taux activé. Bascule DGFiP totale : non.'
+            + clauseSupabase(r.historique);
     }
     function htmlRapport(annee) {
         if (!rapportsControle[annee]) return '';
@@ -2006,6 +2025,29 @@
         };
     }
 
+    /* Historisation Supabase des preuves lues (migration 013).
+       - best effort : un échec (pont absent, réseau, contrainte qui refuse la
+         source) ne bloque ni la collecte ni le rendu ; le cache local reste la
+         référence du moteur ;
+       - séquentielle, un millésime après l'autre : la clé primaire
+         (user_id, annee_revenus, source, revision) et l'enchaînement des
+         révisions restent déterministes ;
+       - une ligne écrite n'est PAS une règle publiée : pf2_fiscal_annees
+         (révisions activées, R2) reste écrit par service_role, jamais ici. */
+    function historiserCollectes(annees) {
+        if (!PF.fiscalHistorique) return Promise.resolve();
+        return (annees || []).reduce(function (chaine, an) {
+            return chaine.then(function () {
+                var preuves = null;
+                try { preuves = preuvesParAnnee(an); } catch (_) { preuves = null; }
+                return PF.fiscalHistorique.historiser(an, preuves).then(function (r) {
+                    historiques[an] = r;
+                    if (rapportsControle[an]) rapportsControle[an].historique = r;
+                });
+            });
+        }, Promise.resolve()).catch(function () { /* jamais bloquant */ });
+    }
+
     function matriceCouverture() {
         if (!PF.fiscalCouverture) return null;
         var preuves = {};
@@ -2147,7 +2189,10 @@
             + ' ; brochure RCM PDF ' + (brochureRcm.etat || brochureRcm.erreur || 'non recherchée')
             + ' ; brochure charges PDF ' + (chargesRcm.etat || chargesRcm.erreur || 'non recherchée') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
-            + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
+            + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.'
+            + (resultat.historique && PF.fiscalHistorique
+                ? ' ' + PF.fiscalHistorique.texte(annee, resultat.historique)
+                : ' Historisation Supabase : aucune écriture tentée pour ce millésime.');
     }
 
     // -------------------------------------------------------------- événements
@@ -2246,8 +2291,10 @@
                     return actualiserCollectesDgfip(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
-                        if (compteRapports && compteRapports !== proprietaire.id)
+                        if (compteRapports && compteRapports !== proprietaire.id) {
                             rapportsControle = Object.create(null);
+                            historiques = Object.create(null);
+                        }
                         compteRapports = proprietaire.id;
                         resultats.forEach(function (r) { rapportsControle[r.annee] = r; });
                         // Le recoupement relu est conservé par millésime : il ne
@@ -2256,7 +2303,11 @@
                             if (r.recoupement && r.recoupement.statut && r.recoupement.statut !== 'partiel')
                                 recoupementsCrypto[r.annee] = r.recoupement;
                         });
-                        PF.app.rendre();
+                        // Les preuves lues sont historisées côté serveur APRÈS le
+                        // rechargement des caches : preuvesParAnnee() reflète alors
+                        // exactement ce qui vient d'être lu, millésime par millésime.
+                        return historiserCollectes(resultats.map(function (r) { return r.annee; }))
+                            .then(function () { PF.app.rendre(); });
                     });
                 }).catch(function (err) {
                     if (etat) etat.textContent = 'Actualisation interrompue : '

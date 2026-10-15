@@ -847,6 +847,65 @@ révision publiée, `tauxPSRevenuMobilier(2027, …)` refuse ; aucune valeur d'u
 année n'est recopiée ; `basculeComplete` reste `false` tant que les 52 cases ne sont
 pas établies.
 
+### 7.7 Ce qui s'écrit dans Supabase — et ce qui ne s'écrit pas
+
+**Constat avant ce tour** : rien. Les cinq lecteurs DGFiP n'écrivaient que dans le
+`localStorage` de l'appareil. La table `pf2_fiscal_collectes` (migration 009, puis
+012) n'autorisait que les deux sources OpenFisca et leurs deux adresses exactes :
+une ligne DGFiP y était **refusée par le schéma**. Et `pf2_fiscal_annees`
+(migrations 010 et 011) n'est accessible à l'APK qu'en **lecture** — les lignes
+R2 des revenus 2025 ont été écrites par les robots côté serveur. Une réinstallation
+de l'application, ou un changement d'appareil, faisait donc perdre toute preuve
+collectée.
+
+**Migration `013_collectes_dgfip.sql`** (à exécuter dans Supabase SQL Editor APRÈS
+012, une seule fois, après sauvegarde chiffrée récente restaurée et comparée) :
+
+- les **onze sources DGFiP** réellement lues par l'application sont autorisées
+  (trois familles BOFiP, frais salariés et forfait repas, PS/PFU des plus-values de
+  titres, notice 2086, trois chapitres de brochure, chapitre nouveautés) ;
+- chaque source n'est acceptée qu'avec **son adresse officielle** : hôte DGFiP
+  exact en `https`, chemin imposé, permalien BOFiP verrouillé sur la version lue
+  (`…/bofip/<n>-PGP.html/identifiant=BOI-IR-LIQ-20-…-<8 chiffres>`) ou adresse
+  courte de la version en vigueur (`…/doctrine/BOI-IR-LIQ-20-…`). Une adresse d'un
+  autre hôte, un chemin inventé, un permalien non daté : **refusés** ;
+- les sources OpenFisca historiques restent autorisées : aucune ligne existante ne
+  devient orpheline ;
+- **aucun droit n'est élargi** : la table reste append-only pour les clients
+  (`select`, `insert`), chaque compte ne lit et n'écrit que ses propres lignes
+  (`auth.uid() = user_id`), `anon` n'a toujours rien ;
+- script **rejouable** : il ne supprime ni ne modifie aucune ligne.
+
+**Module `fiscal_historique_supabase.js` (`PF.fiscalHistorique`)**, appelé par le
+bouton de collecte après le rechargement des caches, un millésime après l'autre :
+
+| | |
+| --- | --- |
+| **Ce qui s'écrit** | une ligne par document **réellement lu** du millésime demandé : `annee_revenus`, `source`, `valeurs` (paramètres publics + référence du document : adresse lue, année des revenus, libellé, date de publication pour le BOFiP), `source_url`, `revision` |
+| **Ce qui ne s'écrit pas** | aucune **donnée personnelle** (aucun montant du foyer, aucun taux de prélèvement à la source, aucune ligne de déclaration) ; aucune valeur d'**une autre année** (garde `revenus === annee`) ; aucun **état d'échec** pris pour une preuve ; aucune **adresse devinée** (une ligne sans adresse lue n'est pas proposée) ; et **jamais `pf2_fiscal_annees`** — l'APK ne publie aucune règle, la R2 reste écrite par `service_role` |
+| **Append-only** | collecte identique ⇒ aucune écriture (« inchangée ») ; rectification du même millésime ⇒ **révision N+1**, la révision 1 reste présente |
+| **Best effort** | pont Supabase absent ou incomplet, historique illisible, contrainte qui refuse la ligne ⇒ **aucune exception** remontée, un état et un motif affichés (le motif nomme la migration 013), et la collecte locale reste valable |
+
+Une ligne historisée **n'active rien** : le moteur ne relit jamais cette table, il
+n'utilise que le cache local revérifié à chaque ouverture. L'historisation sert à
+conserver la preuve d'un document lu au-delà de l'appareil, pas à publier un
+paramètre.
+
+**À l'écran** : le résumé copiable porte une clause courte sans adresse
+(« Supabase : 11 document(s) historisé(s). », « Supabase : déjà historisé à
+l'identique. », ou « Supabase : NON historisé, collecte conservée sur l'appareil. »)
+et le bilan détaillé reprend le motif complet. Le résumé reste sous 600 caractères
+(399 au pire cas mesuré).
+
+**Validé** : `tests/test_fiscal_sql_dgfip.py` rejoue 009 → 010 → 011 → 012 → 013
+sur un PostgreSQL embarqué (les onze sources acceptées avec leurs adresses réelles,
+dix adresses inventées ou d'un autre hôte refusées, UPDATE/DELETE refusés, isolation
+entre comptes, `pf2_fiscal_annees` toujours fermée à l'APK, migration rejouable) ;
+`tests/test_fiscal_historique_supabase.js` vérifie hors réseau la **parité** entre
+les lignes produites par le module et les contraintes lues dans le fichier SQL de la
+013 — sans cette parité, le module écrirait des lignes que la base refuserait en
+silence.
+
 ## 8. Tests
 
 Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
@@ -870,9 +929,13 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
         (`12-charges_ded_rev_215a226.pdf`) collectés → cases CSG « partiel » avec l'URL et l'année d'effet de leur
         millésime, exclusions « CSG patrimoine 2022 payée en 2023 » / « 2023 payée en 2024 », cases RCM 2023/2024
         toujours « non disponible », revenus 2026 « non disponible », bascule totale `false` |
+| `tests/test_fiscal_historique_supabase.js` | **historisation Supabase des collectes DGFiP** (hors réseau, pont bouchonné) : les onze familles du module sont exactement les onze sources `dgfip_*` autorisées par la migration 013 et les deux sources OpenFisca restent permises ; une collecte complète des revenus 2025 produit onze lignes, chacune avec son millésime, son adresse lue, la référence du document et la date de publication BOFiP ; **parité avec le SQL** — chaque `source` produite est autorisée par la contrainte et chaque `source_url` satisfait l'expression lue dans `013_collectes_dgfip.sql` (sinon la base refuserait en silence) ; seuls les documents réellement lus sont proposés (famille absente, adresse absente, cache PDF d'une **autre année**, état d'échec « PDF inaccessible » ⇒ aucune ligne), rien avant 2023 ; aucune clé personnelle dans `valeurs`, une ligne ne porte que `annee_revenus, source, source_url, valeurs` avant insertion, et **`pf2_fiscal_annees` n'apparaît dans aucun appel** ; append-only : collecte identique ⇒ zéro écriture, rectification de la décote ⇒ révision 2 pour cette seule famille, la révision 1 intacte ; best effort : pont absent, pont incomplet, `select` nul ou en échec, contrainte qui refuse (motif nommant la migration 013), rien à historiser ⇒ aucun exception, aucune écriture ; revenus **2027** historisés comme 2025 et aucun millésime énuméré dans le code exécutable (seule la borne 2023) ; lignes d'état courtes et sans adresse ; module chargé par `index.html` dans le bon ordre et appelé par le bouton, échec non bloquant, état effacé au changement de compte |
+| `tests/test_fiscal_sql_dgfip.py` | **migration 013 sur PostgreSQL embarqué** (pgserver, aucun projet Supabase réel) : avant 013 une source DGFiP est refusée (c'est le constat qui motive la migration) ; après 013 les onze sources sont acceptées avec leurs adresses officielles, la source OpenFisca historique aussi, et la migration est rejouable ; dix adresses refusées (hôte tiers, `http`, permalien non daté, `gains.htm` pour la famille frais, arborescence de brochure inventée, extension `.htm`, notice 2086 sans numéro) ainsi que deux sources hors liste ; **append-only** : révision 2 acceptée, UPDATE et DELETE refusés (42501), la révision 1 jamais écrasée ; **RLS non élargie** : le compte B ne lit aucune ligne de A, ne peut pas écrire au nom de A, `anon` n'a toujours aucun droit ; `pf2_fiscal_annees` reste fermée à l'APK et ouverte à l'écriture serveur |
 | `tests/test_fiscal_frais_millesimes_reels.js` | **recoupement du moteur par les sources officielles** des revenus 2023 (aide frais.htm lue le 15/10/2026) et 2024 (lue par indexation) : plancher 495 €/plafond 14 171 € et forfait repas 5,20 € pour 2023, plancher 504 €/plafond 14 426 € et barème 3-4 CV pour 2024, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; forfait repas 2024 et tranches 5 à 7 CV 2024 explicitement **non recoupés** ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve d'un millésime sans effet sur les autres ; famille `frais` des vérifications distantes et limites de lecture 2024 |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 50 suites JavaScript sont vertes en local, et 936 tests Python.
+modification : les 51 suites JavaScript sont vertes en local, et 974 tests Python
+(les tests SQL et RLS, auparavant sautés faute de PostgreSQL local, s'exécutent
+désormais aussi en local).
