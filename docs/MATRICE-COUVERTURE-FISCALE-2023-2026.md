@@ -58,7 +58,7 @@ confirmés sur Android + BOFiP + aides du simulateur 2026) :
 | Abattement salariés 10 % | établiable | établiable | **établi** | non disponible |
 | Forfait repas | établiable | établiable | **établi** | non disponible |
 | Barème kilométrique | établiable | établiable | **établi** | non disponible |
-| PS plus-values de titres | établiable (aide du millésime 2024 relue à distance le 14/10/2026 : 17,2 %) | établiable (corroborée par l'accueil du simulateur 2025 : 17,2 %) | **établi** (divergence signalée) | non disponible |
+| PS plus-values de titres | établiable (aide du millésime 2024 relue à distance le 14/10/2026 : 17,2 %) | établiable (aide du millésime 2025 relue à distance le 15/10/2026 : 17,2 %) | **établi** (divergence signalée) | non disponible |
 | PS cessions crypto privées | partiel | partiel | **recoupement** (non activé) | non disponible |
 | RCM : produit, année, précompte, 2OP, 2CG/2BH/2DF | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
 | CSG déductible et calendrier 6DE | non disponible | non disponible | **partiel** (règles seulement) | non disponible |
@@ -87,7 +87,7 @@ ou « partiel », et le bilan l'affiche.
 
 ## 3. Point 1 — PS des cessions crypto privées de 2025 : preuve recherchée
 
-### 3.1 Ce que disent réellement les documents DGFiP (vérifié le 14/10/2026)
+### 3.1 Ce que disent réellement les documents DGFiP (vérifié les 14 et 15/10/2026)
 
 **Source A — BOFiP `BOI-RPPM-PVBMC-30-30`**, « Cession d'actifs numériques à
 titre occasionnel — Modalités d'imposition et obligations déclaratives ».
@@ -105,6 +105,13 @@ pointe toujours sur cette version au 14/10/2026).
 - **Limite** : ce texte ne date pas son taux par année de cession et n'a pas été
   mis à jour depuis le 23/04/2024. Il apporte cependant le maillon décisif : la
   **qualification** « revenus du patrimoine », qui fixe la date d'effet.
+- **Re-vérifié le 15/10/2026** : la version en vigueur est toujours celle du
+  23/04/2024, aucune version postérieure n'a été trouvée dans les sources
+  indexées, et l'URL non versionnée
+  (`…/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30`) renvoie « Document non
+  trouvé » — seul le permalien versionné est lisible. La contradiction n'a donc
+  **pas** été levée par une mise à jour du BOFiP : constat d'absence, à
+  re-vérifier à chaque campagne.
 
 **Source B — Brochure DGFiP « Principales nouveautés revenus 2025 »** (déclaration
 2026) : <https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/nouveautes.pdf>
@@ -143,13 +150,47 @@ pointe toujours sur cette version au 14/10/2026).
   revenus 2025. Elle porte sur les **titres**, pas sur les actifs numériques :
   le lecteur ne transpose pas ce taux à la crypto.
 
+**Source E — Formulaire et notice 2086 n° 16043*07, « Déclaration des plus ou
+moins-values réalisées en 2025 »** (lu le 15/10/2026, même URL que celle du
+lecteur `fiscal_crypto_pdf_sources.js`) :
+<https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf>
+
+- Passages probants : « Les plus-values réalisées par les particuliers lors de la
+  cession d'actifs numériques ou de droits s'y rapportant sont passibles de
+  l'impôt sur le revenu selon le régime d'imposition prévu à l'article 150 VH bis
+  du CGI (**taux forfaitaire de 12,8 % auquel s'ajoutent les prélèvements
+  sociaux**) » ; « Si le total des prix de cession réalisés **au niveau du foyer
+  fiscal** est inférieur ou égal à 305 €, vos cessions sont exonérées » ;
+  « **Ligne 52** — Total des plus-values et moins-values réalisées **au niveau du
+  foyer fiscal** : à reporter ligne **3AN** de la 2042 C en cas de plus-value
+  globale ou à reporter ligne **3BN** de la 2042 C en cas de moins-value
+  globale » ; « Plus ou moins-value brute = Prix de cession – [Prix total
+  d'acquisition x Prix de cession / Valeur globale du portefeuille] » ; « vous
+  devez cocher la case **3CN** … L'option est globale et porte sur le total des
+  plus-values de cession d'actifs numériques réalisées par **votre foyer fiscal**
+  … Cette option est **indépendante** de celle pouvant être exercée pour la
+  taxation des revenus de capitaux mobiliers et des plus-values sur cession de
+  droits sociaux. »
+- **Limite décisive pour le point 1** : ce document est le seul, parmi ceux du
+  millésime revenus 2025, à traiter explicitement des cessions d'actifs
+  numériques — et il **ne chiffre pas les prélèvements sociaux**. Il ne peut donc
+  pas établir 18,6 % à lui seul : c'est précisément pourquoi
+  `analyserNotice` renvoie `psCrypto2025Attestes: false` et pourquoi le taux de
+  2025 passe par le **recoupement** A + B, jamais par une lecture isolée.
+- Portée positive : les huit preuves exigées par `analyserNotice` (millésime,
+  formule, frais hors quotient, seuil du foyer, ligne 51, cases 3AN/3BN, option
+  3CN, IR 12,8 %) sont bien présentes dans le document réel, et le seuil, la
+  formule, la ligne de total et les cases sont rédigés **à l'échelle du foyer**
+  (voir section 4).
+
 ### 3.2 Contradiction documentaire, non tranchée par un texte unique
 
 | Document | Taux PS crypto | Date | Portée |
 | --- | --- | --- | --- |
-| BOFiP `BOI-RPPM-PVBMC-30-30` | **17,2 %** (global 30 %) | version 23/04/2024 | sans année de cession |
+| BOFiP `BOI-RPPM-PVBMC-30-30` | **17,2 %** (global 30 %) | version 23/04/2024, toujours en vigueur au 15/10/2026 | sans année de cession |
 | FAQ DGFiP actifs numériques | **18,6 %** (PFU 31,4 %) | modifiée le 17/07/2026 | sans année de cession |
 | Brochure nouveautés revenus 2025 | CSG 9,2 % → **10,6 %** sur revenus du patrimoine | déclaration 2026 | « à compter des revenus 2025 déclarés en 2026 » |
+| Formulaire/notice 2086 revenus 2025 | **aucun taux chiffré** (« 12,8 % auquel s'ajoutent les prélèvements sociaux ») | millésime 2026 | daté des cessions 2025, mais muet sur les PS |
 
 La contradiction est **affichée** dans l'écran Fiscalité (bloc replié
 « Contradictions documentaires DGFiP ») et dans `bilanMiseAJour`. Elle n'est
@@ -217,6 +258,18 @@ Preuve DGFiP complémentaire relevée le 14/10/2026, **BOFiP
 > par un pacte civil de solidarité - PACS) que par les autres membres du foyer
 > fiscal. »
 
+Confirmation relevée le **15/10/2026** dans le formulaire et la notice 2086
+n° 16043*07 des revenus 2025 (source E de la section 3.1, même URL que le
+lecteur) : le seuil, la ligne de total et les cases de report sont rédigés à
+l'échelle du foyer — « Si le total des prix de cession réalisés **au niveau du
+foyer fiscal** est inférieur ou égal à 305 €, vos cessions sont exonérées » ;
+« **Ligne 52** — Total des plus-values et moins-values réalisées **au niveau du
+foyer fiscal** : à reporter ligne 3AN … ou … ligne 3BN » ; « l'option est globale
+et porte sur le total des plus-values de cession d'actifs numériques réalisées
+par **votre foyer fiscal** ». Les huit preuves exigées par `analyserNotice` sont
+présentes dans le document réel, mais celui-ci **ne chiffre pas les PS** : il
+établit la méthode et l'échelle, jamais le taux (section 3.1).
+
 Ce texte fonde la règle, pas les données : `portee2086Foyer()` renvoie toujours
 `certifieFoyer: false`. Seule l'inférence à sens unique est admise :
 
@@ -244,10 +297,10 @@ de la notice) reste signalé, jamais tranché.
 | 4. 2086 : formule, frais, seuil, cases au niveau du foyer | **partiel** | voir section 4 : formule, frais hors quotient, seuil et cases relus ; exhaustivité du foyer non certifiable. |
 | 5a. Cas QF particuliers, changements de formule, arrondis | **non disponible** | `casParticuliersQF()` bloque bilan et recommandation 2OP dès qu'un cas particulier est déclaré ou qu'une demi-part n'est pas expliquée par la règle générale. Les plafonds spéciaux ne sont pas modélisés. |
 | 5b. Divergence DGFiP sur les PS des titres 2025 | **signalée, non levée** | aide du simulateur 2026 : 18,6 % daté « en 2025 » (vérifié le 14/10/2026) ; notice 2042 : 17,2 % (lecture antérieure consignée dans `docs/COLLECTE-FISCALE.md`) ; **et la page d'accueil du même simulateur 2026 affiche encore « Flat Tax de 30% (12.8% d'impôt sur le revenu et 17.2% de prélèvements sociaux) »** — la contradiction est donc interne au millésime 2026. Les trois termes sont consignés dans `CONTRADICTIONS.ps_titres_2025` ; seul le passage qui date explicitement l'année (« Si, en 2025 … ») et dont la somme est cohérente (12,8 + 18,6 = 31,4) est retenu. Aucun taux intermédiaire n'est inventé ; R2 2025 publiée reste prioritaire. |
-| 5c. Sources propres à 2023 et 2024 | **établiables, non établies avant clic** | voir ci-dessous le détail des pages relues à distance le 14/10/2026. Les PS crypto de ces millésimes restent « partiel » : aucune source ne date le taux par année de cession. |
+| 5c. Sources propres à 2023 et 2024 | **établiables, non établies avant clic** | voir ci-dessous le détail des pages relues à distance les 14 et 15/10/2026. Les PS crypto de ces millésimes restent « partiel » : aucune source ne date le taux par année de cession. |
 | 5d. Paramètres des revenus 2026 | **non disponible** | aucun document du millésime. `PROVENANCE_PS[2026]` dit explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche. `baremeDe` et `plafondQF` refusent 2026 sans preuve ; `comparerOptionsFoyer(…, 2026, …)` lève une erreur. Sonde du 14/10/2026 : aucune page du millésime « revenus 2026 » (déclaration 2027) publiée ou indexée, aucune brochure `ir_2027` ; la sonde directe de `/calcul_impot/2027/` n'a pas abouti depuis l'environnement de vérification, le constat repose sur l'absence de publication et sur `docs/COLLECTE-FISCALE.md` (13/10/2026). |
 
-### 5.1 Détail du point 5c — sources propres à 2023 et 2024, relues le 14/10/2026
+### 5.1 Détail du point 5c — sources propres à 2023 et 2024, relues les 14 et 15/10/2026
 
 **Revenus 2023** (aide « Plus-values et gains divers » du simulateur, millésime
 déclaration 2024) —
@@ -265,26 +318,50 @@ déclaration 2024) —
 
 Portée : le lecteur `analyserTitres(html, 2023)` accepte ce libellé et renvoie
 `établi` avec `ps = 0.172` ; `PS_PAR_ANNEE[2023] = 0.172` est donc cohérent avec
-la source du millésime. Vérifié hors réseau par
-`tests/test_fiscal_regimes_revenus_2023_reel.js`, qui transpose le texte réel de
-la page (balisage simplifié) et contrôle aussi les refus : la même page n'est
-**pas** acceptée pour 2024 ni pour 2025, et sans « Si, en 2023 » elle
-n'établit rien.
+la source du millésime.
 
-**Revenus 2024** : l'aide gains.htm du millésime déclaration 2025 n'a pas pu être
-relue à distance depuis cet environnement (accès en échec). La page d'accueil du
-même simulateur, millésime déclaration 2025 —
-`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/complet/index.htm` —
-indique pour les revenus 2024 la « Flat Tax de 30% (12.8% d'impôt sur le revenu
-et 17.2% de prélèvements sociaux) » ; la page d'accueil du millésime déclaration
-2024 liste les cases 3TB, 3XD « PS 15,5 % » et 3YA « PS 17,2 % ». Ce sont des
-**corroborations** : la case de la matrice reste « établiable » et ne devient
-« établi » qu'après lecture réussie de l'aide millésimée par le bouton.
+**Revenus 2024** (aide « Plus-values et gains divers » du simulateur, millésime
+déclaration 2025) — relue le **15/10/2026** —
+`https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/gains.htm` :
+
+> « Les plus-values de cession de valeurs mobilières réalisées depuis le
+> 1er janvier 2018 sont soumises, lors de leur imposition, à un prélèvement
+> forfaitaire unique (PFU) de 12,8 % auquel s'ajoutent les prélèvements sociaux
+> de **17,2 %** soit au total un taux de **30 %** » ; « **Si, en 2024**, vous ou
+> les membres de votre foyer fiscal avez vendu des valeurs mobilières, des droits
+> sociaux et titres assimilés, si vous avez perçu des distributions effectuées
+> par certaines structures ou si vous avez réalisé des profits sur les instruments
+> financiers à terme, les gains et distributions réalisés, sont imposables au taux
+> de 12,8 % (ou sur option au barème progressif de l'impôt sur le revenu) » ;
+> option au barème en cochant la **case 2OP** ; abattement réservé aux titres
+> acquis ou souscrits avant le 1er janvier 2018 ; case **3VG** (montant avant
+> abattement en cas d'abattement de droit commun), moins-value case **3VH**
+> imputable dix ans ; « Les plus-values réalisées en **2024** peuvent être
+> réduites des moins-values en report des dix années précédentes » ; fiche
+> **2074-CMV** si dispense de la 2074.
+
+Portée : même lecteur, mêmes conclusions pour les revenus 2024 —
+`analyserTitres(html, 2024)` renvoie `établi` avec `ps = 0.172`, cohérent avec
+`PS_PAR_ANNEE[2024] = 0.172`. La page d'accueil du même simulateur, millésime
+déclaration 2025 (`…/calcul_impot/2025/complet/index.htm`, « Flat Tax de 30%
+(12.8% d'impôt sur le revenu et 17.2% de prélèvements sociaux) ») et celle du
+millésime déclaration 2024 (cases 3TB, 3XD « PS 15,5 % », 3YA « PS 17,2 % »)
+restent consignées comme **corroborations** : elles ne servent jamais seules de
+preuve.
+
+**Vérifié hors réseau** par `tests/test_fiscal_regimes_millesimes_reels.js`, qui
+transpose le texte réel des deux pages (balisage simplifié) et contrôle aussi les
+refus : chaque page n'est acceptée **que** pour sa propre année (la page 2023 est
+refusée pour 2024 et 2025, la page 2024 pour 2023 et 2025), rien n'est établi
+sans la phrase « Si, en <année> », une balise glissée entre l'année et la virgule
+provoque un refus conservateur, et la collecte simulée ne remplit **que** la
+colonne de son millésime (2025 et 2026 restent « non disponible »).
 
 **Limite assumée** : ces vérifications distantes ne remplacent pas la collecte.
 Elles sont consignées telles quelles, avec leur date et leur portée, dans
 `VERIFICATIONS_DISTANTES` et affichées dans le bloc replié de la matrice, sans
-jamais alimenter une valeur du moteur.
+jamais alimenter une valeur du moteur. La case ne devient « établi » dans
+l'application qu'après lecture réussie, sur l'appareil, par le bouton annuel.
 
 ---
 
@@ -327,7 +404,7 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 | `tests/test_fiscal_crypto_ps_recoupement.js` | lecture du BOFiP (date de version, qualification, taux), huit maillons, refus par millésime et par maillon manquant, corroboration et contradiction de la FAQ, caches par compte/document/millésime, rectifications conservées, cache altéré refusé |
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
-| `tests/test_fiscal_regimes_revenus_2023_reel.js` | libellé **réel** de l'aide gains.htm des revenus 2023 relu le 14/10/2026 : 17,2 %/30 % acceptés, variantes typographiques tolérées, refus pour 2024 et 2025, refus sans attribution d'année, preuve collectée → case « établi » uniquement pour 2023, cohérence avec `VERIFICATIONS_DISTANTES` |
+| `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,

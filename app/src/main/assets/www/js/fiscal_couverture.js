@@ -321,10 +321,11 @@
         }
     ];
 
-    /* Vérifications distantes menées le 14/10/2026 sur les documents publics,
-       hors application. Elles ne remplacent PAS la collecte du bouton : elles
-       consignent ce qui a été constaté sur la source à cette date, et ce qui ne
-       l'a pas été. Les tests récurrents, eux, n'utilisent jamais le réseau. */
+    /* Vérifications distantes menées les 14 et 15/10/2026 sur les documents
+       publics, hors application. Elles ne remplacent PAS la collecte du bouton :
+       elles consignent ce qui a été constaté sur la source à cette date, et ce
+       qui ne l'a pas été. Les tests récurrents, eux, n'utilisent jamais le
+       réseau. */
     var VERIFICATIONS_DISTANTES = [
         { date: '2026-10-14', millesime: 2023, categorie: 'ps_titres',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/gains.htm',
@@ -332,12 +333,18 @@
                 + 'foyer fiscal avez vendu des valeurs mobilières » ; case 2OP ; abattement réservé aux titres '
                 + 'acquis ou souscrits avant le 1er janvier 2018',
             portée: 'libellé accepté par analyserTitres pour les revenus 2023 : la case passe à « établi » au clic' },
-        { date: '2026-10-14', millesime: 2024, categorie: 'ps_titres',
+        { date: '2026-10-15', millesime: 2024, categorie: 'ps_titres',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/gains.htm',
+            constate: 'PFU de 12,8 % + PS de 17,2 % = 30 % ; « Si, en 2024, vous ou les membres de votre '
+                + 'foyer fiscal avez vendu des valeurs mobilières » ; case 2OP ; case 3VG (montant avant '
+                + 'abattement en cas d’abattement de droit commun) ; moins-value reportée case 3VH et imputable '
+                + 'dix ans ; abattement réservé aux titres acquis ou souscrits avant le 1er janvier 2018 ; '
+                + 'fiche 2074-CMV',
+            portée: 'libellé accepté par analyserTitres pour les revenus 2024 : la case passe à « établi » au clic' },
+        { date: '2026-10-15', millesime: 2024, categorie: 'ps_titres',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/complet/index.htm',
             constate: 'Flat Tax de 30 % (12,8 % d’IR et 17,2 % de PS) pour les revenus 2024',
-            portée: 'corroboration seulement',
-            limite: 'l’aide gains.htm du millésime 2025 n’a pas pu être relue à distance depuis cet '
-                + 'environnement : la case reste à établir par le bouton' },
+            portée: 'corroboration du même millésime, lue avant l’aide ; jamais utilisée seule comme preuve' },
         { date: '2026-10-14', millesime: 2025, categorie: 'ps_titres',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm',
             constate: 'PFU de 12,8 % + PS de 18,6 % = 31,4 % ; « Si, en 2025 … »',
@@ -367,6 +374,38 @@
                 + 'foyer fiscal … tant par le contribuable ou les époux soumis à une imposition commune … que par '
                 + 'les autres membres du foyer fiscal »',
             portée: 'fonde l’exigence du seuil et de l’annexe au niveau du FOYER, pas du seul portefeuille' },
+        { date: '2026-10-15', millesime: 2025, categorie: 'crypto_2086_foyer',
+            url: 'https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf',
+            constate: 'formulaire et notice 2086 n° 16043*07, « Déclaration des plus ou moins-values réalisées '
+                + 'en 2025 » ; « Si le total des prix de cession réalisés au niveau du foyer fiscal est inférieur '
+                + 'ou égal à 305 €, vos cessions sont exonérées » ; « Ligne 52 — Total des plus-values et '
+                + 'moins-values réalisées au niveau du foyer fiscal : à reporter ligne 3AN de la 2042 C en cas de '
+                + 'plus-value globale ou à reporter ligne 3BN de la 2042 C en cas de moins-value globale » ; '
+                + '« Plus ou moins-value brute = Prix de cession – [Prix total d’acquisition x Prix de cession / '
+                + 'Valeur globale du portefeuille] » ; « vous devez cocher la case 3CN … L’option est globale et '
+                + 'porte sur le total des plus-values de cession d’actifs numériques réalisées par votre foyer '
+                + 'fiscal … indépendante de celle pouvant être exercée pour la taxation des revenus de capitaux '
+                + 'mobiliers »',
+            portée: 'les huit preuves exigées par analyserNotice sont présentes dans le document réel : seuil, '
+                + 'formule, ligne de total et cases 3AN/3BN sont bien à l’échelle du FOYER, et l’option 3CN reste '
+                + 'distincte de la 2OP. L’exhaustivité de l’annexe du foyer demeure non certifiable '
+                + '(annexeFoyerComplete:false)' },
+        { date: '2026-10-15', millesime: 2025, categorie: 'ps_crypto',
+            url: 'https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf',
+            constate: '« Les plus-values … sont passibles de l’impôt sur le revenu selon le régime … de l’article '
+                + '150 VH bis du CGI (taux forfaitaire de 12,8 % auquel s’ajoutent les prélèvements sociaux) » : '
+                + 'aucun taux de PS chiffré dans le formulaire du millésime revenus 2025',
+            portée: 'le document millésimé 2025 ne chiffre pas les PS des cessions crypto : il ne peut pas établir '
+                + '18,6 % à lui seul. D’où psCrypto2025Attestes:false et le recours au recoupement' },
+        { date: '2026-10-15', millesime: 2025, categorie: 'ps_crypto',
+            url: 'https://bofip.impots.gouv.fr/bofip/11969-PGP.html/identifiant=BOI-RPPM-PVBMC-30-30-20240423',
+            constate: 'version en vigueur toujours datée du 23/04/2024 (12,8 % + PS sur revenus du patrimoine '
+                + '17,2 %, taux global 30 %) ; aucune version postérieure trouvée dans les sources indexées ; '
+                + 'l’URL non versionnée renvoie « Document non trouvé », seul le permalien versionné est lisible',
+            portée: 'au 15/10/2026 la contradiction n’a pas été levée par une mise à jour du BOFiP : le '
+                + 'recoupement reste la seule chaîne DGFiP qui date les revenus 2025',
+            limite: 'constat d’absence fondé sur les sources indexées, pas sur une interrogation exhaustive du '
+                + 'BOFiP ; à re-vérifier à chaque campagne' },
         { date: '2026-10-14', millesime: 2026, categorie: 'toutes',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2027/aides/frais.htm',
             constate: 'aucune aide ni brochure du millésime « revenus 2026 » (déclaration 2027) publiée ou '

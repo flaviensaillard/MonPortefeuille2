@@ -136,8 +136,10 @@ assert.match(titres.arbitrage, /R2 2025 publiée prioritaire/);
 // ------------------------------------------- vérifications distantes consignées
 const verifs = C.VERIFICATIONS_DISTANTES;
 assert.ok(verifs.length >= 7, 'chaque source relue hors application est tracée');
+const parUrl = (an, cat, motif) => verifs.find(v => v.millesime === an && v.categorie === cat
+    && new RegExp(motif).test(v.url));
 verifs.forEach(v => {
-    assert.match(v.date, /^2026-10-14$/);
+    assert.match(v.date, /^2026-10-1[45]$/, 'date de lecture explicite');
     assert.ok(v.url && /^https:\/\/(simulateur-ir-ifi\.impots\.gouv\.fr|www\.impots\.gouv\.fr|bofip\.impots\.gouv\.fr)\//.test(v.url),
         'source DGFiP uniquement : ' + v.url);
     assert.ok(v.constate && v.portée, 'constat et portée obligatoires');
@@ -153,8 +155,28 @@ assert.match(verifs2026[0].limite, /sonde directe/, 'la limite de la vérificati
 assert.match(C.texteVerifications(2025), /BOI-RPPM-PVBMC-30-30-20240423/, 'BOFiP en permalien versionné');
 assert.equal(C.texteVerifications(2022), '');
 // Le BOFiP ne date aucune année de cession : il ne peut pas établir 2025 seul.
-assert.match(C.verificationsDistantes(2025, 'ps_crypto')[0].portée, /aucune année de cession/);
-assert.match(C.verificationsDistantes(2025, 'ps_crypto')[2].portée, /jamais attribuée à 2025/);
+assert.match(parUrl(2025, 'ps_crypto', 'BOI-RPPM-PVBMC-30-30-20240423').portée, /aucune année de cession/);
+assert.match(parUrl(2025, 'ps_crypto', 'comment-declarer-les-plus-ou-moins-values').portée, /jamais attribuée à 2025/);
+// Revenus 2023 et 2024 : les deux aides millésimées ont été relues (14 et 15/10/2026).
+assert.match(parUrl(2023, 'ps_titres', 'calcul_impot/2024/aides/gains').constate, /Si, en 2023/);
+assert.match(parUrl(2024, 'ps_titres', 'calcul_impot/2025/aides/gains').constate, /Si, en 2024/);
+assert.match(parUrl(2024, 'ps_titres', 'calcul_impot/2025/aides/gains').portée, /établi/);
+assert.match(parUrl(2024, 'ps_titres', 'calcul_impot/2025/complet').portée, /corroboration/);
+// Notice 2086 du millésime revenus 2025 : échelle du foyer vérifiée, PS non chiffrés.
+const notice = 'sites/default/files/formulaires/2086/2026/2086_5515';
+assert.match(parUrl(2025, 'crypto_2086_foyer', notice).constate, /au niveau du foyer fiscal/);
+assert.match(parUrl(2025, 'crypto_2086_foyer', notice).constate, /réalisées en 2025/);
+assert.match(parUrl(2025, 'crypto_2086_foyer', notice).constate, /3AN/);
+assert.match(parUrl(2025, 'crypto_2086_foyer', notice).constate, /3CN/);
+assert.match(parUrl(2025, 'crypto_2086_foyer', notice).portée, /annexeFoyerComplete:false/);
+assert.match(parUrl(2025, 'ps_crypto', notice).constate, /aucun taux de PS chiffré/);
+assert.match(parUrl(2025, 'ps_crypto', notice).portée, /psCrypto2025Attestes:false/);
+// Le BOFiP n'a pas été mis à jour : la contradiction n'est pas levée.
+const bofip15 = verifs.filter(v => v.date === '2026-10-15' && /BOI-RPPM-PVBMC-30-30/.test(v.url));
+assert.equal(bofip15.length, 1);
+assert.match(bofip15[0].constate, /toujours datée du 23\/04\/2024/);
+assert.match(bofip15[0].portée, /pas été levée par une mise à jour du BOFiP/);
+assert.ok(bofip15[0].limite, 'un constat d’absence porte sa limite');
 
 // ------------------------------------------------------------------ comptes rendus
 const t = C.texte(m3);
