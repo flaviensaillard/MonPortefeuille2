@@ -111,4 +111,24 @@ select 9, 'Clés personnelles dans les lignes DGFiP (attendu : 0)',
                         where k in ('numeroFiscal', 'tauxPas', 'tauxPersonnalise',
                                     'nom', 'prenom', 'adresse', 'email', 'siren',
                                     'user_id', 'declarant', 'conjoint')))
+union all
+-- La révision maximale est le symptôme d'un défaut corrigé en 2.2.4 : PostgreSQL
+-- jsonb réordonne les clés, si bien qu'une comparaison naïve voyait « différente »
+-- une collecte strictement identique et recréait une révision à CHAQUE clic.
+-- Attendu : rév. max 1 partout. Un millésime en rév. max 2 ou plus, avec un nombre
+-- de lignes multiple de celui des documents lus, signifie que des clics antérieurs
+-- à la 2.2.4 ont empilé des révisions en double. Elles ne faussent aucun calcul
+-- (le moteur ne relit pas cette table) et ne peuvent pas être supprimées : la
+-- table est append-only pour l'APK.
+-- Séparateur « | » et non « , » : le texte d'un millésime contient déjà une
+-- virgule (« ligne(s), rév. max »), si bien qu'une virgule rendrait la ligne
+-- impossible à découper de façon certaine.
+select 10, 'Détail par millésime DGFiP (lignes et révision maximale)',
+       coalesce((select string_agg(d.annee_revenus::text || ' : ' || d.n::text
+                                     || ' ligne(s), rév. max ' || d.mx::text,
+                                   ' | ' order by d.annee_revenus)
+                   from (select annee_revenus, count(*) as n, max(revision) as mx
+                           from public.pf2_fiscal_collectes
+                          where source like 'dgfip\_%' escape '\'
+                          group by annee_revenus) d), 'aucune')
 order by ordre;

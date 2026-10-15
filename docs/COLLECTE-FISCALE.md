@@ -475,24 +475,43 @@ par l'APK **2.2.3** puis corrigé en **2.2.4**.
 est une sonde à coller dans Supabase SQL Editor. Elle ne contient **qu'un seul
 `select`** (aucun mot-clé d'écriture ne survit à la suppression des commentaires et
 des littéraux — c'est contrôlé par test), et n'affiche aucune donnée personnelle :
-ni `user_id`, ni montant, ni adresse de document. Elle rend neuf lignes :
+ni `user_id`, ni montant, ni adresse de document. Elle rend dix lignes :
 
 | # | Contrôle | Avant 013 | Après 013 (15/10) | **Attendu maintenant** |
 | --- | --- | --- | --- | --- |
 | 1 | Migration 013 appliquée | NON | OUI | **OUI** |
 | 2 | Sources DGFiP autorisées | 0 | 11 sur 11 | **11 sur 11** |
 | 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | 2 sur 2 | **2 sur 2** |
-| 4 | Lignes de collecte DGFiP historisées | 0 | 0 | **6** (à confirmer) |
-| 5 | Millésimes historisés | aucun | aucun | **2023** |
+| 4 | Lignes de collecte DGFiP historisées | 0 | 0 | **17 ou plus** |
+| 5 | Millésimes historisés | aucun | aucun | **2023, 2025** |
 | 6 | Droits de l'APK sur l'historique | INSERT, SELECT | INSERT, SELECT | **INSERT, SELECT** |
 | 7 | Droits de l'APK sur les règles publiées | SELECT seul | SELECT seul | **SELECT seul** |
 | 8 | Tables fiscales sous RLS | 2 | 2 | **2** |
 | 9 | Clés personnelles dans les lignes DGFiP | 0 | 0 | **0** |
+| 10 | Détail par millésime (lignes, révision max) | aucune | aucune | **2025 : 11 ligne(s), rév. max 1** |
 
-Les lignes 4 et 5 sont passées de 0 à 6 et de « aucun » à « 2023 » du fait du clic
-réel du 15/10/2026 avec l'APK 2.2.3 : le téléphone a annoncé « 6 document(s)
-historisé(s) » pour les revenus 2023. **À confirmer en relançant la sonde** — c'est
-elle, et non l'écran du téléphone, qui fait foi sur le contenu de la base.
+Les lignes 4 et 5 ne sont plus à deviner : le retour du téléphone sous APK 2.2.4
+pour les revenus 2025 dit **« déjà historisé à l'identique »**, ce qui exige que les
+11 documents soient présents dans la table et que chacun corresponde exactement à la
+collecte du jour. Le millésime 2023 avait déjà annoncé « 6 document(s) historisé(s) »
+le 15/10/2026. D'où 17 lignes au minimum — davantage si 2024 a été écrit depuis, ou
+si des révisions ont été empilées avant la 2.2.4.
+
+**La ligne 10 tranche ce que les lignes 4 et 5 ne peuvent pas trancher.** Elle rend
+le nombre de lignes et la révision maximale par millésime, au format
+`2023 : 6 ligne(s), rév. max 1 | 2025 : 11 ligne(s), rév. max 1`. Deux lectures :
+
+- **rév. max 1 partout** : chaque millésime n'a été écrit qu'une fois, l'historique
+  est propre.
+- **rév. max 2 ou plus**, avec un nombre de lignes multiple de celui des documents
+  lus : c'est la trace du défaut jsonb corrigé en 2.2.4. PostgreSQL réordonne les
+  clés d'un `jsonb`, si bien qu'une comparaison naïve voyait « différente » une
+  collecte strictement identique et recréait une révision à **chaque** clic. Ces
+  doublons ne faussent aucun calcul — le moteur ne relit pas cette table — et ne
+  peuvent pas être supprimés par l'APK, qui n'a que `INSERT, SELECT` sur une table
+  volontairement append-only.
+
+C'est la sonde, et non l'écran du téléphone, qui fait foi sur le contenu de la base.
 
 ### Retour réel du 15/10/2026 (APK 2.2.3) — ce qui a marché, ce qui a échoué
 
@@ -552,6 +571,48 @@ conflit 23505 ⇒ relecture et réessai bornés sans doublon `(source, revision)
 messages d'erreur ⇒ six diagnostics distincts dont un seul nomme la 013, échec
 partiel ⇒ les écritures réussies sont comptées, motif absent ⇒ « raison inconnue »
 et jamais un silence.
+
+### Retour réel sous APK 2.2.4 (revenus 2025) — le correctif jsonb validé en base
+
+Ligne rendue par l'écran Fiscalité du téléphone, recopiée telle quelle :
+
+> Revenus 2025 (déclaration 2026) — R2 publiée prioritaire. DGFiP : IR/décote/QF
+> 3/3, frais salariés 3/3, PS titres lu. PDF : nouveautés CSG lu, notice 2086 lu,
+> brochure crypto lu, RCM lu, charges/CSG lu. RCM personnels, PS crypto 2025 et
+> déduction CSG du foyer non vérifiés ; aucun nouveau taux activé. Bascule DGFiP
+> totale : non. **Supabase : déjà historisé à l'identique.**
+
+« Déjà historisé à l'identique » est l'état `inchangée` du module. Il n'est atteint
+que si trois conditions sont réunies : des lignes existent déjà pour ce millésime,
+les 11 documents du jour ont chacun retrouvé leur ligne, et **leurs valeurs relues
+depuis PostgreSQL ont été reconnues identiques** à celles recalculées.
+
+**Ce que cette ligne prouve** :
+
+- les 11 documents des revenus 2025 **sont écrits dans la base réelle** — ce n'est
+  plus un résultat de test, c'est l'état de la table du propriétaire ;
+- la lecture `SELECT` fonctionne sous RLS avec le rôle `authenticated` de l'APK ;
+- le défaut n° 4 est corrigé **en conditions réelles**. Les valeurs relues viennent
+  d'un `jsonb` dont PostgreSQL a réordonné les clés ; avec la comparaison naïve de la
+  2.2.3 ce même clic aurait conclu « différent » et écrit une révision 2 pour les 11
+  documents. Il n'a rien écrit. C'est exactement le comportement attendu.
+
+**Ce que cette ligne ne prouve pas** :
+
+- l'état des revenus **2024**. Le refus du 15/10 sous 2.2.3 n'a pas été re-reporté
+  depuis, et sa cause reste **inconnue** — aucune hypothèse n'est avancée ici comme
+  un fait. Sous 2.2.4 la raison est imprimée dans le résumé : le prochain clic la
+  nommera.
+- l'état des revenus **2023** au-delà de leur existence. Le clic du 15/10 a écrit 6
+  documents ; si un second clic a eu lieu sous 2.2.3, le défaut jsonb a pu empiler
+  une révision 2. Seule la **ligne 10 de la sonde** le dira (`rév. max`).
+- la version d'APK exacte du téléphone. Le verdict `inchangée` existait déjà en
+  2.2.3, mais il y était pratiquement inatteignable pour un millésime déjà écrit,
+  précisément à cause du défaut n° 4. Ce retour est donc une forte présomption de
+  2.2.4, pas une preuve.
+
+Les revenus 2026 restent à « rien à historiser » : aucun document du millésime 2026
+n'est publié, et rien n'est inventé.
 
 Les lignes 6 à 9 sont des garde-fous : si l'une d'elles bouge, la sécurité de la
 table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par

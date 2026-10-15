@@ -57,7 +57,7 @@ def _sans_transaction(sql: str) -> str:
 def _sonder(cur) -> dict[str, str]:
     cur.execute(SONDE.read_text(encoding="utf-8"))
     lignes = cur.fetchall()
-    assert len(lignes) == 9, "la sonde doit rendre neuf contrôles"
+    assert len(lignes) == 10, "la sonde doit rendre dix contrôles"
     return {str(controle): str(resultat) for _, controle, resultat in lignes}
 
 
@@ -116,6 +116,7 @@ def test_la_sonde_dit_vrai_avant_et_apres_013(base):
             "les sources historiques restent autorisées avant comme après"
         assert _cle(avant, "Lignes de collecte DGFiP") == "0"
         assert _cle(avant, "Millésimes de revenus historisés") == "aucun"
+        assert _cle(avant, "Détail par millésime DGFiP") == "aucune"
     finally:
         conn.execute("rollback")
 
@@ -151,6 +152,32 @@ def test_la_sonde_dit_vrai_avant_et_apres_013(base):
         assert int(_cle(apres_insert, "Lignes de collecte DGFiP")) == avant_insert + 1
         assert str(annee_sonde) in _cle(apres_insert, "Millésimes de revenus historisés").split(", ")
         assert _cle(apres_insert, "Clés personnelles dans les lignes DGFiP") == "0"
+
+        # La ligne 10 est le seul endroit qui détaille par millésime. On l'asserte
+        # par contenant : d'autres tests de la session peuvent avoir laissé des
+        # lignes pour d'autres millésimes, la sonde les rend aussi.
+        assert f"{annee_sonde} : 1 ligne(s), rév. max 1" in _cle(
+            apres_insert, "Détail par millésime DGFiP")
+
+        # Réécriture du même couple (millésime, source) en révision 2 : c'est la
+        # trace qu'aurait laissée le défaut jsonb corrigé en 2.2.4, où une collecte
+        # strictement identique était vue comme différente et recréait une révision
+        # à chaque clic. La sonde doit rendre cette inflation visible.
+        cur.execute(
+            "insert into pf2_fiscal_collectes "
+            "(annee_revenus, source, valeurs, source_url, revision) values (%s,%s,%s,%s,2)",
+            (annee_sonde, "dgfip_bofip_ir",
+             json.dumps({"bareme": {"tranches": [11700]},
+                         "document": {"url": URL_BOFIP_IR, "annee_revenus": annee_sonde,
+                                      "libelle": "BOFiP — barème de l'impôt"}}),
+             URL_BOFIP_IR),
+        )
+        apres_double = _sonder(cur)
+        assert f"{annee_sonde} : 2 ligne(s), rév. max 2" in _cle(
+            apres_double, "Détail par millésime DGFiP")
+        # L'inflation reste invisible sur les valeurs : la sonde ne projette aucune
+        # donnée personnelle, même quand les doublons s'accumulent.
+        assert "11700" not in " | ".join(f"{k}={v}" for k, v in apres_double.items())
 
         # Aucune donnée personnelle ne sort de la sonde : ni identifiant, ni
         # adresse de document, ni valeur de barème.
