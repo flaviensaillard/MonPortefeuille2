@@ -345,6 +345,38 @@
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/complet/index.htm',
             constate: 'Flat Tax de 30 % (12,8 % d’IR et 17,2 % de PS) pour les revenus 2024',
             portée: 'corroboration du même millésime, lue avant l’aide ; jamais utilisée seule comme preuve' },
+        { date: '2026-10-15', millesime: 2023, categorie: 'frais_abattement',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/frais.htm',
+            constate: '« Pour les revenus perçus en 2023, le minimum de déduction est de 495 €, le maximum de '
+                + '14 171 € » ; déduction calculée automatiquement ; choix entre forfaitaire 10 % et frais réels '
+                + 'par membre du foyer ; frais réels en cases 1AK à 1DK, remboursements en 1AJ à 1DJ',
+            portée: 'identique aux constantes embarquées PLANCHER_ABATTEMENT_10[2023] = 495 et '
+                + 'PLAFOND_ABATTEMENT_10[2023] = 14 171 : recoupement du code par la source du millésime' },
+        { date: '2026-10-15', millesime: 2023, categorie: 'frais_repas',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/frais.htm',
+            constate: '« si vous n’avez pas de justifications détaillées, les frais supplémentaires sont évalués à '
+                + '5,20 € par repas » ; « la valeur du repas pris au foyer (évalué à 5,20 € pour 2023) » ; '
+                + 'participation de l’employeur aux titres-restaurant à déduire',
+            portée: 'identique à FORFAIT_REPAS[2023] = 5.2 : recoupement du code par la source du millésime' },
+        { date: '2026-10-15', millesime: 2023, categorie: 'frais_km',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2024/aides/frais.htm',
+            constate: 'barème automobiles des revenus 2023 — 3 CV et moins : d × 0,529 / (d × 0,316) + 1 065 / '
+                + 'd × 0,370 ; 4 CV : 0,606 / 0,340 + 1 330 / 0,407 ; 5 CV : 0,636 / 0,357 + 1 395 / 0,427 ; '
+                + '6 CV : 0,665 / 0,374 + 1 457 / 0,447 ; 7 CV et plus : 0,697 / 0,394 + 1 515 / 0,470 ; seuils '
+                + '5 000 et 20 000 km ; « Le barème pour les véhicules 100 % électriques correspond au barème '
+                + 'applicable ci-dessous majoré de 20 % » ; arrêté du 27 mars 2023 (+5,4 %) ; frais payés au cours '
+                + 'de l’année 2023 ; règle des 40 km ; tarifs 2 roues et cyclomoteurs',
+            portée: 'identique à BAREME_KM et à MAJORATION_VOITURE_ELECTRIQUE = 0,20 : pour les revenus 2023 '
+                + 'l’hypothèse embarquée cesse d’en être une. Elle reste une hypothèse recopiée pour 2022, 2024 '
+                + 'et 2026, et recoupée pour 2025 : le lecteur lireKm exige « Pour les revenus perçus en <année> » '
+                + 'et refuse toute page d’une autre année' },
+        { date: '2026-10-15', millesime: 2024, categorie: 'frais',
+            url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2025/aides/frais.htm',
+            constate: 'sonde en échec le 15/10/2026 : ni l’abattement 10 %, ni le forfait repas, ni le barème '
+                + 'kilométrique des revenus 2024 n’ont pu être relus à distance',
+            portée: 'les trois cases frais des revenus 2024 restent à établir par le bouton ; aucune valeur de '
+                + '2023 n’est reportée sur 2024',
+            limite: 'échec d’accès distant et non absence de publication : à re-vérifier, sans rien déduire' },
         { date: '2026-10-14', millesime: 2025, categorie: 'ps_titres',
             url: 'https://simulateur-ir-ifi.impots.gouv.fr/calcul_impot/2026/aides/gains.htm',
             constate: 'PFU de 12,8 % + PS de 18,6 % = 31,4 % ; « Si, en 2025 … »',
@@ -415,10 +447,17 @@
                 + 'constat fondé sur l’absence de publication indexée et sur docs/COLLECTE-FISCALE.md (13/10/2026)' }
     ];
 
+    /* Une entrée peut porter une catégorie précise, la famille 'frais' (les
+       trois cases lues sur la même page d'aide) ou 'toutes'. */
+    function categorieConcernee(v, categorie) {
+        if (categorie === undefined) return true;
+        if (v.categorie === categorie || v.categorie === 'toutes') return true;
+        return v.categorie === 'frais' && String(categorie).indexOf('frais_') === 0;
+    }
+
     function verificationsDistantes(annee, categorie) {
         return VERIFICATIONS_DISTANTES.filter(function (v) {
-            return (annee === undefined || v.millesime === annee)
-                && (categorie === undefined || v.categorie === categorie || v.categorie === 'toutes');
+            return (annee === undefined || v.millesime === annee) && categorieConcernee(v, categorie);
         });
     }
 
