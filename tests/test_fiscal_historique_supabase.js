@@ -95,21 +95,48 @@ function charger(options) {
     const o = options || {};
     const appels = { select: [], insert: [] };
     const table = o.existantes ? o.existantes.slice() : [];
+    /* PostgreSQL `jsonb` ne conserve pas l'ordre des clés : il les réordonne par
+       longueur puis par octets. Un bouchon qui rendrait les objets dans l'ordre
+       d'envoi masquerait ce comportement — et c'est précisément lui qui faisait
+       dire « différent » à une collecte identique. */
+    const reordonne = (v) => {
+        if (Array.isArray(v)) return v.map(reordonne);
+        if (v && typeof v === 'object') {
+            const out = {};
+            Object.keys(v).sort().reverse().forEach(k => { out[k] = reordonne(v[k]); });
+            return out;
+        }
+        return v;
+    };
+    let ecritures = 0;
     const supabase = {
         select: (t, q) => {
             appels.select.push({ table: t, query: q });
             if (o.selectRefuse) return Promise.reject(new Error('Lecture impossible (réseau)'));
             if (o.selectNul) return Promise.resolve(null);
             const an = /annee_revenus=eq\.(\d+)/.exec(q || '');
-            return Promise.resolve(table.filter(r => !an || r.annee_revenus === Number(an[1])));
+            const rows = table.filter(r => !an || r.annee_revenus === Number(an[1]))
+                .map(r => JSON.parse(JSON.stringify(r)));
+            return Promise.resolve(o.jsonb ? rows.map(r => Object.assign({}, r,
+                { valeurs: reordonne(r.valeurs) })) : rows);
         }
     };
     if (!o.sansInsert) {
         supabase.insert = (t, lignes) => {
             appels.insert.push({ table: t, lignes: JSON.parse(JSON.stringify(lignes)) });
+            ecritures += 1;
             if (o.refus) {
                 return Promise.reject(new Error('Écriture ' + t
                     + ' refusée : new row violates check constraint'));
+            }
+            if (o.erreurInsert) return Promise.reject(new Error(o.erreurInsert));
+            if (o.conflit && ecritures <= o.conflit) {
+                return Promise.reject(new Error('Écriture ' + t + ' refusée : duplicate key value '
+                    + 'violates unique constraint "pf2_fiscal_collectes_pkey" (23505)'));
+            }
+            if (o.echecApres && ecritures > o.echecApres) {
+                return Promise.reject(new Error('Écriture ' + t + ' refusée : ' + (o.erreurTardive
+                    || 'new row violates check constraint "pf2_fiscal_collectes_source_url_check"')));
             }
             lignes.forEach(l => table.push(JSON.parse(JSON.stringify(l))));
             return Promise.resolve(lignes);
@@ -461,10 +488,138 @@ async function bestEffort() {
     assert.doesNotMatch(fiscal, /supabase\.upsert\('pf2_fiscal_annees'/);
 }
 
+/* --------------------------------------------------------------- régressions
+   Quatre défauts observés ou déduits du retour réel du 15/10/2026 (revenus 2023
+   historisé, revenus 2024 et 2025 « NON historisé » sans raison affichée). */
+
+// 10) jsonb réordonne les clés : une collecte identique relue depuis la base doit
+//     rester « inchangée ». Sans cette garde, CHAQUE clic recréait une révision.
+async function jsonbReordonne() {
+    const { H, appels, table } = charger();
+    await H.historiser(2025, preuves(2025));
+    assert.equal(table().length, 11);
+    const avant = appels.insert.length;
+
+    const relue = charger({ existantes: table(), jsonb: true });
+    const r = await relue.H.historiser(2025, preuves(2025));
+    assert.equal(r.etat, 'inchangée',
+        'des clés réordonnées par jsonb ne font pas une collecte différente');
+    assert.equal(relue.appels.insert.length, 0, 'aucune révision fantôme au deuxième clic');
+    assert.equal(r.ignorees.length, 11);
+    assert.ok(avant === 11);
+
+    // Une VRAIE différence reste détectée malgré le réordonnancement.
+    const modifiee = charger({ existantes: table(), jsonb: true });
+    const r2 = await modifiee.H.historiser(2025, preuves(2025, {
+        decote: { dc: 900, dcCouple: 1483, dcPlafond: 1982, dcPlafondCouple: 3277 } }));
+    assert.equal(r2.etat, 'historisée');
+    assert.equal(JSON.stringify(r2.corrigees), '["dgfip_bofip_decote"]',
+        'seule la valeur réellement changée est réécrite');
+}
+
+// 11) Conflit 23505 (deux clics, deux appareils) : relire et réessayer, comme le
+//     fait déjà fiscal_sources.js pour OpenFisca. Jamais UPDATE ni UPSERT.
+async function conflitRevision() {
+    const { H, appels, table } = charger({ conflit: 1 });
+    const r = await H.historiser(2025, preuves(2025));
+    assert.equal(r.etat, 'historisée', 'un conflit de révision se résout par relecture');
+    assert.equal(r.ajoutees.length, 11);
+    assert.equal(table().length, 11, 'les onze documents finissent écrits, une seule fois chacun');
+    assert.ok(appels.select.length >= 2, 'le conflit provoque une relecture de l’historique');
+    assert.equal(new Set(table().map(l => l.source + '#' + l.revision)).size, 11,
+        'aucun doublon de (source, revision)');
+    assert.ok(table().every(l => l.revision === 1));
+
+    // Un conflit qui persiste au-delà des relectures ne boucle pas indéfiniment.
+    const bloque = charger({ conflit: 99 });
+    const r2 = await bloque.H.historiser(2025, preuves(2025));
+    assert.equal(r2.etat, 'non historisée');
+    assert.match(r2.motif, /conflit de révision/, 'le conflit doit être nommé comme tel');
+    assert.doesNotMatch(r2.motif, /migration 013/,
+        'un conflit n’est pas une migration absente : ne pas envoyer sur une fausse piste');
+    assert.ok(bloque.appels.insert.length <= 33, 'nombre de tentatives borné');
+}
+
+// 12) Diagnostic honnête : chaque code d'erreur a sa cause. Attribuer tout refus à
+//     la migration 013 était le défaut qui rendait le retour du téléphone muet.
+async function diagnosticParCause() {
+    const cas = [
+        ['Écriture pf2_fiscal_collectes refusée : {"code":"42501","message":"row-level security"}',
+            /droits insuffisants/i, /migration 013/],
+        ['Écriture pf2_fiscal_collectes refusée : {"code":"401","message":"JWT expired"}',
+            /session expirée|reconnecter/i, /migration 013/],
+        ['Écriture pf2_fiscal_collectes refusée : {"code":"429","message":"rate limit"}',
+            /cadence/i, /migration 013/],
+        ['Écriture pf2_fiscal_collectes refusée : duplicate key value violates unique (23505)',
+            /conflit de révision/i, /migration 013/],
+        ['Écriture pf2_fiscal_collectes refusée : new row violates check constraint (23514)',
+            /migration 013/, null],
+        ['Lecture pf2_fiscal_collectes impossible (réseau)', /historique illisible/, /migration 013/]
+    ];
+    for (const [message, attendu, interdit] of cas) {
+        const { H, appels } = charger({ erreurInsert: message, selectRefuse: /^Lecture/.test(message) });
+        const r = await H.historiser(2025, preuves(2025));
+        assert.equal(r.etat, 'non historisée');
+        assert.match(r.motif, attendu, 'motif pour : ' + message);
+        if (interdit) assert.doesNotMatch(r.motif, interdit, 'fausse piste pour : ' + message);
+        assert.equal(r.revisionPubliee, false);
+        assert.ok(appels.insert.every(c => c.table === 'pf2_fiscal_collectes'));
+    }
+}
+
+// 13) Échec partiel : les lignes déjà écrites restent en base (append-only) et
+//     DOIVENT être dites — sinon on croit à tort que rien n'est parti.
+async function echecPartiel() {
+    const { H, appels, table } = charger({ echecApres: 3 });
+    const r = await H.historiser(2025, preuves(2025));
+    assert.equal(r.etat, 'non historisée');
+    assert.equal(r.ajoutees.length, 3, 'les trois écritures réussies sont comptées');
+    assert.equal(table().length, 3, 'elles sont bien en base, et aucune n’est retirée');
+    assert.match(r.motif, /contrainte|migration 013/i);
+    assert.ok(appels.insert.length >= 4);
+
+    // Le résumé copiable doit le dire, sans adresse et sans exploser la limite.
+    const resume = resumeAvec(r);
+    assert.match(resume, /3 document\(s\) écrit\(s\), puis NON historisé/);
+    assert.doesNotMatch(resume.slice(resume.indexOf('Supabase')), /https?:/);
+}
+
+// 14) Le résumé court porte la RAISON : sans elle, le retour du téléphone ne
+//     permettait aucun diagnostic (c'est exactement ce qui s'est produit).
+function resumeAvec(historique) {
+    const ctx2 = { PF: { ui: { h: s => String(s) }, store: { reglages: () => ({}) } },
+        Date, Number, String };
+    ctx2.globalThis = ctx2;
+    vm.createContext(ctx2);
+    vm.runInContext(fs.readFileSync(path.join(dir, 'fiscal.js'), 'utf8'), ctx2,
+        { filename: 'fiscal.js' });
+    return ctx2.PF.fiscal.resumeRapport(2025, { boi: {}, frais: {}, historique });
+}
+async function raisonDansLeResume() {
+    const long = 'Écriture pf2_fiscal_collectes refusée : '
+        + 'https://aaaaaaaaaaaaaaaaaaaa.supabase.co/rest/v1/pf2_fiscal_collectes '
+        + 'x'.repeat(400);
+    const r = resumeAvec({ etat: 'non historisée', motif: long,
+        ajoutees: [], corrigees: [], ignorees: [] });
+    assert.match(r, /NON historisé — /, 'la raison doit apparaître dans le résumé copiable');
+    assert.doesNotMatch(r, /https?:/, 'aucune adresse dans le résumé');
+    assert.ok(r.length < 600, 'le résumé reste copiable en un message : ' + r.length);
+
+    const sansMotif = resumeAvec({ etat: 'non historisée',
+        ajoutees: [], corrigees: [], ignorees: [] });
+    assert.match(sansMotif, /raison inconnue/, 'un motif absent doit être dit, pas tu');
+}
+
 Promise.resolve()
     .then(() => ecritureInitiale())
     .then(() => appendOnly())
     .then(() => bestEffort())
+    .then(() => jsonbReordonne())
+    .then(() => conflitRevision())
+    .then(() => diagnosticParCause())
+    .then(() => echecPartiel())
+    .then(() => raisonDansLeResume())
     .then(() => console.log('Historisation Supabase des collectes DGFiP : écritures, append-only, '
-        + 'best effort, millésime futur et parité avec la migration 013 OK'))
+        + 'best effort, millésime futur, parité 013, jsonb, conflit 23505, diagnostic par cause '
+        + 'et raison dans le résumé OK'))
     .catch(e => { console.error(e); process.exit(1); });

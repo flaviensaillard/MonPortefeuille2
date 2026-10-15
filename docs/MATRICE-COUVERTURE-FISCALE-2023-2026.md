@@ -897,6 +897,32 @@ l'identique. », ou « Supabase : NON historisé, collecte conservée sur l'appa
 et le bilan détaillé reprend le motif complet. Le résumé reste sous 600 caractères
 (399 au pire cas mesuré).
 
+**Retour réel du 15/10/2026 (APK 2.2.3, premier clic après application de la 013)** :
+revenus 2023 → **6 document(s) historisé(s)** ; revenus 2024 et 2025 → **NON
+historisé** ; revenus 2026 → rien à historiser (correct). Deux faits en découlent,
+vérifiés et non supposés : la migration 013 **est appliquée et fonctionne** (sans
+elle aucune source `dgfip_*` n'est écrivable, or six lignes de 2023 ont été
+acceptées) ; et la contrainte d'adresse **n'est pas la cause** des échecs — les 23
+lignes réellement produites par les lecteurs (6 + 6 + 11), avec leurs vraies
+adresses, ont été rejouées sur un PostgreSQL réel avec 009 → 013 : toutes sont
+acceptées. **La cause exacte des refus 2024 et 2025 reste inconnue**, et aucune
+hypothèse n'est avancée ici comme un fait : le résumé copiable taisait le motif, ce
+qui a rendu ce retour inexploitable. Quatre défauts réels ont été corrigés en
+**2.2.4** — le résumé dit maintenant la raison (sans adresse, sous 600 caractères) ;
+chaque code d'erreur a son propre diagnostic au lieu d'être attribué en bloc à la
+migration 013 (un conflit 23505, une session 401/403, une cadence 429 ou un droit
+42501 n'ont pas le même remède) ; un conflit de révision est relu et réessayé deux
+fois comme `fiscal_sources.js` le fait déjà pour OpenFisca, sans jamais UPDATE,
+DELETE ni UPSERT ; et la comparaison d'identité est **canonique**, parce que
+PostgreSQL `jsonb` ne conserve pas l'ordre des clés — une ligne écrite
+`{"quotient_familial":…,"document":…}` est relue `{"document":…,"quotient_familial":…}`,
+si bien qu'avec un `JSON.stringify` brut **chaque clic aurait recréé une révision**.
+Un échec survenant après des écritures réussies le dit désormais (« N document(s)
+écrit(s), puis NON historisé — raison »), ces lignes restant en base du fait de
+l'append-only. Le détail et les cinq jeux de test qui verrouillent ces points
+(§10 à §14 de `tests/test_fiscal_historique_supabase.js`) sont dans
+[`COLLECTE-FISCALE.md`](COLLECTE-FISCALE.md), section « Retour réel du 15/10/2026 ».
+
 **Vérifiable par le propriétaire, sans rien écrire** :
 [`docs/VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql`](VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql)
 est un `select` unique à coller dans Supabase SQL Editor. Il répond par des faits —

@@ -15,7 +15,7 @@ ne se teste que sur appareil — voir telechargements/notes-2.2.0.md) :
 - le module JS est chargé par index.html et exigé par build.sh ;
 - les nouvelles méthodes du pont figurent sur la liste de revue du test de
   durcissement (toute méthode non revue fait échouer la suite) ;
-- version courante cohérente partout (2.2.3), y compris core/__init__.py ;
+- version courante cohérente partout (2.2.4), y compris core/__init__.py ;
 - les notes de version parlent de l'empreinte et de sa limite « appareil ».
 """
 from __future__ import annotations
@@ -135,11 +135,11 @@ def test_les_six_methodes_sont_sur_la_liste_de_revue_du_pont():
 
 
 def test_version_courante_coherente_dont_core():
-    """2.2.3 : le manifeste, le workflow, build.sh et core/__init__.py disent la
+    """2.2.4 : le manifeste, le workflow, build.sh et core/__init__.py disent la
     même version. Le verrou complet est dans tests/test_livraison_securisee.js."""
-    assert re.search(r"__version__\s*=\s*\"2\.2\.3\"", CORE), \
+    assert re.search(r"__version__\s*=\s*\"2\.2\.4\"", CORE), \
         "core/__init__.py doit annoncer la même version que l'APK"
-    assert "VERSION_NAME:-2.2.3" in BUILD
+    assert "VERSION_NAME:-2.2.4" in BUILD
 
 
 def test_notes_2_2_0_parlent_de_l_empreinte_et_de_la_limite_appareil():

@@ -183,87 +183,139 @@
             + '&order=revision.desc');
     }
 
+    /* PostgreSQL `jsonb` ne conserve PAS l'ordre des clés : il les réordonne
+       (par longueur puis par octets). Comparer les `JSON.stringify` bruts ferait
+       donc dire « différent » à une collecte strictement identique relue depuis la
+       base — et chaque clic recréerait une révision, jusqu'à épuiser l'historique.
+       D'où cette forme canonique : mêmes paires, triées de la même façon des deux
+       côtés, quel que soit l'ordre rendu par le serveur. */
+    function canonique(v) {
+        if (Array.isArray(v)) return v.map(canonique);
+        if (v && typeof v === 'object') {
+            var out = {};
+            Object.keys(v).sort().forEach(function (k) { out[k] = canonique(v[k]); });
+            return out;
+        }
+        return v;
+    }
+
     function identiques(a, b) {
-        try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+        try { return JSON.stringify(canonique(a)) === JSON.stringify(canonique(b)); }
+        catch (_) { return false; }
+    }
+
+    /* Classe l'erreur renvoyée par le pont. Le message brut de PostgREST porte le
+       code SQL, et chaque code a une cause et un remède DIFFÉRENTS : dire « la
+       migration 013 est-elle appliquée ? » devant un conflit de révision ou une
+       session expirée enverrait le propriétaire sur une fausse piste — c'était le
+       défaut de la première version, qui attribuait tout refus à la contrainte. */
+    function qualifier(msg) {
+        var m = String(msg || '');
+        if (/23505|duplicate key|violates unique/i.test(m))
+            return 'conflit de révision avec un autre clic ou un autre appareil';
+        if (/23514|check constraint|violates check/i.test(m))
+            return 'ligne refusée par une contrainte — la migration 013 (sources DGFiP) '
+                + 'est-elle appliquée ?';
+        if (/23502|null value/i.test(m)) return 'valeur obligatoire absente';
+        if (/42501|row-level security|permission denied/i.test(m)) return 'droits insuffisants (RLS)';
+        if (/\b(401|403)\b|jwt|token|session/i.test(m))
+            return 'session expirée ou refusée — reconnecter le compte puis relancer la collecte';
+        if (/\b429\b|rate.?limit|quota/i.test(m)) return 'cadence refusée par le serveur';
+        return 'échec inattendu';
+    }
+
+    function nettoie(msg) {
+        return String(msg || '').replace(/https?:\/\/[^\s'"]+/gi, '<adresse>')
+            .replace(/\s+/g, ' ').trim();
     }
 
     /* Écrit l'historique d'une collecte. Ne lève jamais d'exception : un échec
-       (réseau, contrainte, migration 013 non appliquée) est rapporté dans `etat` et
-       `motif`, et la collecte locale reste la référence du moteur. */
+       (réseau, session, contrainte, conflit) est rapporté dans `etat` et `motif`,
+       et la collecte locale reste la référence du moteur.
+
+       Un conflit de clé primaire (23505) est ATTENDU et bénin : deux clics, ou
+       deux appareils, peuvent lire la même dernière révision avant d'écrire. Comme
+       `fiscal_sources.js` le fait déjà pour OpenFisca, on relit la ligne gagnante
+       et on réessaie — jamais UPDATE, DELETE ni UPSERT : la table reste
+       append-only. Les lignes déjà écrites par une passe précédente ne sont pas
+       réécrites. */
     function historiser(annee, preuves) {
         var sb = PF.net && PF.net.supabase;
         var candidats = lignes(annee, preuves);
         var vide = { ajoutees: [], corrigees: [], ignorees: [] };
         if (!sb || typeof sb.insert !== 'function' || typeof sb.select !== 'function') {
-            var sansPont = { etat: 'non historisée', motif: 'pont Supabase absent', revisionPubliee: false };
-            return Promise.resolve(Object.assign(sansPont, vide));
+            return Promise.resolve(Object.assign({ etat: 'non historisée',
+                motif: 'pont Supabase absent', revisionPubliee: false }, vide));
         }
         if (!candidats.length) {
             return Promise.resolve(Object.assign({ etat: 'rien à historiser',
                 motif: 'aucun document de ce millésime lu', revisionPubliee: false }, vide));
         }
-        return consulter(annee).then(function (existantes) {
-            if (existantes === null) {
-                return Object.assign({ etat: 'non historisée',
-                    motif: 'historique illisible (pont Supabase incomplet)', revisionPubliee: false }, vide);
-            }
-            var dernier = {};
-            (Array.isArray(existantes) ? existantes : []).forEach(function (r) {
-                if (!r || !r.source) return;
-                if (!dernier[r.source] || Number(r.revision) > Number(dernier[r.source].revision)) dernier[r.source] = r;
+
+        var ecrites = [], dejaConnues = Object.create(null), ignorees = [];
+
+        function resultat(etat, motif) {
+            return {
+                etat: etat, motif: motif,
+                ajoutees: ecrites.filter(function (s) { return !dejaConnues[s]; }),
+                corrigees: ecrites.filter(function (s) { return !!dejaConnues[s]; }),
+                ignorees: ignorees, revisionPubliee: false
+            };
+        }
+
+        function inserer(liste, i) {
+            if (i >= liste.length) return Promise.resolve(true);
+            return sb.insert(TABLE, [liste[i]]).then(function () {
+                ecrites.push(liste[i].source);
+                return inserer(liste, i + 1);
             });
-            var aInserer = [], ignorees = [];
-            candidats.forEach(function (c) {
-                var ancien = dernier[c.source];
-                if (ancien && identiques(ancien.valeurs, c.valeurs) && ancien.source_url === c.source_url) {
-                    ignorees.push(c.source);
-                    return;
-                }
-                var revision = ancien ? Number(ancien.revision) + 1 : 1;
-                if (!Number.isInteger(revision) || revision < 1) { ignorees.push(c.source); return; }
-                c.revision = revision;
-                aInserer.push(c);
-            });
-            if (!aInserer.length) {
-                return { etat: 'inchangée', motif: 'documents déjà historisés à l’identique',
-                    ajoutees: [], corrigees: [], ignorees: ignorees, revisionPubliee: false };
-            }
-            var ecrites = [];
-            function ecrire(i) {
-                if (i >= aInserer.length) return Promise.resolve(null);
-                // Insertion séquentielle : la clé primaire
-                // (user_id, annee_revenus, source, revision) protège des clics
-                // simultanés entre deux appareils.
-                return sb.insert(TABLE, [aInserer[i]]).then(function () {
-                    ecrites.push(aInserer[i].source);
-                    return ecrire(i + 1);
+        }
+
+        function passe(tentatives) {
+            return consulter(annee).then(function (existantes) {
+                if (existantes === null)
+                    throw new Error('historique illisible (pont Supabase incomplet)');
+                var dernier = {};
+                (Array.isArray(existantes) ? existantes : []).forEach(function (r) {
+                    if (!r || !r.source) return;
+                    if (!dernier[r.source] || Number(r.revision) > Number(dernier[r.source].revision))
+                        dernier[r.source] = r;
                 });
-            }
-            return ecrire(0).then(function () {
-                return {
-                    etat: 'historisée',
-                    motif: aInserer.length + ' document(s) écrit(s) dans ' + TABLE,
-                    ajoutees: ecrites.filter(function (s) { return ignorees.indexOf(s) < 0 && dernier[s] === undefined; }),
-                    corrigees: ecrites.filter(function (s) { return dernier[s] !== undefined; }),
-                    ignorees: ignorees, revisionPubliee: false
-                };
+                var aInserer = [];
+                // Les sources déjà écrites par une passe précédente sont dans
+                // `ecrites` : les remettre dans `ignorees` les compterait deux fois.
+                ignorees = [];
+                candidats.forEach(function (c) {
+                    if (ecrites.indexOf(c.source) >= 0) return; // écrite à une passe précédente
+                    var ancien = dernier[c.source];
+                    if (ancien && identiques(ancien.valeurs, c.valeurs)
+                        && ancien.source_url === c.source_url) { ignorees.push(c.source); return; }
+                    var revision = ancien ? Number(ancien.revision) + 1 : 1;
+                    if (!Number.isInteger(revision) || revision < 1) { ignorees.push(c.source); return; }
+                    c.revision = revision;
+                    dejaConnues[c.source] = !!ancien;
+                    aInserer.push(c);
+                });
+                if (!aInserer.length) return false;
+                return inserer(aInserer, 0);
             }).catch(function (err) {
                 var msg = String(err && err.message || err);
-                return {
-                    etat: 'non historisée',
-                    motif: /refusée/.test(msg)
-                        ? 'écriture refusée par la table — la migration 013 (sources DGFiP) est-elle appliquée ? '
-                            + msg.slice(0, 180)
-                        : 'écriture interrompue : ' + msg.slice(0, 180),
-                    ajoutees: ecrites.filter(function (s) { return dernier[s] === undefined; }),
-                    corrigees: ecrites.filter(function (s) { return dernier[s] !== undefined; }),
-                    ignorees: ignorees, revisionPubliee: false
-                };
+                if (tentatives > 0 && /23505|duplicate key|violates unique/i.test(msg))
+                    return passe(tentatives - 1);
+                if (/^Lecture /.test(msg)) throw new Error('historique illisible : ' + msg);
+                throw err;
             });
+        }
+
+        return passe(2).then(function (ecrit) {
+            return ecrit
+                ? resultat('historisée', ecrites.length + ' document(s) écrit(s) dans ' + TABLE)
+                : resultat('inchangée', 'documents déjà historisés à l’identique');
         }).catch(function (err) {
-            return Object.assign({ etat: 'non historisée',
-                motif: 'historique illisible : ' + String(err && err.message || err).slice(0, 180),
-                revisionPubliee: false }, vide);
+            var msg = String(err && err.message || err);
+            if (/^historique illisible/.test(msg)) return resultat('non historisée', msg.slice(0, 180));
+            return resultat('non historisée',
+                qualifier(msg) + ' — ' + nettoie(msg).slice(0, 160));
         });
     }
 

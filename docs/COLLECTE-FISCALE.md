@@ -465,12 +465,10 @@ ne lit et n'écrit que ses lignes, `anon` n'a rien) ; elle ne touche pas à
 est rejouable sans perte (il ne supprime ni ne modifie aucune ligne), mais un rejeu
 n'apporte rien.
 
-La base accepte donc désormais les onze sources DGFiP. **Aucune ligne n'est encore
-écrite**, et c'est attendu : l'écriture vient du module
-`js/fiscal_historique_supabase.js`, qui n'existe dans aucune APK installée. La
-2.2.2 du téléphone ne le contient pas ; il sera livré par la **2.2.3** (voir
-ci-dessous). D'ici là, l'historisation échoue proprement, le motif nomme la
-migration 013, et la collecte locale reste la référence du moteur.
+La base accepte donc désormais les onze sources DGFiP — **et c'est vérifié en
+conditions réelles, pas seulement en test** : voir « Retour réel du 15/10/2026 »
+ci-dessous. L'écriture vient du module `js/fiscal_historique_supabase.js`, livré
+par l'APK **2.2.3** puis corrigé en **2.2.4**.
 
 **Vérifier soi-même, sans rien écrire** :
 [`docs/VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql`](VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql)
@@ -479,21 +477,81 @@ est une sonde à coller dans Supabase SQL Editor. Elle ne contient **qu'un seul
 des littéraux — c'est contrôlé par test), et n'affiche aucune donnée personnelle :
 ni `user_id`, ni montant, ni adresse de document. Elle rend neuf lignes :
 
-| # | Contrôle | Avant 013 | **Depuis le 15/10/2026** | Après un clic en 2.2.3 |
+| # | Contrôle | Avant 013 | Après 013 (15/10) | **Attendu maintenant** |
 | --- | --- | --- | --- | --- |
-| 1 | Migration 013 appliquée | NON | **OUI** | OUI |
-| 2 | Sources DGFiP autorisées | 0 | **11 sur 11** | 11 sur 11 |
-| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | **2 sur 2** | 2 sur 2 |
-| 4 | Lignes de collecte DGFiP historisées | 0 | **0** | ≥ 1 |
-| 5 | Millésimes historisés | aucun | **aucun** | ex. 2025 |
-| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | **INSERT, SELECT** | INSERT, SELECT |
-| 7 | Droits de l'APK sur les règles publiées | SELECT seul | **SELECT seul** | SELECT seul |
-| 8 | Tables fiscales sous RLS | 2 | **2** | 2 |
-| 9 | Clés personnelles dans les lignes DGFiP | 0 | **0** | 0 |
+| 1 | Migration 013 appliquée | NON | OUI | **OUI** |
+| 2 | Sources DGFiP autorisées | 0 | 11 sur 11 | **11 sur 11** |
+| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | 2 sur 2 | **2 sur 2** |
+| 4 | Lignes de collecte DGFiP historisées | 0 | 0 | **6** (à confirmer) |
+| 5 | Millésimes historisés | aucun | aucun | **2023** |
+| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | INSERT, SELECT | **INSERT, SELECT** |
+| 7 | Droits de l'APK sur les règles publiées | SELECT seul | SELECT seul | **SELECT seul** |
+| 8 | Tables fiscales sous RLS | 2 | 2 | **2** |
+| 9 | Clés personnelles dans les lignes DGFiP | 0 | 0 | **0** |
 
-La ligne 4 à **0** alors que la ligne 1 est à **OUI** est l'état normal et attendu
-depuis le 15/10/2026 : la base sait accepter les collectes DGFiP, mais aucune APK
-installée ne les écrit encore.
+Les lignes 4 et 5 sont passées de 0 à 6 et de « aucun » à « 2023 » du fait du clic
+réel du 15/10/2026 avec l'APK 2.2.3 : le téléphone a annoncé « 6 document(s)
+historisé(s) » pour les revenus 2023. **À confirmer en relançant la sonde** — c'est
+elle, et non l'écran du téléphone, qui fait foi sur le contenu de la base.
+
+### Retour réel du 15/10/2026 (APK 2.2.3) — ce qui a marché, ce qui a échoué
+
+Premier clic réel du propriétaire après application de la 013. Résultat affiché par
+l'écran Fiscalité :
+
+| Millésime | Documents lus | Verdict |
+| --- | --- | --- |
+| Revenus 2023 | 6 | **6 document(s) historisé(s)** |
+| Revenus 2024 | 6 | NON historisé |
+| Revenus 2025 | 11 | NON historisé |
+| Revenus 2026 | 0 | rien à historiser (correct) |
+
+**Ce que ce retour prouve** :
+
+- la migration 013 **est appliquée et fonctionne** : sans elle aucune source
+  `dgfip_*` ne peut être écrite, or six lignes des revenus 2023 ont été acceptées ;
+- la contrainte d'adresse **n'est pas la cause** des échecs 2024 et 2025. Les 23
+  lignes réellement produites par les lecteurs (6 + 6 + 11), avec leurs vraies
+  adresses extraites de `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()`
+  et `repasUrl()`, `fiscal_regimes_sources.url()` et `urlPour()` des lecteurs PDF,
+  ont été rejouées sur un PostgreSQL réel avec 009 → 013 : **toutes sont acceptées**.
+
+**Ce que ce retour ne prouve pas** : la cause exacte des refus 2024 et 2025. Elle
+est **inconnue**, et elle l'est restée à cause d'un défaut du module : le résumé
+copiable disait « NON historisé, collecte conservée sur l'appareil » **sans le
+motif**. Aucune hypothèse n'est donc avancée ici comme un fait.
+
+**Quatre défauts réels, corrigés en 2.2.4** :
+
+1. *Le résumé taisait la raison.* C'est ce qui a rendu le retour du 15/10
+   inexploitable. La raison est maintenant reprise dans le résumé copiable, sans
+   adresse, et le résumé reste sous 600 caractères.
+2. *Tout refus était attribué à la migration 013.* Un conflit de révision (23505),
+   une session expirée (401/403), une cadence refusée (429) ou un droit insuffisant
+   (42501) ont des causes et des remèdes différents. Chaque code a son libellé, et
+   la 013 n'est plus nommée que pour un refus de contrainte (23514).
+3. *Aucun rejeu sur conflit.* Deux clics ou deux appareils peuvent lire la même
+   dernière révision avant d'écrire : le second reçoit 23505. `fiscal_sources.js`
+   relit et réessaie déjà deux fois pour OpenFisca ; ce module abandonnait tout le
+   millésime. Il relit désormais la ligne gagnante et réessaie, sans jamais UPDATE,
+   DELETE ni UPSERT.
+4. *Une collecte identique était vue comme différente.* PostgreSQL `jsonb` **ne
+   conserve pas l'ordre des clés** : une ligne écrite `{"quotient_familial":…,"document":…}`
+   est relue `{"document":…,"quotient_familial":…}`. La comparaison par
+   `JSON.stringify` brut concluait « différent », et **chaque clic aurait recréé une
+   révision**. La comparaison est canonique (clés triées des deux côtés).
+
+S'y ajoute un défaut d'honnêteté du compte rendu : un échec peut survenir **après**
+des écritures réussies, qui restent en base (append-only). Le résumé le dit — « N
+document(s) écrit(s), puis NON historisé — raison » — au lieu de laisser croire que
+rien n'est parti.
+
+Ces cinq points sont verrouillés par `tests/test_fiscal_historique_supabase.js`
+(§10 à §14) : clés réordonnées par jsonb ⇒ « inchangée » et zéro révision fantôme,
+conflit 23505 ⇒ relecture et réessai bornés sans doublon `(source, revision)`, six
+messages d'erreur ⇒ six diagnostics distincts dont un seul nomme la 013, échec
+partiel ⇒ les écritures réussies sont comptées, motif absent ⇒ « raison inconnue »
+et jamais un silence.
 
 Les lignes 6 à 9 sont des garde-fous : si l'une d'elles bouge, la sécurité de la
 table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par
@@ -502,7 +560,7 @@ les deux états (avant / après 013), y compris avec une écriture réelle de l'
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
 
-### Livraison : la prochaine APK est la 2.2.3, pas la 2.2.2
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4
 
 Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
 release **depuis `main` seulement**. Or la release est **unique et immuable** : si
@@ -511,13 +569,15 @@ fait `exit 1`. La PR #24 modifie neuf fichiers sous `app/` : la fusionner sous l
 version 2.2.2 aurait donc **fait échouer la construction sur `main`**, sans APK
 installable à la clé.
 
-La version est donc passée à **2.2.3 (code 33)** dans les cinq endroits que la
-procédure du dépôt impose (`AndroidManifest.xml`, `apk.yml` `VERSION_NAME` et
-`VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
-`telechargements/notes-2.2.3.md` et le nom d'artefact alignés.
+La version est donc passée à **2.2.3 (code 33)**, puis à **2.2.4 (code 34)** après
+le retour réel du 15/10 — la 2.2.3 étant déjà installée sur le téléphone, il faut
+un code supérieur pour que les deux APK se distinguent. Les cinq endroits imposés
+par la procédure du dépôt sont alignés (`AndroidManifest.xml`, `apk.yml`
+`VERSION_NAME` et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
+`telechargements/notes-2.2.4.md` et le nom d'artefact.
 
 **Conséquence à connaître avant de fusionner** : la fusion de la PR #24 construira
-puis **publiera automatiquement la release `apk-2.2.3`**. C'est le comportement
+puis **publiera automatiquement la release `apk-2.2.4`**. C'est le comportement
 normal du workflow (la 2.2.2 a été publiée ainsi), mais c'est bien une publication
 définitive : aucun écrasement n'est possible ensuite.
 

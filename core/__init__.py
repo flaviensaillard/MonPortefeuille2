@@ -19,4 +19,4 @@ une erreur affichée, pas un chiffre inventé. C'est la correction structurelle 
 la v1.
 """
 
-__version__ = "2.2.3"
+__version__ = "2.2.4"

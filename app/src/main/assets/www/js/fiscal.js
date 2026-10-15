@@ -1252,14 +1252,26 @@
     /* Une clause, pas une page : le résumé copiable doit rester sous 600
        caractères et sans adresse. Absente tant qu'aucune historisation n'a été
        tentée (rapport antérieur, module non chargé). */
+    /* Le motif brut peut contenir l'adresse renvoyée par le serveur : le résumé
+       copiable doit rester court et sans URL, donc on la remplace et on tronque.
+       Sans la raison, « NON historisé » ne permet aucun diagnostic. */
+    function raisonCourte(motif) {
+        var m = String(motif || 'raison inconnue')
+            .replace(/https?:\/\/[^\s'"]+/gi, '<adresse>').replace(/\s+/g, ' ').trim();
+        return m.length > 100 ? m.slice(0, 97) + '…' : m;
+    }
+
     function clauseSupabase(h) {
         if (!h || !h.etat) return '';
-        if (h.etat === 'historisée') return ' Supabase : '
-            + (h.ajoutees.length + h.corrigees.length) + ' document(s) historisé(s)'
+        var ecrits = (h.ajoutees ? h.ajoutees.length : 0) + (h.corrigees ? h.corrigees.length : 0);
+        if (h.etat === 'historisée') return ' Supabase : ' + ecrits + ' document(s) historisé(s)'
             + (h.ignorees && h.ignorees.length ? ', ' + h.ignorees.length + ' inchangé(s)' : '') + '.';
         if (h.etat === 'inchangée') return ' Supabase : déjà historisé à l’identique.';
         if (h.etat === 'rien à historiser') return ' Supabase : rien à historiser.';
-        return ' Supabase : NON historisé, collecte conservée sur l’appareil.';
+        // Un échec peut survenir APRÈS des écritures réussies : append-only, elles
+        // restent en base. Le taire ferait croire à tort que rien n'est parti.
+        return ' Supabase : ' + (ecrits ? ecrits + ' document(s) écrit(s), puis ' : '')
+            + 'NON historisé — ' + raisonCourte(h.motif) + '.';
     }
 
     function resumeRapport(annee, r) {
