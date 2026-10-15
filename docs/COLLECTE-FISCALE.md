@@ -467,6 +467,32 @@ ligne), mais ne pas rejouer 009, 010, 011, 012 ni le SQL R2 2025. Tant qu'elle n
 pas appliquée, l'APK continue de fonctionner : l'historisation échoue proprement,
 le motif nomme la migration 013, et la collecte locale reste la référence du moteur.
 
+**Vérifier soi-même, sans rien écrire** :
+[`docs/VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql`](VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql)
+est une sonde à coller dans Supabase SQL Editor. Elle ne contient **qu'un seul
+`select`** (aucun mot-clé d'écriture ne survit à la suppression des commentaires et
+des littéraux — c'est contrôlé par test), et n'affiche aucune donnée personnelle :
+ni `user_id`, ni montant, ni adresse de document. Elle rend neuf lignes :
+
+| # | Contrôle | Attendu aujourd'hui | Attendu après 013 + un clic |
+| --- | --- | --- | --- |
+| 1 | Migration 013 appliquée | **NON** | OUI |
+| 2 | Sources DGFiP autorisées | 0 | 11 sur 11 |
+| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | 2 sur 2 |
+| 4 | Lignes de collecte DGFiP historisées | 0 | ≥ 1 |
+| 5 | Millésimes historisés | aucun | ex. 2025 |
+| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | INSERT, SELECT |
+| 7 | Droits de l'APK sur les règles publiées | SELECT seul | SELECT seul |
+| 8 | Tables fiscales sous RLS | 2 | 2 |
+| 9 | Clés personnelles dans les lignes DGFiP | 0 | 0 |
+
+Les lignes 6 à 9 sont des garde-fous : si l'une d'elles bouge, la sécurité de la
+table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par
+`tests/test_verifier_collectes_dgfip.py`, qui la rejoue sur un PostgreSQL réel dans
+les deux états (avant / après 013), y compris avec une écriture réelle de l'APK sous
+RLS, et qui exige que sa liste de sources reste **identique** à celle de la
+contrainte de la 013 (sinon une douzième source serait ignorée en silence).
+
 Côté application, l'écriture est faite par `js/fiscal_historique_supabase.js`
 (`PF.fiscalHistorique`), appelé par le bouton de collecte après le rechargement des
 caches, un millésime après l'autre. Le détail de ce qui s'écrit et de ce qui ne
