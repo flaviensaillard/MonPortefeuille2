@@ -439,7 +439,7 @@ installer un APK signé avec une clé de développement par-dessus l'application
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.
 
-## Migration 013 : historique des collectes DGFiP — **À EXÉCUTER, pas encore appliquée**
+## Migration 013 : historique des collectes DGFiP — **APPLIQUÉE par le propriétaire le 15/10/2026**
 
 Constat au 16/10/2026 : les cinq lecteurs DGFiP de l'APK n'écrivaient **que dans le
 `localStorage` de l'appareil**. La table `pf2_fiscal_collectes`, limitée par 009 puis
@@ -460,12 +460,17 @@ rectification crée la révision suivante) ; elle n'élargit pas la RLS (chaque 
 ne lit et n'écrit que ses lignes, `anon` n'a rien) ; elle ne touche pas à
 `pf2_fiscal_annees`, dont l'écriture reste `service_role`.
 
-**Mode d'emploi** : à exécuter dans Supabase SQL Editor **APRÈS 012**, une seule
-fois, avec l'accord du propriétaire et après une sauvegarde chiffrée récente
-restaurée et comparée. Le script est rejouable (il ne supprime ni ne modifie aucune
-ligne), mais ne pas rejouer 009, 010, 011, 012 ni le SQL R2 2025. Tant qu'elle n'est
-pas appliquée, l'APK continue de fonctionner : l'historisation échoue proprement,
-le motif nomme la migration 013, et la collecte locale reste la référence du moteur.
+**Exécutée par le propriétaire le 15/10/2026** dans Supabase SQL Editor, après
+012. **Ne pas la rejouer**, comme 009, 010, 011, 012 et le SQL R2 2025. Le script
+est rejouable sans perte (il ne supprime ni ne modifie aucune ligne), mais un rejeu
+n'apporte rien.
+
+La base accepte donc désormais les onze sources DGFiP. **Aucune ligne n'est encore
+écrite**, et c'est attendu : l'écriture vient du module
+`js/fiscal_historique_supabase.js`, qui n'existe dans aucune APK installée. La
+2.2.2 du téléphone ne le contient pas ; il sera livré par la **2.2.3** (voir
+ci-dessous). D'ici là, l'historisation échoue proprement, le motif nomme la
+migration 013, et la collecte locale reste la référence du moteur.
 
 **Vérifier soi-même, sans rien écrire** :
 [`docs/VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql`](VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql)
@@ -474,17 +479,21 @@ est une sonde à coller dans Supabase SQL Editor. Elle ne contient **qu'un seul
 des littéraux — c'est contrôlé par test), et n'affiche aucune donnée personnelle :
 ni `user_id`, ni montant, ni adresse de document. Elle rend neuf lignes :
 
-| # | Contrôle | Attendu aujourd'hui | Attendu après 013 + un clic |
-| --- | --- | --- | --- |
-| 1 | Migration 013 appliquée | **NON** | OUI |
-| 2 | Sources DGFiP autorisées | 0 | 11 sur 11 |
-| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | 2 sur 2 |
-| 4 | Lignes de collecte DGFiP historisées | 0 | ≥ 1 |
-| 5 | Millésimes historisés | aucun | ex. 2025 |
-| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | INSERT, SELECT |
-| 7 | Droits de l'APK sur les règles publiées | SELECT seul | SELECT seul |
-| 8 | Tables fiscales sous RLS | 2 | 2 |
-| 9 | Clés personnelles dans les lignes DGFiP | 0 | 0 |
+| # | Contrôle | Avant 013 | **Depuis le 15/10/2026** | Après un clic en 2.2.3 |
+| --- | --- | --- | --- | --- |
+| 1 | Migration 013 appliquée | NON | **OUI** | OUI |
+| 2 | Sources DGFiP autorisées | 0 | **11 sur 11** | 11 sur 11 |
+| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | **2 sur 2** | 2 sur 2 |
+| 4 | Lignes de collecte DGFiP historisées | 0 | **0** | ≥ 1 |
+| 5 | Millésimes historisés | aucun | **aucun** | ex. 2025 |
+| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | **INSERT, SELECT** | INSERT, SELECT |
+| 7 | Droits de l'APK sur les règles publiées | SELECT seul | **SELECT seul** | SELECT seul |
+| 8 | Tables fiscales sous RLS | 2 | **2** | 2 |
+| 9 | Clés personnelles dans les lignes DGFiP | 0 | **0** | 0 |
+
+La ligne 4 à **0** alors que la ligne 1 est à **OUI** est l'état normal et attendu
+depuis le 15/10/2026 : la base sait accepter les collectes DGFiP, mais aucune APK
+installée ne les écrit encore.
 
 Les lignes 6 à 9 sont des garde-fous : si l'une d'elles bouge, la sécurité de la
 table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par
@@ -492,6 +501,32 @@ table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par
 les deux états (avant / après 013), y compris avec une écriture réelle de l'APK sous
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
+
+### Livraison : la prochaine APK est la 2.2.3, pas la 2.2.2
+
+Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
+release **depuis `main` seulement**. Or la release est **unique et immuable** : si
+`apk-2.2.2` existe déjà avec un APK de SHA256 différent, l'étape de publication
+fait `exit 1`. La PR #24 modifie neuf fichiers sous `app/` : la fusionner sous la
+version 2.2.2 aurait donc **fait échouer la construction sur `main`**, sans APK
+installable à la clé.
+
+La version est donc passée à **2.2.3 (code 33)** dans les cinq endroits que la
+procédure du dépôt impose (`AndroidManifest.xml`, `apk.yml` `VERSION_NAME` et
+`VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
+`telechargements/notes-2.2.3.md` et le nom d'artefact alignés.
+
+**Conséquence à connaître avant de fusionner** : la fusion de la PR #24 construira
+puis **publiera automatiquement la release `apk-2.2.3`**. C'est le comportement
+normal du workflow (la 2.2.2 a été publiée ainsi), mais c'est bien une publication
+définitive : aucun écrasement n'est possible ensuite.
+
+Un verrou manquait et a été ajouté dans `tests/test_livraison_securisee.js`
+(« Cohérence de la livraison ») : la version est **lue dans le workflow**, jamais
+recopiée dans le test, puis le fichier de notes, le nom d'artefact, le manifeste,
+`build.sh` et `core/__init__.py` doivent tous la porter. Sans ce verrou, un
+`--notes-file` pointant vers un fichier absent n'aurait échoué **qu'au moment de la
+publication sur `main`**, c'est-à-dire après la fusion.
 
 Côté application, l'écriture est faite par `js/fiscal_historique_supabase.js`
 (`PF.fiscalHistorique`), appelé par le bouton de collecte après le rechargement des

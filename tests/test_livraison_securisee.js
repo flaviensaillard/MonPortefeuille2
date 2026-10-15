@@ -10,7 +10,7 @@
    - build.sh n'a AUCUN mot de passe de signature par défaut ;
    - build.sh refuse de construire sans mot de passe (pas de repli connu) ;
    - la release est publiée sans `--clobber` (un APK publié n'est jamais écrasé) ;
-   - la version est bien 2.2.2 (code 32) dans le manifeste, le workflow et build.sh ;
+   - la version est bien 2.2.3 (code 33) dans le manifeste, le workflow et build.sh ;
    - la rotation est documentée (docs/SECURITE-LIVRAISON.md). */
 'use strict';
 
@@ -45,8 +45,8 @@ verifier("l'ancien cache public apk-keystore-v1 est purgé (rotation)",
 verifier('aucun --clobber sur la publication de release',
     !/--clobber/.test(apkYml),
     'un APK publié ne doit jamais pouvoir être remplacé');
-verifier('version 2.2.2 et code 32',
-    /VERSION_NAME:\s*'2\.2\.2'/.test(apkYml) && /VERSION_CODE:\s*'32'/.test(apkYml));
+verifier('version 2.2.3 et code 33',
+    /VERSION_NAME:\s*'2\.2\.3'/.test(apkYml) && /VERSION_CODE:\s*'33'/.test(apkYml));
 
 console.log('Script de build (build.sh)');
 verifier('aucun mot de passe de signature par défaut',
@@ -56,18 +56,50 @@ verifier('aucun mot de passe de signature par défaut',
 verifier('la construction échoue sans mot de passe de signature',
     /if \[ -z "\$\{KEY_PASS:-\}" \]/.test(buildSh) && /KEY_PASS absent/.test(buildSh),
     'sans mot de passe fourni par un secret, le build doit refuser de signer');
-verifier('version par défaut 2.2.2 / code 32',
-    /VERSION_NAME="\$\{VERSION_NAME:-2\.2\.2\}"/.test(buildSh)
-        && /VERSION_CODE="\$\{VERSION_CODE:-32\}"/.test(buildSh));
+verifier('version par défaut 2.2.3 / code 33',
+    /VERSION_NAME="\$\{VERSION_NAME:-2\.2\.3\}"/.test(buildSh)
+        && /VERSION_CODE="\$\{VERSION_CODE:-33\}"/.test(buildSh));
 
 console.log('Manifeste Android');
-verifier('versionName 2.2.2', /android:versionName="2\.2\.2"/.test(manifeste));
-verifier('versionCode 32', /android:versionCode="32"/.test(manifeste));
+verifier('versionName 2.2.3', /android:versionName="2\.2\.3"/.test(manifeste));
+verifier('versionCode 33', /android:versionCode="33"/.test(manifeste));
 
 console.log('Version Python (core)');
-verifier('core/__init__.py annonce 2.2.2',
-    /__version__\s*=\s*"2\.2\.2"/.test(lire('core/__init__.py')),
+verifier('core/__init__.py annonce 2.2.3',
+    /__version__\s*=\s*"2\.2\.3"/.test(lire('core/__init__.py')),
     'la version doit être cohérente partout : APK, workflow, build, core, notes');
+
+/* Cohérence de la livraison : la version est lue dans le workflow, jamais
+   recopiée ici, pour que ce verrou ne puisse pas vieillir en silence.
+
+   Pourquoi ce bloc existe : `apk.yml` publie la release avec
+   `--notes-file telechargements/notes-<VERSION_NAME>.md`. Si ce fichier manque,
+   la création de la release ÉCHOUE sur main — après la fusion, donc au pire
+   moment. Et comme la release est unique et immuable, un APK construit depuis un
+   code modifié sous une version déjà publiée fait échouer le build
+   (`exit 1`) : toute fusion touchant `app/**` exige donc une version neuve,
+   cohérente partout et accompagnée de ses notes. */
+console.log('Cohérence de la livraison');
+const version = (apkYml.match(/VERSION_NAME:\s*'([^']+)'/) || [])[1];
+const code = (apkYml.match(/VERSION_CODE:\s*'([^']+)'/) || [])[1];
+verifier('le workflow annonce une version et un code',
+    /^[0-9]+\.[0-9]+\.[0-9]+$/.test(version || '') && /^[0-9]+$/.test(code || ''));
+verifier('le fichier de notes de la version publiée existe',
+    fs.existsSync(path.join(RACINE, 'telechargements', 'notes-' + version + '.md')),
+    'apk.yml passe --notes-file telechargements/notes-' + version + '.md : '
+    + 'absent, la création de la release échouerait sur main');
+verifier('le workflow publie les notes de SA version',
+    apkYml.includes('--notes-file telechargements/notes-' + version + '.md'));
+verifier("le nom d'artefact porte la même version",
+    apkYml.includes('name: Porte-feuille-' + version + '.apk'),
+    'un artefact nommé d\'une autre version se télécharge à la place du bon APK');
+verifier('le manifeste porte la même version et le même code que le workflow',
+    manifeste.includes('android:versionName="' + version + '"')
+        && manifeste.includes('android:versionCode="' + code + '"'));
+verifier('build.sh construit par défaut cette version et ce code',
+    buildSh.includes('VERSION_NAME:-' + version) && buildSh.includes('VERSION_CODE:-' + code));
+verifier('core/__init__.py annonce la même version',
+    lire('core/__init__.py').includes('__version__ = "' + version + '"'));
 
 console.log('Documentation de rotation');
 verifier('docs/SECURITE-LIVRAISON.md existe',

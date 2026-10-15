@@ -858,8 +858,8 @@ R2 des revenus 2025 ont été écrites par les robots côté serveur. Une réins
 de l'application, ou un changement d'appareil, faisait donc perdre toute preuve
 collectée.
 
-**Migration `013_collectes_dgfip.sql`** (à exécuter dans Supabase SQL Editor APRÈS
-012, une seule fois, après sauvegarde chiffrée récente restaurée et comparée) :
+**Migration `013_collectes_dgfip.sql`** — **appliquée par le propriétaire le
+15/10/2026** dans Supabase SQL Editor, après 012. Ne pas la rejouer :
 
 - les **onze sources DGFiP** réellement lues par l'application sont autorisées
   (trois familles BOFiP, frais salariés et forfait repas, PS/PFU des plus-values de
