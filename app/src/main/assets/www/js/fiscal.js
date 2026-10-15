@@ -1882,6 +1882,16 @@
     /* Preuves réellement LUES pour un millésime, en vue de la matrice. Les
        constantes embarquées du code n'y apparaissent jamais : seule une
        relecture de cache revalidée, ou un document du millésime, compte. */
+    /* URL d'un document PDF pour CE millésime : l'inventaire des sources décide.
+       Un millésime sans document vérifié vaut `null`, jamais l'URL d'une autre
+       année. Les lecteurs antérieurs à l'inventaire (sans `urlPour`) retombent
+       sur leur adresse par défaut pour les revenus 2025 uniquement. */
+    function urlSource(module, type, annee) {
+        if (!module) return null;
+        if (typeof module.urlPour === 'function') return module.urlPour(type, annee);
+        return annee === 2025 && module.urls ? module.urls[type] || null : null;
+    }
+
     function preuvesParAnnee(annee) {
         var r = rapportsControle[annee] || {};
         function cache(module, args) {
@@ -1898,10 +1908,10 @@
             titres: titresOfficiels[annee] || cache(PF.fiscalRegimesSources, [annee]) || null,
             cryptoFaq: cache(PF.fiscalCryptoSources) || null,
             brochure: cache(PF.fiscalBrochureSources) || null,
-            notice2086: cache(PF.fiscalCryptoPdfSources, ['notice']) || null,
-            brochureCrypto: cache(PF.fiscalCryptoPdfSources, ['brochure']) || null,
-            brochureRcm: cache(PF.fiscalRcmPdfSources, ['rcm']) || null,
-            chargesRcm: cache(PF.fiscalRcmPdfSources, ['charges']) || null,
+            notice2086: cache(PF.fiscalCryptoPdfSources, ['notice', annee]) || null,
+            brochureCrypto: cache(PF.fiscalCryptoPdfSources, ['brochure', annee]) || null,
+            brochureRcm: cache(PF.fiscalRcmPdfSources, ['rcm', annee]) || null,
+            chargesRcm: cache(PF.fiscalRcmPdfSources, ['charges', annee]) || null,
             recoupementPsCrypto: recoupement && recoupement.statut === 'partiel' ? recoupement
                 : recoupement ? { statut: recoupement.statut, taux: recoupement.taux,
                     sources: recoupement.sources, note: recoupement.derivation } : null,
@@ -1911,9 +1921,10 @@
                 repas: PF.fiscalFraisSources ? PF.fiscalFraisSources.repasUrl(annee) : null,
                 gains: PF.fiscalRegimesSources ? PF.fiscalRegimesSources.url(annee) : null,
                 cryptoFaq: PF.fiscalCryptoSources ? PF.fiscalCryptoSources.url : null,
-                notice2086: PF.fiscalCryptoPdfSources ? PF.fiscalCryptoPdfSources.urls.notice : null,
-                brochureRcm: PF.fiscalRcmPdfSources ? PF.fiscalRcmPdfSources.urls.rcm : null,
-                charges: PF.fiscalRcmPdfSources ? PF.fiscalRcmPdfSources.urls.charges : null
+                notice2086: urlSource(PF.fiscalCryptoPdfSources, 'notice', annee),
+                brochureRcm: urlSource(PF.fiscalRcmPdfSources, 'rcm', annee),
+                charges: urlSource(PF.fiscalRcmPdfSources, 'charges', annee),
+                brochureCrypto: urlSource(PF.fiscalCryptoPdfSources, 'brochure', annee)
             }
         };
     }

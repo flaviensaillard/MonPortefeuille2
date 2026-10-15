@@ -50,7 +50,12 @@ Après collecte des documents du millésime **revenus 2025** (les cinq PDF déj�
 confirmés sur Android + BOFiP + aides du simulateur 2026) :
 
 Familles de documents lisibles par l'application au 16/10/2026 (§7) : revenus 2023
-6/11, revenus 2024 6/11, revenus 2025 11/11, revenus 2026 0/11.
+**8/11**, revenus 2024 **8/11**, revenus 2025 **11/11**, revenus 2026 **0/11** —
+dont, au jeu de preuves entièrement vérifié sur le document réel : 6/11 pour 2023,
+6/11 pour 2024, 11/11 pour 2025. Les deux familles supplémentaires de 2023 et 2024
+(chapitre « charges déductibles » et notice 2086) sont **autorisées sous réserve** :
+document repéré, ancre portante vérifiée verbatim, et lecteur qui exige toutes ses
+preuves et refuse sans elles (§7.1).
 
 | Catégorie | Revenus 2023 | Revenus 2024 | Revenus 2025 | Revenus 2026 |
 | --- | --- | --- | --- | --- |
@@ -273,6 +278,23 @@ par **votre foyer fiscal** ». Les huit preuves exigées par `analyserNotice` so
 présentes dans le document réel, mais celui-ci **ne chiffre pas les PS** : il
 établit la méthode et l'échelle, jamais le taux (section 3.1).
 
+**Millésimes 2023 et 2024** : les notices 2086 correspondantes ont été repérées le
+16/10/2026 — `ir_2024/pdf_som/2086.pdf` (notice **16043\*05**, « Déclaration des
+plus ou moins-values réalisées en **2023** ») et `ir_2025/pdf_som/2086.pdf` (notice
+**16043\*06**, « **NOTICE (revenus 2024)** »). La seconde a été relue : formule
+« Plus ou moins-value brute = Prix de cession – [Prix total d'acquisition x Prix de
+cession / Valeur globale du portefeuille] », « Si le total des prix de cession
+réalisés **au niveau du foyer fiscal** est inférieur ou égal à 305 €, vos cessions
+sont exonérées », ligne 51 et ses lignes sources (218 + 258 + 318 + 413 + 423 +
+433), report « en ligne **3AN** de la 2042 C en cas de plus-value globale ou en
+ligne **3BN** … en cas de moins-value globale », « taux forfaitaire de 12,8 %
+auquel s'ajoutent les prélèvements sociaux » (aucun taux de PS chiffré, comme pour
+2025), option « **expresse et irrévocable** » avec la case **3CN**. `analyserNotice`
+est désormais paramétré par année de cessions : ces deux millésimes sont lisibles
+**sous réserve** (frais hors quotient et portée globale de l'option non relus dans
+l'extrait ; le lecteur exige ses 8 preuves). `certifieFoyer` reste `false` et
+`psCryptoAttestes` reste `false` quel que soit le millésime.
+
 Ce texte fonde la règle, pas les données : `portee2086Foyer()` renvoie toujours
 `certifieFoyer: false`. Seule l'inférence à sens unique est admise :
 
@@ -475,18 +497,46 @@ Ils ne disent **rien** des produits détenus, des années de versement ni du
 précompte réellement subi : ces éléments restent à saisir par le propriétaire
 (case « partiel », jamais « établi »).
 
-**Revenus 2023 et 2024 (RCM/CSG)** : la brochure du millésime ir_2024
-(`…/brochure/ir_2024/pdf_som/08-RCM_123a137.pdf`) date bien ses règles des
-revenus 2023 — « Inscrivez ligne 2BH le montant des revenus **perçus en 2023** …
-(case 2OP cochée) », « **N'indiquez pas** cette fraction de CSG déductible ligne
-6DE », « ligne 2DF … retenu pour le calcul du montant de CSG à déduire du revenu
-global de **l'année 2023** ». Mais `DOCS.rcm` et `DOCS.charges` sont **figés sur
-le millésime ir_2026** et `analyserCharges` exige la mention littérale
-« REVENUS 2024, PAYEE EN 2025 » : l'application ne peut donc pas établir ces
-règles pour 2023 ni 2024, et **ne les reporte pas** depuis 2025. Les cases RCM et
-CSG de ces deux années restent « non disponible » ; le millésime ir_2025 n'a pas
-été sondé. Rendre ces lecteurs millésimés exigerait, pour chaque année, la
-brochure correspondante et ses preuves propres — pas une transposition.
+**Revenus 2023 et 2024 (RCM/CSG)** — état au 16/10/2026, après la mise à
+millésime des lecteurs (§7.2) :
+
+- **Chapitre « charges déductibles » (CSG, case 6DE) : repéré et autorisé pour les
+  deux années.** `ir_2024/pdf_som/12-charges_ded_rev_219a230.pdf` (revenus 2023)
+  porte « **CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2022, PAYÉE EN 2023** »,
+  « Le montant déductible est égal à 6,8 points de CSG calculée (au taux de
+  9,2 %) », « Vous ne devez pas le calculer vous-même ni l'indiquer ligne 6DE en
+  corrigeant le montant prérempli. Le montant de CSG déductible afférent aux
+  revenus déclarés ligne 2BH et 2DF sera calculé automatiquement ».
+  `ir_2025/pdf_som/12-charges_ded_rev_215a226.pdf` (revenus 2024) porte
+  « **… REVENUS 2023, PAYÉE EN 2024** » puis « **… REVENUS 2024, PAYÉE EN 2024** »,
+  les 6,8 points au taux de 9,2 %, l'exemple 736 € (8 000 € × 9,2 %) → 544 €
+  (8 000 € × 6,8 %) et la même interdiction de double compte en 6DE.
+  L'ancre portante de `analyserCharges` est « REVENUS *N-1*, PAYEE EN *N* » : elle
+  est vérifiée **verbatim** pour 2023 comme pour 2024, et les autres preuves ne
+  portent pas sur l'année. La lecture est donc autorisée, **sous réserve** : 4 des
+  7 preuves (2023) et 3 des 7 (2024) n'ont pas été relues dans l'extrait indexé,
+  et le lecteur exige les 7 — un document incomplet renvoie la liste de ce qui
+  manque et ne produit aucune valeur.
+- **Chapitre RCM : repéré pour 2023, non autorisé.**
+  `ir_2024/pdf_som/08-RCM_123a137.pdf` date bien ses règles des revenus 2023 —
+  « Inscrivez ligne 2BH le montant des revenus **perçus en 2023** … (case 2OP
+  cochée) », « **N'indiquez pas** cette fraction de CSG déductible ligne 6DE »,
+  « ligne 2DF … retenu pour le calcul du montant de CSG à déduire du revenu global
+  de **l'année 2023** », « Le montant des revenus indiqué ligne 2BH est exclu de la
+  base de calcul des prélèvements sociaux ». Mais la formulation de ce millésime
+  diffère de celle d'ir_2026 sur laquelle les huit ancres ont été écrites
+  (notamment « prélèvements sociaux ont déjà été prélevés en *N* » et l'en-tête
+  « 2042 K … perçus en *N* ») : la lecture est **refusée sans appel réseau**, avec
+  l'adresse nommée et la liste de ce qui devrait être vérifié pour l'autoriser.
+- **Chapitre RCM des revenus 2024 : non repéré** (référence du fichier ir_2025 non
+  vérifiée). Aucune URL inventée ; le motif `ir_<N+1>/pdf_som/08-RCM_<référence>.pdf`
+  est donné.
+
+Les cases RCM de 2023 et 2024 restent donc « non disponible ». Les cases CSG de ces
+deux années peuvent désormais passer à « partiel » — règles lues, déduction
+personnelle du foyer toujours non établie — dès que le propriétaire déclenche la
+collecte, et **jamais** par report depuis 2025 : la preuve doit porter
+`revenus: 2023` ou `revenus: 2024`, ce que `evaluer` contrôle.
 
 **Limite assumée** : ces vérifications distantes ne remplacent pas la collecte.
 Elles sont consignées telles quelles, avec leur date et leur portée, dans
@@ -624,8 +674,21 @@ ne déclenche rien. C'est le cas du chapitre RCM du millésime 2024
 vérifiés, le jeu de huit preuves du lecteur ne l'a pas été — l'adresse est nommée,
 la lecture est refusée, aucune valeur n'est produite.
 
-État au 16/10/2026 : **revenus 2025 → 11/11** familles lisibles ; **revenus 2023 →
-6/11** ; **revenus 2024 → 6/11** ; **revenus 2026 → 0/11** (rien de publié).
+Chaque famille reçoit un **état** :
+
+| État | Sens | Effet |
+| --- | --- | --- |
+| `lisible-vérifiée` | adresse vérifiée **et** jeu de preuves confirmé sur le document réel | collecte autorisée |
+| `lisible-sous-réserve` | adresse vérifiée, ancre portante (l'année des revenus) vérifiée verbatim, jeu de preuves **partiellement** relu | collecte autorisée ; le lecteur exige toutes ses preuves et renvoie la liste de ce qui manque sinon |
+| `repérée-non-autorisée` | adresse vérifiée, mais formulation du millésime non confirmée (ou aucun lecteur dédié) | **aucun appel réseau**, adresse et motif affichés |
+| `absente` | document non publié ou non repéré | **aucune URL inventée**, motif à chercher affiché |
+
+État au 16/10/2026 : **revenus 2025 → 11/11** familles lisibles, toutes vérifiées ;
+**revenus 2023 → 8/11** lisibles (6 vérifiées, 2 sous réserve : chapitre charges et
+notice 2086) ; **revenus 2024 → 8/11** (idem) ; **revenus 2026 → 0/11** (rien de
+publié). Une famille « sous réserve » ne produit une valeur que si le document réel
+contient **toutes** les preuves exigées : la réserve porte sur ce que je n'ai pas pu
+relire à distance, pas sur ce que l'application accepte.
 
 ### 7.2 Les lecteurs ne sont plus figés sur un millésime
 
@@ -660,7 +723,24 @@ l'ouverture de la déclaration ; notice 2086 du millésime correspondant. Ces da
 servent à savoir **quand** revenir chercher une preuve. Elles ne produisent ni URL,
 ni valeur, ni statut « établi ».
 
-### 7.4 Ce que cela ne change pas
+### 7.4 Bug corrigé au passage : les preuves PDF collectées ne comptaient pas
+
+La matrice attendait, pour les cases RCM, CSG et 2086, un objet de la forme
+`{ etat, valeurs }` — celle d'une collecte fraîche. Or le cache renvoie les
+**valeurs seules**. Conséquence : un propriétaire ayant lu les cinq PDF avec succès
+(cinq lecteurs confirmés sur Android) voyait quand même « aucun document de ce
+millésime lu » et les cases RCM / CSG déductible / 2086-foyer restaient
+« non disponible ».
+
+`evaluer` accepte désormais les deux formes via `valeursPdf(preuve, annee)`, avec
+deux conditions cumulatives : l'objet porte des valeurs, **et** ces valeurs sont
+celles du millésime demandé (`valeur.revenus === annee`). Un échec de lecture
+(`{ etat: 'PDF non disponible…' }`, `{ etat: '… preuves incomplètes (six8)' }`)
+n'établit rien, et une preuve des revenus 2025 n'établit jamais une case de 2023.
+`preuvesParAnnee(annee)` lit les quatre caches PDF **par millésime** et expose les
+URL de ce millésime (`urlSource`), jamais celles d'une autre année.
+
+### 7.5 Ce que cela ne change pas
 
 Aucune constante du moteur, aucune migration, aucune donnée personnelle, aucune
 version d'APK. Un inventaire de sources n'établit rien par lui-même : sans collecte
@@ -673,14 +753,21 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 
 | Fichier | Couvre |
 | --- | --- |
-| `tests/test_fiscal_matrice_couverture.js` | statuts par millésime et catégorie, refus de reconduction, recoupement distinct d'un texte explicite, contradictions (dont les trois termes de `ps_titres_2025`), liste et portée des vérifications distantes consignées, bascule jamais déclarée totale |
+| `tests/test_fiscal_matrice_couverture.js` | statuts par millésime et catégorie, refus de reconduction, recoupement distinct d'un texte explicite, contradictions (dont les trois termes de `ps_titres_2025`), liste et portée des vérifications distantes consignées, bascule jamais déclarée totale — **et les deux formes de preuve PDF** : valeurs nues du cache et `{ etat, valeurs }` d'une collecte établissent les cases RCM/CSG/2086 (non-régression du bug §7.4), preuve d'une autre année refusée, état sans valeurs (échec de lecture, preuves incomplètes) refusé |
 | `tests/test_fiscal_crypto_ps_recoupement.js` | lecture du BOFiP (date de version, qualification, taux), huit maillons, refus par millésime et par maillon manquant, corroboration et contradiction de la FAQ, caches par compte/document/millésime, rectifications conservées, cache altéré refusé |
 | `tests/test_fiscal_gardes_foyer.js` | CSG 6DE sans double compte (2BH/2DF automatiques), portée de la 2086 au niveau du foyer, cas particuliers du QF, séparation public/personnel |
 | `tests/test_fiscal_matrice_integration.js` | **non-régression** : aucun chiffre du moteur modifié, R2 non remplacée, 2025 non reconduit sur 2026, matrice et contradictions affichées, résumé court inchangé |
 | `tests/test_fiscal_regimes_millesimes_reels.js` | libellés **réels** des aides gains.htm des revenus 2023 (lus le 14/10/2026) et 2024 (lus le 15/10/2026) : 17,2 %/30 % acceptés chacun pour sa seule année, variantes typographiques tolérées, refus croisés (2023↔2024, et vers 2025), refus sans attribution d'année, refus conservateur si une balise coupe l'année, collecte simulée → cases « établi » uniquement pour 2023 et 2024, page d'une autre année enregistrée sans valeur, cohérence avec `VERIFICATIONS_DISTANTES` |
 | `tests/test_fiscal_divergences_code.js` | registre des divergences valeurs embarquées / BOFiP : 4 écarts (décote 2023, barème 2024, décote 2024, plafond QF 2024), chacun avec le permalien identique à `fiscal_dgfip_sources.url()`, ses dates de publication et de fin, la loi, le passage verbatim citant l'année des revenus, la valeur officielle et la valeur embarquée ; le registre décrit le moteur sans le modifier (11 520, 906/1 493, 924/1 523 et 1 759 inchangés) ; cohérence interne de la décote officielle (seuil = base / 45,25 %) ; cases 2023/2024 « non disponible » avec l'alerte DIVERGENTE et la valeur officielle nommée, cases 2023 barème et QF sans alerte (identiques au BOFiP), 2025 et 2026 sans divergence ; après collecte du millésime 2024 les trois cases passent « établi » et l'alerte disparaît ; collecte 2024 sans effet sur 2023 ; non-régression R2 2025 (tranches, décote 897/1 483, plafond QF 1 807, `tauxPS` 18,6 %, comparaison 2OP/PFU inchangée) et bascule totale toujours `false` |
-| `tests/test_fiscal_sources_millesimes.js` | **inventaire pérenne des sources** : 11 familles × 4 millésimes, année de revenus ≠ année de déclaration, dates de publication BOFiP distinctes ; chaque entrée porte une date de vérification et un constat écrit ; aucune URL hors des trois hôtes DGFiP, aucune URL à joker, `null` partout pour les revenus 2026, `source(2022)`/`source(2027)` hors inventaire ; un document **repéré** mais dont le jeu de preuves n'est pas vérifié (chapitre RCM ir_2024) ne donne aucune URL lisible ; inventaire 11/11 en 2025, 6/11 en 2023 et 2024, 0/11 en 2026 ; **cohérence obligatoire** avec les URL que construisent réellement `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()/repasUrl()`, `fiscal_regimes_sources.url()`, `fiscal_rcm_pdf_sources.urls` et `fiscal_crypto_pdf_sources.urls` ; toute famille marquée « DIVERGENT » a son écart dans `DIVERGENCES_CODE` ; calendrier du millésime à venir (fenêtres observées, jamais une valeur devinée) ; et non-régression : un inventaire n'établit rien par lui-même (`etablis` = 0, bascule `false`) |
-| `tests/test_fiscal_rcm_pdf_sources.js` | textes réels des brochures revenus 2025, transport PDF simulé, cache, rectifications, non-activation — **étendu à la pérennité** : URL par millésime prises dans l'inventaire, comportement 2025 inchangé, refus 2023 (document repéré, preuves non vérifiées) / 2024 et 2026 (non repérés) **sans aucun appel réseau** et sans valeur produite, motif à vérifier fourni, ancres paramétrées par année (un texte 2023 n'est lu que pour 2023, jamais pour 2024 ni par défaut), ancienne clé de cache sans millésime toujours lue pour 2025 et jamais reportée sur une autre année |
+| `tests/test_fiscal_crypto_pdf_sources.js` | notice 2086 et chapitre plus-values : preuves indépendantes, millésime exact, rectifications, non-activation — **étendu à la pérennité** : notices 16043\*05 (revenus 2023) et 16043\*06 (revenus 2024) repérées dans les brochures, ancres paramétrées par année de cessions (un texte 2024 lu pour 2024, jamais par défaut ni pour 2023), collecte 2024 réussie **sans modifier le lecteur**, chapitre plus-values ir_2025 non repéré → refus sans URL inventée, revenus 2026 → aucun appel réseau, caches isolés par millésime, ancienne clé sans millésime toujours lue pour 2025 et jamais reportée, `psCrypto2025Attestes` et `annexeFoyerComplete` toujours `false` |
+| `tests/test_fiscal_sources_millesimes.js` | **inventaire pérenne des sources** : 11 familles × 4 millésimes, année de revenus ≠ année de déclaration, dates de publication BOFiP distinctes ; chaque entrée porte une date de vérification et un constat écrit ; aucune URL hors des trois hôtes DGFiP, aucune URL à joker, `null` partout pour les revenus 2026, `source(2022)`/`source(2027)` hors inventaire ; un document **repéré** mais dont le jeu de preuves n'est pas vérifié (chapitre RCM ir_2024) ne donne aucune URL lisible ; inventaire 11/11 en 2025, 6/11 en 2023 et 2024, 0/11 en 2026 ; **cohérence obligatoire** avec les URL que construisent réellement `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()/repasUrl()`, `fiscal_regimes_sources.url()`, `fiscal_rcm_pdf_sources.urls`/`urlPour()` et `fiscal_crypto_pdf_sources.urls`/`urlPour()` ;
+        quatre états (`lisible-vérifiée`, `lisible-sous-réserve`, `repérée-non-autorisée`, `absente`) avec
+        autorisation ≠ vérification (les réserves écrites, le nombre de preuves exigées nommé) ; toute famille marquée « DIVERGENT » a son écart dans `DIVERGENCES_CODE` ; calendrier du millésime à venir (fenêtres observées, jamais une valeur devinée) ; et non-régression : un inventaire n'établit rien par lui-même (`etablis` = 0, bascule `false`) |
+| `tests/test_fiscal_rcm_pdf_sources.js` | textes réels des brochures revenus 2025, transport PDF simulé, cache, rectifications, non-activation — **étendu à la pérennité** : URL par millésime prises dans l'inventaire, comportement 2025 inchangé, refus 2023 (document repéré, preuves non vérifiées) / 2024 et 2026 (non repérés) **sans aucun appel réseau** et sans valeur produite, motif à vérifier fourni, ancres paramétrées par année (un texte 2023 n'est lu que pour 2023, jamais pour 2024 ni par défaut), ancienne clé de cache sans millésime toujours lue pour 2025 et jamais reportée sur une autre année ; **de bout en
+        en** : chapitres charges des revenus 2023 (`12-charges_ded_rev_219a230.pdf`) et 2024
+        (`12-charges_ded_rev_215a226.pdf`) collectés → cases CSG « partiel » avec l'URL et l'année d'effet de leur
+        millésime, exclusions « CSG patrimoine 2022 payée en 2023 » / « 2023 payée en 2024 », cases RCM 2023/2024
+        toujours « non disponible », revenus 2026 « non disponible », bascule totale `false` |
 | `tests/test_fiscal_frais_millesimes_reels.js` | **recoupement du moteur par les sources officielles** des revenus 2023 (aide frais.htm lue le 15/10/2026) et 2024 (lue par indexation) : plancher 495 €/plafond 14 171 € et forfait repas 5,20 € pour 2023, plancher 504 €/plafond 14 426 € et barème 3-4 CV pour 2024, barème km 3 à 7 CV sur ses trois tranches et ses deux seuils, majoration électrique 20 % ; forfait repas 2024 et tranches 5 à 7 CV 2024 explicitement **non recoupés** ; refus pour 2026 (`null`, « non disponible ») et 2027 ; preuve d'un millésime sans effet sur les autres ; famille `frais` des vérifications distantes et limites de lecture 2024 |
 
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,

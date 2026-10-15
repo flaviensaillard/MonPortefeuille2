@@ -81,6 +81,18 @@
 
     var EMBARQUE = 'valeur embarquée dans le code : ce n’est pas une mise à jour officielle';
 
+    /* Preuve issue d'un PDF DGFiP. Deux formes circulent dans l'application :
+       le résultat d'une collecte (`{ etat, valeurs }`) et le contenu du cache
+       (les valeurs seules). Les deux sont acceptées, à deux conditions : l'objet
+       porte des valeurs, et ces valeurs sont celles du millésime demandé. Une
+       preuve d'une autre année n'établit jamais une case. */
+    function valeursPdf(preuve, annee) {
+        if (!preuve || typeof preuve !== 'object') return null;
+        var v = preuve.valeurs && typeof preuve.valeurs === 'object' ? preuve.valeurs : preuve;
+        if (!v || typeof v !== 'object' || v.revenus !== annee) return null;
+        return v;
+    }
+
     /* `preuves` décrit ce qui a été réellement LU pour ce millésime. Toute
        clé absente vaut « non lu ». Une R2 publiée reste prioritaire mais ne
        transforme pas une catégorie non établie en catégorie établie : elle est
@@ -153,7 +165,7 @@
 
         // RCM : les brochures établissent des RÈGLES, jamais les produits, les
         // dates ni la réalité du précompte du foyer.
-        var rcmRegles = !!(p.brochureRcm && p.brochureRcm.valeurs);
+        var rcmRegles = !!valeursPdf(p.brochureRcm, annee);
         cellules.rcm_precompte = cellule(rcmRegles && !futur ? STATUTS.PARTIEL : STATUTS.NON_DISPONIBLE, {
             valeur: null, source: p.urls && p.urls.brochureRcm || null,
             publication: rcmRegles ? m.publicationBoi : null, anneeEffet: rcmRegles ? annee : null,
@@ -165,7 +177,7 @@
                 : 'aucun document de ce millésime lu ; le précompte doit être indiqué par le propriétaire' });
 
         // CSG : trois calendriers distincts, jamais additionnés.
-        var charges = !!(p.chargesRcm && p.chargesRcm.valeurs);
+        var charges = !!valeursPdf(p.chargesRcm, annee);
         cellules.csg_deductible = cellule(charges && !futur ? STATUTS.PARTIEL : STATUTS.NON_DISPONIBLE, {
             valeur: null, source: p.urls && p.urls.charges || null,
             publication: charges ? m.publicationBoi : null, anneeEffet: charges ? annee : null,
@@ -178,7 +190,7 @@
 
         // 2086 : la formule et les cases sont relues, l'exhaustivité du FOYER
         // ne l'est jamais depuis un seul portefeuille.
-        var notice = p.notice2086 && p.notice2086.valeurs, brochurePv = p.brochureCrypto && p.brochureCrypto.valeurs;
+        var notice = valeursPdf(p.notice2086, annee), brochurePv = valeursPdf(p.brochureCrypto, annee);
         var preuve2086 = notice || brochurePv;
         cellules.crypto_2086_foyer = cellule(preuve2086 && !futur ? STATUTS.PARTIEL : STATUTS.NON_DISPONIBLE, {
             valeur: null, source: p.urls && p.urls.notice2086 || null,

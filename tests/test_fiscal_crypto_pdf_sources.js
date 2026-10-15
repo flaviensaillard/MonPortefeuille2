@@ -1,5 +1,8 @@
 /* node tests/test_fiscal_crypto_pdf_sources.js — DGFiP 2086/brochure, faux réseau,
-   millésime exact, preuves indépendantes, rectifications, non-activation. */
+   millésime exact, preuves indépendantes, rectifications, non-activation.
+   PÉRENNITÉ : les URL viennent de l'inventaire des sources ; un millésime dont la
+   notice est repérée devient lisible sans modifier le lecteur, et un millésime non
+   repéré est refusé sans appel réseau. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -27,7 +30,9 @@ const ctx = { PF: { net: { auth: { utilisateur: () => ({ id }) }, reqPdf: url =>
     localStorage: { getItem: k => memoire.get(k) || null, setItem: (k, v) => memoire.set(k, v) },
     Date, Promise, Number, String };
 ctx.globalThis = ctx;
+vm.runInNewContext(fs.readFileSync(dossier + 'fiscal_sources_millesimes.js', 'utf8'), ctx);
 vm.runInNewContext(fs.readFileSync(dossier + 'fiscal_crypto_pdf_sources.js', 'utf8'), ctx);
+const sources = ctx.PF.fiscalSourcesMillesimes;
 const lecteur = ctx.PF.fiscalCryptoPdfSources;
 function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.from(JSON.stringify([texte])).toString('base64') }; }
 (async () => {
@@ -56,18 +61,78 @@ function reponse(url, texte) { retours[url] = { ok: true, binary_b64: Buffer.fro
     assert.equal(lecteur.lireCache('notice').psCrypto2025Attestes, false);
     assert.equal(lecteur.lireCache('brochure').psCrypto2025Attestes, false);
     await lecteur.chercher(2025);
-    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.' + id)).length, 1);
+    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.2025.' + id)).length, 1);
     reponse(lecteur.urls.notice, notice.replace('NOTICE (revenus 2025)', 'NOTICE rectifiée (revenus 2025)'));
     assert.equal((await lecteur.chercher(2025)).notice.enregistree, true);
-    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.' + id)).length, 1,
+    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.2025.' + id)).length, 1,
         'un changement hors passages probants ne crée pas de révision');
     reponse(lecteur.urls.notice, notice.replace('qui constitue le premier terme', 'qui représente le premier terme'));
     assert.equal((await lecteur.chercher(2025)).notice.enregistree, true);
-    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.' + id)).length, 2);
+    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.2025.' + id)).length, 2);
     retours[lecteur.urls.brochure] = { ok: false, error: 'hors ligne' };
     const partiel = await lecteur.chercher(2025);
     assert.equal(partiel.notice.enregistree, true, 'échec brochure n’efface pas notice');
     assert.equal(partiel.brochure.enregistree, false);
+    // ---------------------------------------------------- pérennité par millésime
+    assert.equal(lecteur.urlPour('notice', 2025), lecteur.urls.notice, 'comportement 2025 inchangé');
+    assert.equal(lecteur.urlPour('brochure', 2025), lecteur.urls.brochure);
+    const notice2024 = sources.url(2024, 'notice_2086');
+    assert.equal(notice2024, 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2025/pdf_som/2086.pdf',
+        'notice 16043*06 des revenus 2024 repérée dans la brochure ir_2025');
+    assert.equal(lecteur.urlPour('notice', 2024), notice2024);
+    assert.equal(lecteur.urlPour('notice', 2023),
+        'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2024/pdf_som/2086.pdf',
+        'notice 16043*05 des revenus 2023 repérée dans la brochure ir_2024');
+    assert.equal(lecteur.urlPour('brochure', 2024), null, 'chapitre plus-values ir_2025 non repéré');
+    assert.equal(lecteur.urlPour('notice', 2026), null, 'notice 2086 du millésime 2027 non publiée');
+
+    // Ancres paramétrées : un texte 2024 n'est lu que pour 2024.
+    const n24 = notice.replace(/2025/g, '2024');
+    const b24 = brochure.replace('en 2025 génère', 'en 2024 génère');
+    assert.equal(lecteur.analyserNotice(n24, 2024).valeurs.revenus, 2024);
+    assert.equal(lecteur.analyserNotice(n24, 2024).valeurs.declaration, 2025);
+    assert.equal(lecteur.analyserNotice(n24, 2024).valeurs.seuilFoyer, 305);
+    assert.equal(lecteur.analyserNotice(n24).valeurs, undefined, 'texte 2024 refusé par le défaut 2025');
+    assert.equal(lecteur.analyserNotice(n24, 2023).valeurs, undefined);
+    assert.equal(lecteur.analyserBrochure(b24, 2024).valeurs.revenus, 2024);
+    assert.equal(lecteur.analyserBrochure(b24).valeurs, undefined);
+    assert.equal(lecteur.analyserNotice(notice, 2024).valeurs, undefined, 'texte 2025 refusé pour 2024');
+
+    // Un millésime repéré devient lisible SANS modifier le lecteur.
+    let appels = 0;
+    const reqPdf = ctx.PF.net.reqPdf;
+    ctx.PF.net.reqPdf = url => { appels++; return reqPdf(url); };
+    reponse(notice2024, n24);
+    const collecte2024 = await lecteur.chercher(2024);
+    assert.equal(collecte2024.notice.enregistree, true, collecte2024.notice.etat);
+    assert.equal(collecte2024.notice.valeurs.revenus, 2024);
+    assert.equal(collecte2024.notice.valeurs.psCrypto2025Attestes, false, 'aucun PS attesté par ce lecteur');
+    assert.equal(collecte2024.notice.valeurs.annexeFoyerComplete, false);
+    assert.match(collecte2024.brochure.etat, /non repéré : aucune URL inventée/);
+    assert.equal(collecte2024.brochure.url, null);
+    assert.equal(JSON.parse(memoire.get('pf2.dgfip.crypto.pdf.v1.notice.2024.' + id)).length, 1);
+    // Isolation par millésime : 2025 ne récupère rien de 2024, et inversement.
+    assert.equal(lecteur.lireCache('notice', 2024).revenus, 2024);
+    assert.equal(lecteur.lireCache('notice', 2025).revenus, 2025);
+    assert.equal(lecteur.lireCache('notice', 2023), null, 'rien de collecté pour 2023');
+    assert.equal(lecteur.lireCache('brochure', 2024), null);
+    // 2026 : refus complet, aucun appel réseau.
+    const avant = appels;
+    const refus2026 = await lecteur.chercher(2026);
+    assert.equal(refus2026.notice.valeurs, undefined);
+    assert.match(refus2026.notice.etat, /notice 2086 du millésime 2027 non publiée/);
+    assert.match(refus2026.brochure.etat, /aucune URL inventée/);
+    assert.equal(appels, avant, 'aucun appel réseau pour un millésime non vérifié');
+    // L'ancienne clé sans millésime reste lue pour les revenus 2025.
+    const k25 = 'pf2.dgfip.crypto.pdf.v1.notice.2025.' + id;
+    memoire.set('pf2.dgfip.crypto.pdf.v1.notice.' + id, memoire.get(k25));
+    memoire.delete(k25);
+    assert.equal(lecteur.lireCache('notice').revenus, 2025,
+        'cache Android constitué avant la clé millésimée toujours lisible');
+    assert.equal(lecteur.lireCache('notice', 2024).revenus, 2024, 'et jamais reporté sur une autre année');
+    memoire.set(k25, memoire.get('pf2.dgfip.crypto.pdf.v1.notice.' + id));
+    ctx.PF.net.reqPdf = reqPdf;
+
     ctx.PF.ui = { h: String }; ctx.PF.store = { reglages: () => ({}) };
     for (const f of ['util.js', 'fiscal.js']) vm.runInNewContext(fs.readFileSync(dossier + f, 'utf8'), ctx);
     const rapport = ctx.PF.fiscal.bilanMiseAJour(2025, { cryptoPdf: premier });

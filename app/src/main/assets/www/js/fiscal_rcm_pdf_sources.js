@@ -149,7 +149,7 @@
                     extrait: a.extrait, revision: h.length + 1, recupere_le: new Date().toISOString() });
             try { root.localStorage.setItem(k, JSON.stringify(h)); }
             catch (_) { return { etat: a.etat, enregistree: false, url: url }; }
-            return { etat: a.etat, enregistree: true, valeurs: lireCache(type), url: url };
+            return { etat: a.etat, enregistree: true, valeurs: lireCache(type, an), url: url };
         }).catch(function (err) {
             if (err && /Session changée/.test(err.message || '')) throw err;
             return { etat: 'PDF non disponible (' + String(err && err.message || err).slice(0, 100) + ')',

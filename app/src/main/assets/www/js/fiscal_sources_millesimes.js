@@ -159,10 +159,12 @@
             lecteur: 'fiscal_rcm_pdf_sources.analyserCharges',
             motif: BROCHURE + 'ir_<N+1>/pdf_som/12-charges_ded_rev_<référence>.pdf',
             parAnnee: {
-                2023: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
-                    constat: 'chapitre ir_2024 non repéré : référence du fichier non vérifiée' },
-                2024: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
-                    constat: 'chapitre ir_2025 non repéré : référence du fichier non vérifiée' },
+                2023: { url: BROCHURE + 'ir_2024/pdf_som/12-charges_ded_rev_219a230.pdf',
+                    verifieeLe: '2026-10-16', lectureVerifiee: false, lectureAutorisee: true,
+                    constat: 'chapitre repéré et relu le 16/10/2026 : « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2022, PAYÉE EN 2023 » (l’année portante de l’ancre), « Le montant déductible est égal à 6,8 points de CSG calculée (au taux de 9,2 %) », « Vous ne devez pas le calculer vous-même ni l’indiquer ligne 6DE en corrigeant le montant prérempli. Le montant de CSG déductible afférent aux revenus déclarés ligne 2BH et 2DF sera calculé automatiquement » ; 4 des 7 preuves non relues dans l’extrait : lecture autorisée SOUS RÉSERVE, le lecteur exige ses 7 preuves et refuse sans elles' },
+                2024: { url: BROCHURE + 'ir_2025/pdf_som/12-charges_ded_rev_215a226.pdf',
+                    verifieeLe: '2026-10-16', lectureVerifiee: false, lectureAutorisee: true,
+                    constat: 'chapitre repéré et relu le 16/10/2026 : « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2023, PAYÉE EN 2024 » et seconde partie « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2024, PAYÉE EN 2024 », « 6,8 points de CSG calculée (au taux de 9,2 %) », exemple 736 € (8 000 € × 9,2 %) → 544 € (8 000 € × 6,8 %), « Vous ne devez pas le calculer vous-même ni l’indiquer ligne 6DE … sera calculé automatiquement » ; 3 des 7 preuves non relues dans l’extrait : lecture autorisée SOUS RÉSERVE, le lecteur exige ses 7 preuves et refuse sans elles' },
                 2025: { url: BROCHURE + 'ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf',
                     verifieeLe: '2026-10-16', lectureVerifiee: true,
                     constat: '7 preuves vérifiées sur le document réel, dont « CSG DÉDUCTIBLE CALCULÉE SUR LES REVENUS 2024, PAYÉE EN 2025 » et la partie « REVENUS 2025, PAYÉE EN 2025 » ; le plafonnement sur plus-values est signalé non modélisé' },
@@ -188,12 +190,15 @@
         notice_2086: {
             libelle: 'Notice 2086 — cessions de crypto-actifs à l’échelle du foyer',
             lecteur: 'fiscal_crypto_pdf_sources.analyserNotice',
-            motif: 'https://www.impots.gouv.fr/sites/default/files/formulaires/2086/<N+1>/2086_<numéro>.pdf',
+            motif: 'formulaire seul : https://www.impots.gouv.fr/sites/default/files/formulaires/2086/<N+1>/2086_<numéro>.pdf ; '
+                + 'ou dans la brochure : ' + BROCHURE + 'ir_<N+1>/pdf_som/2086.pdf',
             parAnnee: {
-                2023: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
-                    constat: 'notice du millésime 2024 non repérée : numéro de formulaire non vérifié' },
-                2024: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
-                    constat: 'notice du millésime 2025 non repérée : numéro de formulaire non vérifié' },
+                2023: { url: BROCHURE + 'ir_2024/pdf_som/2086.pdf', verifieeLe: '2026-10-16',
+                    lectureVerifiee: false, lectureAutorisee: true,
+                    constat: 'notice 16043*05 repérée et relue le 16/10/2026 : « Déclaration des plus ou moins-values réalisées en 2023 suite à des cessions d’actifs numériques », « Ligne 51 Total des prix de cession réalisés au niveau du foyer fiscal (l. 218 + l. 258 + l. 318 + l. 413 + l. 423 + l. 433) » ; les 6 autres preuves du lecteur n’ont pas été relues dans l’extrait : lecture autorisée SOUS RÉSERVE, le lecteur exige ses 8 preuves et refuse sans elles' },
+                2024: { url: BROCHURE + 'ir_2025/pdf_som/2086.pdf', verifieeLe: '2026-10-16',
+                    lectureVerifiee: false, lectureAutorisee: true,
+                    constat: 'notice 16043*06 repérée et relue le 16/10/2026 : « NOTICE (revenus 2024) », « réalisées en 2024 », « Plus ou moins-value brute = Prix de cession – [Prix total d’acquisition x Prix de cession / Valeur globale du portefeuille] », « Si le total des prix de cession réalisés au niveau du foyer fiscal est inférieur ou égal à 305 €, vos cessions sont exonérées », ligne 51 et ses lignes sources, « ligne 3AN de la 2042 C en cas de plus-value globale ou en ligne 3BN … en cas de moins-value globale », « taux forfaitaire de 12,8 % auquel s’ajoutent les prélèvements sociaux », option 3CN « expresse et irrévocable » ; frais hors quotient et portée globale de l’option non relus : lecture autorisée SOUS RÉSERVE, le lecteur exige ses 8 preuves' },
                 2025: { url: 'https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf',
                     verifieeLe: '2026-10-14', lectureVerifiee: true,
                     constat: 'notice 16043*07 : 8 preuves exigées ; seuil 305 € « au niveau du foyer fiscal », formule de répartition, ligne 52 → 3AN/3BN, option 3CN distincte de 2OP ; aucun taux de prélèvements sociaux chiffré dans cette notice' },
@@ -208,8 +213,9 @@
             parAnnee: {
                 2023: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
                     constat: 'brochure ir_2024 non relue : aucune vérification menée sur ce millésime' },
-                2024: { url: null, verifieeLe: '2026-10-16', lectureVerifiee: false,
-                    constat: 'brochure ir_2025 non relue : aucune vérification menée sur ce millésime' },
+                2024: { url: BROCHURE + 'ir_2025/pdf_som/nouveautes.pdf', verifieeLe: '2026-10-16',
+                    lectureVerifiee: false,
+                    constat: 'document repéré et relu le 16/10/2026 : « PRINCIPALES NOUVEAUTÉS REVENUS 2024 », « Les tranches du barème de l’impôt sur le revenu 2024, ainsi que les seuils et limites qui lui sont associés, augmentent de 1,8 % » — confirme l’indexation officielle déjà consignée au §5.3 ; aucun lecteur dédié dans l’application, donc aucune collecte' },
                 2025: { url: BROCHURE + 'ir_2026/pdf_som/nouveautes.pdf', verifieeLe: '2026-10-14',
                     lectureVerifiee: true,
                     constat: 'relu : CSG 9,2 % → 10,6 % « à compter des revenus 2025 déclarés en 2026 », foncier / PV immobilières / assurance-vie / épargne logement maintenus à 9,2 %, « le taux de CSG déductible reste à 6,8 % », crypto absente des exceptions' },
@@ -226,9 +232,17 @@
         if (!f || !MILLESIMES[annee]) return null;
         var s = f.parAnnee[annee];
         if (!s) return null;
+        /* `lectureVerifiee` : le jeu de preuves du lecteur a été confirmé sur le
+           document réel de ce millésime. `lectureAutorisee` : la lecture peut être
+           tentée parce que l'ancre portante (l'année des revenus) a été vérifiée
+           verbatim et que le lecteur exige TOUTES ses preuves — un document
+           incomplet ne produit aucune valeur, il renvoie la liste de ce qui manque.
+           Par défaut, autoriser = avoir vérifié. */
+        var verifiee = !!s.lectureVerifiee;
         return { famille: famille, libelle: f.libelle, lecteur: f.lecteur, motif: f.motif,
             anneeRevenus: annee, anneeDeclaration: MILLESIMES[annee].declaration,
-            url: s.url, verifieeLe: s.verifieeLe, lectureVerifiee: !!s.lectureVerifiee,
+            url: s.url, verifieeLe: s.verifieeLe, lectureVerifiee: verifiee,
+            lectureAutorisee: s.lectureAutorisee !== undefined ? !!s.lectureAutorisee : verifiee,
             publiee: !!s.url, constat: s.constat };
     }
 
@@ -237,16 +251,25 @@
             .filter(function (s) { return !!s; });
     }
     function lisibles(annee) {
+        return toutes(annee).filter(function (s) { return s.url && s.lectureAutorisee; });
+    }
+    function verifiees(annee) {
         return toutes(annee).filter(function (s) { return s.url && s.lectureVerifiee; });
     }
     function manquantes(annee) {
-        return toutes(annee).filter(function (s) { return !(s.url && s.lectureVerifiee); });
+        return toutes(annee).filter(function (s) { return !(s.url && s.lectureAutorisee); });
     }
     function url(annee, famille) {
         var s = source(annee, famille);
-        // Une URL repérée mais dont la lecture n'est pas vérifiée pour ce
-        // millésime ne doit pas déclencher de collecte : elle vaut « non lisible ».
-        return s && s.url && s.lectureVerifiee ? s.url : null;
+        // Une URL repérée dont la lecture n'est pas autorisée pour ce millésime ne
+        // doit pas déclencher de collecte : elle vaut « non lisible ».
+        return s && s.url && s.lectureAutorisee ? s.url : null;
+    }
+    function etatDe(s) {
+        if (!s.url) return 'absente';
+        if (s.lectureVerifiee) return 'lisible-vérifiée';
+        if (s.lectureAutorisee) return 'lisible-sous-réserve';
+        return 'repérée-non-autorisée';
     }
     function motif(famille) { return SOURCES[famille] ? SOURCES[famille].motif : null; }
 
@@ -284,10 +307,10 @@
         var lignes = [];
         millésimes().forEach(function (an) {
             lignes.push({ anneeRevenus: an, anneeDeclaration: MILLESIMES[an].declaration,
-                lisibles: lisibles(an).length, total: toutes(an).length,
+                lisibles: lisibles(an).length, verifiees: verifiees(an).length,
+                total: toutes(an).length,
                 familles: toutes(an).map(function (s) {
-                    return s.famille + ':' + (s.url && s.lectureVerifiee ? 'lisible'
-                        : s.url ? 'repérée-non-vérifiée' : 'absente');
+                    return s.famille + ':' + etatDe(s);
                 }) });
         });
         return lignes;
@@ -296,8 +319,10 @@
     function texte(annee) {
         var l = lisibles(annee), mv = manquantes(annee), cal = calendrier(annee);
         if (!cal) return 'Millésime hors inventaire : ' + annee + '.';
+        var total = l.length + mv.length;
         var lignes = ['Sources DGFiP — revenus ' + annee + ' (déclaration ' + cal.anneeDeclaration + ') : '
-            + l.length + '/' + (l.length + mv.length) + ' familles lisibles par l’application.'];
+            + l.length + '/' + total + ' familles lisibles par l’application, dont '
+            + verifiees(annee).length + '/' + total + ' au jeu de preuves vérifié.'];
         if (l.length) lignes.push('Lisibles : ' + l.map(function (s) {
             return s.famille + ' (vérifiée le ' + s.verifieeLe + ')';
         }).join(', ') + '.');
@@ -311,7 +336,8 @@
 
     PF.fiscalSourcesMillesimes = {
         MILLESIMES: MILLESIMES, SOURCES: SOURCES, familles: familles, millésimes: millésimes,
-        source: source, toutes: toutes, lisibles: lisibles, manquantes: manquantes, url: url,
+        source: source, toutes: toutes, lisibles: lisibles, verifiees: verifiees, etatDe: etatDe,
+        manquantes: manquantes, url: url,
         motif: motif, prochainMillésime: prochainMillésime, calendrier: calendrier,
         aVerifier: aVerifier, inventaire: inventaire, texte: texte
     };

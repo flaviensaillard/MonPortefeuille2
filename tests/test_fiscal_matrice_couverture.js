@@ -64,6 +64,36 @@ assert.match(cel.rcm_precompte.note, /aucune CSG déductible personnelle/);
 assert.equal(cel.csg_deductible.statut, PARTIEL);
 assert.equal(cel.csg_deductible.exclusions.length, 4, 'trois calendriers + anti double compte 6DE');
 assert.ok(cel.csg_deductible.exclusions.some(e => /2BH\/2DF/.test(e)));
+
+// ------------------------------------- non-régression : formes de preuve des PDF
+// Le cache renvoie les valeurs seules, une collecte renvoie { etat, valeurs } :
+// les deux formes doivent établir la case, sinon une collecte réussie sur Android
+// laissait les cases RCM / CSG / 2086 en « non disponible ».
+const nues = C.evaluer(2025, { brochureRcm: { revenus: 2025, case2BH: 'x' },
+    chargesRcm: { revenus: 2025, csgPayeeEn: 2025 }, notice2086: { revenus: 2025, seuilFoyer: 305 },
+    urls: { brochureRcm: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/08-RCM_121a136.pdf',
+        charges: 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/12-charges_ded_rev_225a236.pdf',
+        notice2086: 'https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf' } });
+assert.equal(nues.rcm_precompte.statut, PARTIEL, 'valeurs nues du cache : RCM partiel');
+assert.equal(nues.csg_deductible.statut, PARTIEL, 'valeurs nues du cache : CSG partiel');
+assert.equal(nues.crypto_2086_foyer.statut, PARTIEL, 'valeurs nues du cache : 2086 partielle');
+assert.equal(nues.rcm_precompte.source, 'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2026/pdf_som/08-RCM_121a136.pdf');
+
+// Une preuve d'une autre année n'établit jamais la case demandée.
+const deborde = C.evaluer(2023, { brochureRcm: { valeurs: { revenus: 2025 } },
+    chargesRcm: { revenus: 2025 }, notice2086: { valeurs: { revenus: 2025 } } });
+assert.equal(deborde.rcm_precompte.statut, NON_DISPONIBLE, 'preuve 2025 refusée pour 2023');
+assert.equal(deborde.csg_deductible.statut, NON_DISPONIBLE);
+assert.equal(deborde.crypto_2086_foyer.statut, NON_DISPONIBLE);
+assert.match(deborde.csg_deductible.note, /aucun document de ce millésime lu/);
+
+// Un état sans valeurs (échec de lecture, PDF inaccessible) n'établit rien.
+const sansValeurs = C.evaluer(2025, { brochureRcm: { etat: 'PDF non disponible (hors ligne)' },
+    chargesRcm: { etat: 'brochure charges revenus 2025 : preuves CSG incomplètes (six8)' },
+    notice2086: { etat: 'notice 2086 revenus 2025 : preuves incomplètes (fraisHorsQuotient)' } });
+assert.equal(sansValeurs.rcm_precompte.statut, NON_DISPONIBLE, 'un échec de lecture n’est pas une preuve');
+assert.equal(sansValeurs.csg_deductible.statut, NON_DISPONIBLE);
+assert.equal(sansValeurs.crypto_2086_foyer.statut, NON_DISPONIBLE);
 assert.equal(cel.crypto_2086_foyer.statut, PARTIEL);
 assert.match(cel.crypto_2086_foyer.note, /ne certifient pas une annexe 2086 exhaustive/);
 assert.equal(cel.ps_crypto.statut, PARTIEL, 'FAQ seule : aucune attribution à 2025');

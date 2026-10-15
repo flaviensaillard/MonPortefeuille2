@@ -69,8 +69,11 @@ S.millésimes().forEach(an => S.familles().forEach(f => {
         assert.equal(s.lectureVerifiee, false,
             `revenus ${an} · ${f} : sans URL, aucune lecture prétendue vérifiée`);
     }
-    assert.equal(S.url(an, f), s.url && s.lectureVerifiee ? s.url : null,
-        `revenus ${an} · ${f} : url() ne renvoie que ce qui est vérifié ET lisible`);
+    assert.equal(typeof s.lectureAutorisee, 'boolean', `revenus ${an} · ${f} : autorisation explicite`);
+    if (s.lectureVerifiee) assert.equal(s.lectureAutorisee, true,
+        `revenus ${an} · ${f} : un jeu de preuves vérifié autorise la lecture`);
+    assert.equal(S.url(an, f), s.url && s.lectureAutorisee ? s.url : null,
+        `revenus ${an} · ${f} : url() ne renvoie que ce qui est repéré ET autorisé`);
 }));
 // Les motifs contiennent des emplacements à vérifier, jamais des adresses devinées.
 ['boi_ir', 'brochure_rcm', 'brochure_charges', 'notice_2086', 'aide_frais'].forEach(f =>
@@ -82,6 +85,46 @@ assert.equal(S.source(2022, 'boi_ir'), null, 'millésime hors inventaire');
 assert.equal(S.source(2027, 'boi_ir'), null, 'millésime futur hors inventaire');
 assert.equal(S.url(2027, 'boi_ir'), null);
 assert.equal(S.calendrier(2027), null);
+
+// Trois états : vérifiée, autorisée sous réserve, absente.
+assert.equal(S.etatDe(S.source(2025, 'brochure_charges')), 'lisible-vérifiée');
+assert.equal(S.etatDe(S.source(2024, 'brochure_charges')), 'lisible-sous-réserve');
+assert.equal(S.etatDe(S.source(2023, 'brochure_rcm')), 'repérée-non-autorisée');
+assert.equal(S.etatDe(S.source(2024, 'brochure_rcm')), 'absente');
+assert.equal(S.etatDe(S.source(2026, 'boi_ir')), 'absente');
+
+// Documents repérés le 16/10/2026 pour les revenus 2023 et 2024.
+assert.equal(S.url(2024, 'notice_2086'),
+    'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2025/pdf_som/2086.pdf');
+assert.equal(S.url(2023, 'notice_2086'),
+    'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2024/pdf_som/2086.pdf');
+assert.match(S.source(2024, 'notice_2086').constat, /16043\*06/);
+assert.match(S.source(2024, 'notice_2086').constat, /NOTICE \(revenus 2024\)/);
+assert.match(S.source(2023, 'notice_2086').constat, /16043\*05/);
+assert.match(S.source(2023, 'notice_2086').constat, /réalisées en 2023/);
+assert.equal(S.url(2023, 'brochure_charges'),
+    'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2024/pdf_som/12-charges_ded_rev_219a230.pdf');
+assert.equal(S.url(2024, 'brochure_charges'),
+    'https://www.impots.gouv.fr/www2/fichiers/documentation/brochure/ir_2025/pdf_som/12-charges_ded_rev_215a226.pdf');
+// L'ancre portante (l'année des revenus) est vérifiée verbatim sur ces chapitres.
+assert.match(S.source(2023, 'brochure_charges').constat, /REVENUS 2022, PAYÉE EN 2023/);
+assert.match(S.source(2024, 'brochure_charges').constat, /REVENUS 2023, PAYÉE EN 2024/);
+assert.match(S.source(2024, 'brochure_charges').constat, /REVENUS 2024, PAYÉE EN 2024/);
+// Autoriser ≠ vérifier : ce qui n'a pas été relu est écrit, et le lecteur refuse
+// toute preuve manquante.
+[S.source(2023, 'brochure_charges'), S.source(2024, 'brochure_charges'),
+    S.source(2023, 'notice_2086'), S.source(2024, 'notice_2086')].forEach(x => {
+    assert.equal(x.lectureVerifiee, false, `${x.famille} ${x.anneeRevenus} : jeu de preuves non vérifié en entier`);
+    assert.equal(x.lectureAutorisee, true, `${x.famille} ${x.anneeRevenus} : lecture autorisée sous réserve`);
+    assert.match(x.constat, /SOUS RÉSERVE/, `${x.famille} ${x.anneeRevenus} : la réserve est écrite`);
+    assert.match(x.constat, /exige ses \d preuves/, `${x.famille} ${x.anneeRevenus} : le nombre de preuves exigées est dit`);
+});
+// Un document repéré sans lecteur dédié n'autorise rien.
+assert.equal(S.url(2024, 'nouveautes'), null,
+    'nouveautés ir_2025 repérées et relues, mais aucun lecteur dédié : aucune collecte');
+assert.match(S.source(2024, 'nouveautes').constat, /PRINCIPALES NOUVEAUTÉS REVENUS 2024/);
+assert.match(S.source(2024, 'nouveautes').constat, /augmentent de 1,8 %/);
+assert.match(S.motif('notice_2086'), /brochure/, 'les deux emplacements de la notice 2086 sont documentés');
 
 // Repéré ≠ lisible : le chapitre RCM ir_2024 existe, sa lecture n'est pas vérifiée.
 const rcm2023 = S.source(2023, 'brochure_rcm');
@@ -95,13 +138,22 @@ assert.match(rcm2023.constat, /lecture refusée, aucune valeur produite/);
 const inv = {};
 S.inventaire().forEach(l => { inv[l.anneeRevenus] = l; });
 assert.equal(inv[2025].lisibles + '/' + inv[2025].total, '11/11', 'revenus 2025 : tout est lisible');
-assert.equal(inv[2023].lisibles + '/' + inv[2023].total, '6/11');
-assert.equal(inv[2024].lisibles + '/' + inv[2024].total, '6/11');
+assert.equal(inv[2025].verifiees + '/' + inv[2025].total, '11/11', 'et tout est vérifié');
+assert.equal(inv[2023].lisibles + '/' + inv[2023].total, '8/11',
+    'revenus 2023 : charges et notice 2086 repérées et autorisées sous réserve');
+assert.equal(inv[2023].verifiees + '/' + inv[2023].total, '6/11');
+assert.equal(inv[2024].lisibles + '/' + inv[2024].total, '8/11');
+assert.equal(inv[2024].verifiees + '/' + inv[2024].total, '6/11');
 assert.equal(inv[2026].lisibles + '/' + inv[2026].total, '0/11');
-assert.ok(inv[2023].familles.includes('brochure_rcm:repérée-non-vérifiée'));
+assert.ok(inv[2023].familles.includes('brochure_rcm:repérée-non-autorisée'));
+assert.ok(inv[2023].familles.includes('brochure_charges:lisible-sous-réserve'));
+assert.ok(inv[2024].familles.includes('notice_2086:lisible-sous-réserve'));
+assert.ok(inv[2024].familles.includes('nouveautes:repérée-non-autorisée'));
 assert.ok(inv[2024].familles.includes('brochure_rcm:absente'));
 assert.equal(S.lisibles(2026).length, 0);
+assert.equal(S.verifiees(2023).length, 6);
 assert.equal(S.manquantes(2025).length, 0);
+assert.equal(S.manquantes(2023).length, 3);
 assert.equal(S.manquantes(2026).length, 11);
 assert.equal(S.aVerifier(2024).length, 5);
 S.aVerifier(2024).forEach(x => assert.ok(x.motif && x.manque, 'ce qui manque est nommé'));
@@ -122,14 +174,20 @@ assert.equal(S.url(2025, 'brochure_plus_values'), crypto.urls.brochure, 'plus-va
 assert.equal(rcm.urlPour('rcm', 2025), S.url(2025, 'brochure_rcm'));
 assert.equal(rcm.urlPour('charges', 2024), S.url(2024, 'brochure_charges'));
 assert.equal(crypto.urlPour('notice', 2025), S.url(2025, 'notice_2086'));
+assert.equal(crypto.urlPour('notice', 2024), S.url(2024, 'notice_2086'));
+assert.equal(crypto.urlPour('notice', 2023), S.url(2023, 'notice_2086'));
+assert.equal(crypto.urlPour('brochure', 2024), S.url(2024, 'brochure_plus_values'));
 assert.equal(crypto.urlPour('brochure', 2023), null);
+assert.equal(rcm.urlPour('charges', 2023), S.url(2023, 'brochure_charges'));
+assert.equal(rcm.urlPour('charges', 2024), S.url(2024, 'brochure_charges'));
 // Les familles non vérifiées pour un millésime ne sont pas lues par les modules.
 assert.equal(rcm.urlPour('rcm', 2023), null);
 assert.equal(rcm.urlPour('rcm', 2026), null);
 
 // ------------------------------------- liens avec la matrice et les divergences
 const t2024 = S.texte(2024);
-assert.match(t2024, /6\/11 familles lisibles/);
+assert.match(t2024, /8\/11 familles lisibles/);
+assert.match(t2024, /dont 6\/11 au jeu de preuves vérifié/);
 assert.match(t2024, /aucune URL inventée/);
 assert.match(t2024, /Calendrier :/);
 assert.match(S.texte(2026), /0\/11/);
