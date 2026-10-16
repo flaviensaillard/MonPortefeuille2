@@ -10,7 +10,7 @@
    - build.sh n'a AUCUN mot de passe de signature par défaut ;
    - build.sh refuse de construire sans mot de passe (pas de repli connu) ;
    - la release est publiée sans `--clobber` (un APK publié n'est jamais écrasé) ;
-   - la version est bien 2.2.4 (code 34) dans le manifeste, le workflow et build.sh ;
+   - la version est bien 2.2.5 (code 35) dans le manifeste, le workflow et build.sh ;
    - la rotation est documentée (docs/SECURITE-LIVRAISON.md). */
 'use strict';
 
@@ -45,8 +45,8 @@ verifier("l'ancien cache public apk-keystore-v1 est purgé (rotation)",
 verifier('aucun --clobber sur la publication de release',
     !/--clobber/.test(apkYml),
     'un APK publié ne doit jamais pouvoir être remplacé');
-verifier('version 2.2.4 et code 34',
-    /VERSION_NAME:\s*'2\.2\.4'/.test(apkYml) && /VERSION_CODE:\s*'34'/.test(apkYml));
+verifier('version 2.2.5 et code 35',
+    /VERSION_NAME:\s*'2\.2\.5'/.test(apkYml) && /VERSION_CODE:\s*'35'/.test(apkYml));
 
 console.log('Script de build (build.sh)');
 verifier('aucun mot de passe de signature par défaut',
@@ -56,17 +56,17 @@ verifier('aucun mot de passe de signature par défaut',
 verifier('la construction échoue sans mot de passe de signature',
     /if \[ -z "\$\{KEY_PASS:-\}" \]/.test(buildSh) && /KEY_PASS absent/.test(buildSh),
     'sans mot de passe fourni par un secret, le build doit refuser de signer');
-verifier('version par défaut 2.2.4 / code 34',
-    /VERSION_NAME="\$\{VERSION_NAME:-2\.2\.4\}"/.test(buildSh)
-        && /VERSION_CODE="\$\{VERSION_CODE:-34\}"/.test(buildSh));
+verifier('version par défaut 2.2.5 / code 35',
+    /VERSION_NAME="\$\{VERSION_NAME:-2\.2\.5\}"/.test(buildSh)
+        && /VERSION_CODE="\$\{VERSION_CODE:-35\}"/.test(buildSh));
 
 console.log('Manifeste Android');
-verifier('versionName 2.2.4', /android:versionName="2\.2\.4"/.test(manifeste));
-verifier('versionCode 34', /android:versionCode="34"/.test(manifeste));
+verifier('versionName 2.2.5', /android:versionName="2\.2\.5"/.test(manifeste));
+verifier('versionCode 35', /android:versionCode="35"/.test(manifeste));
 
 console.log('Version Python (core)');
-verifier('core/__init__.py annonce 2.2.4',
-    /__version__\s*=\s*"2\.2\.4"/.test(lire('core/__init__.py')),
+verifier('core/__init__.py annonce 2.2.5',
+    /__version__\s*=\s*"2\.2\.5"/.test(lire('core/__init__.py')),
     'la version doit être cohérente partout : APK, workflow, build, core, notes');
 
 /* Cohérence de la livraison : la version est lue dans le workflow, jamais

@@ -88,6 +88,13 @@
        table, il n'utilise que le cache local revérifié à chaque ouverture. */
     var historiques = Object.create(null);
     var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue', compteRapports = null;
+    /* Dernière interruption du bouton de mise à jour. Elle survit au rendu parce
+       que c'est un ÉCHEC DE RÉCUPÉRATION : elle doit mettre l'onglet en rouge et
+       nommer la raison, pas disparaître au prochain tracé de l'écran.
+       `interruptionAnnees` borne l'échec aux millésimes réellement demandés :
+       sans cela un clic interrompu sur 2023 à 2025 peindrait en rouge des
+       millésimes qui n'ont jamais été tentés. */
+    var derniereInterruption = null, interruptionAnnees = [];
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
     function franchiseCrypto(annee) {
@@ -1321,10 +1328,7 @@
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus ' + UI.h(libelléPlage()) + ' (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + htmlRapport(annee) + htmlMatrice()
-                + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
-                    .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
-                        + htmlRapport(an) + '</div>'; }).join('') + '</div>';
+                + htmlOngletCollecte(annee) + '</div></div>';
         }
 
         // Le cache d'accueil ne contient aucune transaction : tant que la
@@ -1338,7 +1342,7 @@
                 + '<button class="btn sec" data-fisc="collecter">Vérifier cette année (DGFiP)</button>'
                 + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + htmlRapport(annee) + '</div>';
+                + htmlOngletCollecte(annee) + '</div>';
         }
 
         // --- Bandeau de mise à jour
@@ -1373,12 +1377,7 @@
             + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
             + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-            + htmlRapport(annee)
-            + '</div>' + htmlMatrice() + '</div>';
-        var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
-        if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
-            + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
-                + htmlRapport(an) + '</div>'; }).join('') + '</div>';
+            + htmlOngletCollecte(annee) + '</div></div>';
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
@@ -2099,6 +2098,55 @@
             + '</details>';
     }
 
+    /* Rapports des autres millésimes vérifiés par le même clic. Revenus, jamais
+       année de déclaration : c'est la confusion que toute la page s'attache à
+       lever, elle ne doit pas réapparaître ici. */
+    function htmlAutresAnnees(annee) {
+        var autres = Object.keys(rapportsControle)
+            .filter(function (an) { return Number(an) !== Number(annee); })
+            .sort(function (a, b) { return Number(a) - Number(b); });
+        if (!autres.length) return '';
+        return '<div style="margin-top:10px"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
+            + autres.map(function (an) {
+                return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
+                    + htmlRapport(an) + '</div>';
+            }).join('') + '</div>';
+    }
+
+    /* Onglet replié qui regroupe TOUS les messages d'une mise à jour : résumé
+       copiable, audit détaillé, matrice de couverture et autres millésimes.
+
+       La pastille n'est pas décorative. Elle vient de `PF.fiscalEtatCollecte`,
+       qui classe les motifs réellement produits par les lecteurs :
+         vert   → tout ce que la DGFiP publie pour ces millésimes a été lu ;
+         orange → des informations manquent (document non publié pour le
+                  millésime, portée partielle, contradiction non levée) ;
+         rouge  → la récupération n'a pas abouti (source inaccessible, PDF
+                  illisible, écriture Supabase refusée, mise à jour interrompue).
+
+       L'onglet ne déroule une alerte QUE s'il manque quelque chose : tout est lu
+       ⇒ aucune alerte, conformément à ce qui a été demandé. Un repli explicite
+       est prévu : sans le module de classement, l'écran affiche les messages à
+       plat SANS pastille plutôt que d'inventer un état. */
+    function htmlOngletCollecte(annee) {
+        var contenu = htmlRapport(annee) + htmlMatrice() + htmlAutresAnnees(annee);
+        var E = PF.fiscalEtatCollecte;
+        if (!E) return contenu;
+        var s = E.syntheseTout(rapportsControle, derniereInterruption, interruptionAnnees);
+        var badge = s.couleur === E.ECHEC ? 'warn'
+            : s.couleur === E.MANQUANT ? 'attente'
+                : s.couleur === E.OK ? 'ok' : 'mut';
+        var alerte = E.texteManquants(s);
+        return '<details class="onglet-collecte" data-etat="' + UI.h(s.couleur || 'aucun') + '">'
+            + '<summary><span class="badge ' + badge + '">' + UI.h(E.libelle(s)) + '</span>'
+            + '<span class="onglet-collecte-titre">Messages de la mise à jour fiscale</span></summary>'
+            + (alerte
+                ? '<div class="' + (s.couleur === E.ECHEC ? 'erreur' : 'attention')
+                    + '" style="white-space:pre-wrap;overflow-wrap:anywhere">' + UI.h(alerte) + '</div>'
+                : '')
+            + contenu + '</details>';
+    }
+
     function bilanMiseAJour(annee, resultat) {
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
             rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {},
@@ -2241,7 +2289,12 @@
                 if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
                     !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources
                     || !PF.fiscalBrochureSources || !PF.fiscalCryptoPdfSources || !PF.fiscalRcmPdfSources) {
-                    if (etat) etat.textContent = 'Modules DGFiP absents.';
+                    // Sans lecteurs, la récupération est IMPOSSIBLE : c'est le rouge,
+                    // et il doit survivre au rendu au lieu d'être un texte effacé.
+                    derniereInterruption = 'Modules DGFiP absents : la récupération des documents officiels est impossible.';
+                    interruptionAnnees = [];
+                    if (PF.app && PF.app.rendre) PF.app.rendre();
+                    else if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
                 var proprietaire = PF.net.auth.utilisateur();
@@ -2251,6 +2304,11 @@
                 }
                 var années = collecte.getAttribute('data-fisc') === 'collecter-tout'
                     ? plageCollecte() : [anneeEnCours()];
+                // Un nouveau clic repart de zéro : sans cela l'échec d'une
+                // tentative précédente peindrait l'onglet en rouge alors même que
+                // la collecte en cours réussit.
+                derniereInterruption = null;
+                interruptionAnnees = [];
                 collecte.disabled = true;
                 if (etat) etat.textContent = 'Lecture DGFiP des revenus ' + années.join(', ') + '…';
                 Promise.all(années.map(function (an) {
@@ -2322,8 +2380,15 @@
                             .then(function () { PF.app.rendre(); });
                     });
                 }).catch(function (err) {
-                    if (etat) etat.textContent = 'Actualisation interrompue : '
+                    // Une interruption est une IMPOSSIBILITÉ DE RÉCUPÉRATION, pas
+                    // une lacune documentaire : l'onglet doit passer en rouge et
+                    // nommer la raison. Un simple textContent serait effacé au
+                    // prochain rendu et l'échec disparaîtrait de l'écran.
+                    derniereInterruption = 'Actualisation interrompue : '
                         + String(err && err.message || err) + '. Aucune révision complète publiée.';
+                    interruptionAnnees = années.slice();
+                    if (PF.app && PF.app.rendre) PF.app.rendre();
+                    else if (etat) etat.textContent = derniereInterruption;
                 }).then(function () { collecte.disabled = false; });
                 return;
             }

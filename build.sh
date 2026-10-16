@@ -32,7 +32,7 @@ for f in js/util.js js/models.js js/net.js js/store.js js/biometrie.js js/metric
         exit 1
     fi
 done
-for f in js/fiscal_rcm_sources.js js/fiscal_crypto_sources.js js/fiscal_brochure_sources.js js/fiscal_crypto_pdf_sources.js js/fiscal_rcm_pdf_sources.js vendor/pdfjs/pdf.min.js vendor/pdfjs/pdf.worker.min.js; do
+for f in js/fiscal_rcm_sources.js js/fiscal_crypto_sources.js js/fiscal_brochure_sources.js js/fiscal_crypto_pdf_sources.js js/fiscal_rcm_pdf_sources.js js/fiscal_etat_collecte.js vendor/pdfjs/pdf.min.js vendor/pdfjs/pdf.worker.min.js; do
     if [ ! -f "$WWW/$f" ]; then
         echo "Module fiscal/PDF manquant : $WWW/$f" >&2
         exit 1
@@ -53,8 +53,8 @@ APP="$ROOT/app/src/main"
 BUILD="$ROOT/build"
 OUT="$ROOT/dist"
 
-VERSION_NAME="${VERSION_NAME:-2.2.4}"
-VERSION_CODE="${VERSION_CODE:-34}"
+VERSION_NAME="${VERSION_NAME:-2.2.5}"
+VERSION_CODE="${VERSION_CODE:-35}"
 KEYSTORE="${KEYSTORE:-$ROOT/keystore/portefeuille.jks}"
 KEY_ALIAS="${KEY_ALIAS:-portefeuille}"
 # SÉCURITÉ 2.1.0 (revue S-02) : AUCUN mot de passe par défaut. La valeur

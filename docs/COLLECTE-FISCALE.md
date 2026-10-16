@@ -621,7 +621,7 @@ les deux états (avant / après 013), y compris avec une écriture réelle de l'
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
 
-### Livraison : 2.2.2 → 2.2.3 → 2.2.4
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5
 
 Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
 release **depuis `main` seulement**. Or la release est **unique et immuable** : si
@@ -631,14 +631,15 @@ version 2.2.2 aurait donc **fait échouer la construction sur `main`**, sans APK
 installable à la clé.
 
 La version est donc passée à **2.2.3 (code 33)**, puis à **2.2.4 (code 34)** après
-le retour réel du 15/10 — la 2.2.3 étant déjà installée sur le téléphone, il faut
-un code supérieur pour que les deux APK se distinguent. Les cinq endroits imposés
-par la procédure du dépôt sont alignés (`AndroidManifest.xml`, `apk.yml`
-`VERSION_NAME` et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
-`telechargements/notes-2.2.4.md` et le nom d'artefact.
+le retour réel du 15/10, puis à **2.2.5 (code 35)** pour l'onglet replié de mise à
+jour — la 2.2.4 étant déjà installée sur le téléphone, il faut à chaque fois un code
+supérieur pour que deux APK différentes ne portent pas le même nom. Les cinq
+endroits imposés par la procédure du dépôt sont alignés (`AndroidManifest.xml`,
+`apk.yml` `VERSION_NAME` et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
+`telechargements/notes-2.2.5.md` et le nom d'artefact.
 
 **Conséquence à connaître avant de fusionner** : la fusion de la PR #24 construira
-puis **publiera automatiquement la release `apk-2.2.4`**. C'est le comportement
+puis **publiera automatiquement la release `apk-2.2.5`**. C'est le comportement
 normal du workflow (la 2.2.2 a été publiée ainsi), mais c'est bien une publication
 définitive : aucun écrasement n'est possible ensuite.
 

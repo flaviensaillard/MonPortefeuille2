@@ -972,6 +972,25 @@ Hors réseau, exécutés par la CI (`node tests/test_*.js`) :
 Les suites déjà livrées (`test_fiscal_activation_2025.js`,
 `test_fiscal_crypto_sources.js`, `test_fiscal_regimes_activation.js`,
 `test_fiscal_parametres_partiels.js`, etc.) continuent de passer sans
-modification : les 51 suites JavaScript sont vertes en local, et 977 tests Python
+modification : les 52 suites JavaScript sont vertes en local, et 977 tests Python
 (les tests SQL et RLS, auparavant sautés faute de PostgreSQL local, s'exécutent
 désormais aussi en local).
+
+**2.2.5** — aucun chiffre fiscal changé, aucune catégorie élargie, aucun taux
+activé. Tous les messages d'une mise à jour (résumé copiable, audit détaillé,
+matrice de couverture, autres millésimes du même clic) sont regroupés dans **un
+onglet replié** de l'écran Fiscalité, dont la pastille est **calculée** par
+`js/fiscal_etat_collecte.js` à partir des motifs réellement produits par les
+douze lecteurs : vert si tout ce que la DGFiP publie pour ces millésimes a été
+lu, orange si des informations manquent (document non publié, non attribuable à
+l'année des revenus, preuve insuffisante), rouge si la récupération n'a pas
+abouti (source inaccessible, PDF illisible, écriture Supabase refusée, mise à
+jour interrompue). L'onglet ne déroule **que** ce qui manque ou a échoué, avec le
+millésime et la raison ; tout est lu ⇒ aucune alerte. Le vert ne dit pas que la
+fiscalité du millésime est établie : la portée partielle d'un document lu («
+produit du foyer non déterminé », « avis et montants du foyer non lus ») reste
+écrite dans le résumé et la matrice, à l'intérieur du même onglet. Verrouillé par
+`tests/test_fiscal_etat_collecte.js` (12 sections), qui rejoue les motifs réels
+des lecteurs et contrôle les deux sens de l'erreur : une panne masquée par des
+valeurs restées en cache reste rouge, et un motif inconnu retombe sur « manquant
+», jamais sur « ok ».

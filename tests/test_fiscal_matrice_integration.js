@@ -138,10 +138,17 @@ const json = x => JSON.stringify(x);
     assert.equal(f.casParticuliersQF({ parts: 1.5, statut: 'Célibataire', enfants: 1,
         parentIsole: true }).certifie, false);
 
-    // La matrice est bien appelée par l'écran, dans les deux branches.
+    // La matrice est rendue par l'onglet unique de mise à jour (2.2.5), appelé
+    // dans les TROIS branches de l'écran : calcul indisponible, portefeuille non
+    // chargé, cas nominal. Avant cela elle était appelée deux fois en clair, si
+    // bien que le comptage brut a changé de forme — l'exigence, non : la matrice
+    // doit rester repliée dans l'écran fiscal, y compris quand le calcul est
+    // indisponible. On vérifie donc l'emboîtement réel plutôt qu'un décompte.
     const code = fs.readFileSync(path.join(dir, 'fiscal.js'), 'utf8');
-    assert.equal((code.match(/htmlMatrice\(\)/g) || []).length >= 3, true,
-        'matrice repliée dans l’écran fiscal, y compris quand le calcul est indisponible');
+    assert.equal((code.match(/htmlOngletCollecte\(/g) || []).length >= 4, true,
+        'onglet de mise à jour appelé dans les trois branches de l’écran fiscal');
+    assert.match(code, /function htmlOngletCollecte[\s\S]{0,400}htmlMatrice\(\)/,
+        'matrice repliée dans l’onglet, y compris quand le calcul est indisponible');
     const index = fs.readFileSync(path.join(dir, '..', 'index.html'), 'utf8');
     ['fiscal_couverture.js', 'fiscal_crypto_ps_recoupement.js', 'fiscal_gardes_foyer.js'].forEach(m =>
         assert.ok(index.includes('js/' + m), m + ' chargé par la WebView'));

@@ -208,6 +208,10 @@ main#view.enter { animation: in .26s cubic-bezier(.2, .8, .2, 1); }
 .badge.warn { background: rgba(231, 76, 60, 0.15); color: var(--down); }
 .badge.info { background: rgba(56, 189, 248, 0.14); color: var(--flat); }
 .badge.mut { background: rgba(255, 255, 255, 0.07); color: var(--txt-2); }
+/* Orange = informations manquantes. Ni un succès (ok, vert), ni une panne
+   (warn, rouge) : la collecte a abouti, mais tout n'est pas publié ou tout
+   n'est pas attribuable au millésime. --gold existait déjà dans la palette. */
+.badge.attente { background: rgba(245, 196, 81, 0.16); color: var(--gold); }
 
 .fleche { font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -452,6 +456,22 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .erreur { background: rgba(231, 76, 60, 0.12); border: 1px solid rgba(231, 76, 60, 0.3); color: #FFC9C2; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
 .info { background: rgba(56, 189, 248, 0.10); border: 1px solid rgba(56, 189, 248, 0.26); color: #BFE6FF; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
 .ok-vert { background: rgba(46, 204, 113, 0.12); border: 1px solid rgba(46, 204, 113, 0.3); color: #B9F0D0; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+/* Alertes de l'onglet de mise à jour fiscale. `.erreur` (rouge) existe déjà :
+   récupération impossible. `.attention` (orange) : la collecte a abouti mais des
+   informations manquent. Aucun bloc vert n'est prévu — tout est lu ⇒ aucune
+   alerte, la pastille de l'onglet suffit. */
+.attention { background: rgba(245, 196, 81, 0.10); border: 1px solid rgba(245, 196, 81, 0.3); color: #F3DFA8; border-radius: 14px; padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+
+/* Onglet replié des messages de mise à jour. La bordure reprend la couleur de la
+   pastille pour que l'état se lise sans dérouler l'onglet. */
+.onglet-collecte { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-top: 8px; background: var(--card-2); }
+.onglet-collecte[data-etat="ok"] { border-color: rgba(46, 204, 113, 0.35); }
+.onglet-collecte[data-etat="manquant"] { border-color: rgba(245, 196, 81, 0.35); }
+.onglet-collecte[data-etat="echec"] { border-color: rgba(231, 76, 60, 0.4); }
+.onglet-collecte > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.onglet-collecte > summary::-webkit-details-marker { display: none; }
+.onglet-collecte-titre { font-size: 13px; color: var(--txt-2); }
+.onglet-collecte[open] > summary { margin-bottom: 10px; }
 
 .noanim * { animation: none !important; transition: none !important; }
 
