@@ -31,8 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: '2.2.5'
-      VERSION_CODE: '35'
+      VERSION_NAME: '2.2.6'
+      VERSION_CODE: '36'
     steps:
       - uses: actions/checkout@v4
 
@@ -182,14 +182,14 @@ jobs:
             gh release create "$ETIQUETTE" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "APK ${VERSION_NAME}" \
-              --notes-file telechargements/notes-2.2.5.md
+              --notes-file telechargements/notes-2.2.6.md
             gh release upload "$ETIQUETTE" "dist/$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
           echo "SHA256 de l'APK publié : $SHA_NOUVEAU" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Porte-feuille-2.2.5.apk
+          name: Porte-feuille-2.2.6.apk
           path: dist/Porte-feuille.apk
           if-no-files-found: error
 

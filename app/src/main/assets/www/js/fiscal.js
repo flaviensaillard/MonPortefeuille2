@@ -1346,10 +1346,12 @@
         }
 
         // --- Bandeau de mise à jour
-        if (revisionActive(annee)) {
-            out += '<div class="ok-vert">Révision publiée des paramètres ' + UI.h(annee)
-                + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
-        } else {
+        // Le bandeau « Révision publiée des paramètres … » est retiré à la
+        // demande du propriétaire (2.2.6). Il doublonnait avec le message
+        // « Paramètres publiés pour les revenus … » de verifierMaj(), retiré
+        // lui aussi. L'état R2 reste lisible dans le résumé copiable
+        // (« R2 publiée prioritaire ») et dans l'onglet de mise à jour.
+        if (!revisionActive(annee)) {
             var valeurDGFiP = officiels[annee] || {};
             var utilises = [];
             if (valeurDGFiP.ir) utilises.push('barème IR');
@@ -1367,7 +1369,12 @@
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">Ouvrir l’assistant de mise à jour</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="prompt">Voir le prompt à envoyer à l’IA</button></div></div>';
-        } else {
+        } else if (!revisionActive(annee)) {
+            // Le message « Paramètres publiés pour les revenus … » — celui que
+            // renvoie verifierMaj() quand une R2 est active — est retiré à la
+            // demande du propriétaire (2.2.6). Les AUTRES messages de
+            // verifierMaj() restent affichés : millésime absent, constantes
+            // intégrées, valeurs DGFiP relues.
             out += '<div class="ok-vert">' + UI.h(maj.message) + '</div>';
         }
         // Collectes sourcées partielles ; une révision complète garde priorité.
@@ -1381,19 +1388,23 @@
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
-        var qfGarde = PF.fiscalGardesFoyer ? PF.fiscalGardesFoyer.casParticuliersQF({
-            parts: U.num(r.partsFiscales, 0), statut: r.statutFiscal, enfants: enfants }) : null;
-        out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.'
-            + (qfGarde && (qfGarde.blocages.length || qfGarde.avertissements.length)
-                ? '<div class="st" style="margin-top:6px">'
-                    + UI.h(qfGarde.blocages.concat(qfGarde.avertissements).join(' ')) + '</div>' : '')
-            + '</div>';
+        // Le bandeau « Quotient familial : plafond général seulement … » est
+        // retiré à la demande du propriétaire (2.2.6). Sa partie « personnalisée »
+        // (casParticuliersQF) ne s'est JAMAIS affichée : `enfants` était déclaré
+        // plus bas dans la fonction, donc `var` le faisait valoir undefined à
+        // l'appel, et aucun drapeau (parentIsole, invalidite…) n'était transmis —
+        // blocages et avertissements restaient vides dans tous les cas. Le module
+        // fiscal_gardes_foyer.js reste chargé, exporté et testé.
 
         // --- 1. Paramètres fiscaux
         var couple = estCouple(r.statutFiscal);
-        out += '<div class="info">Titres et cessions : ce portefeuille appartient uniquement à son propriétaire. '
-            + (couple ? 'Le mariage ne rend pas le conjoint codétenteur ; l’IR utilise cependant les revenus saisis pour les deux déclarants. ' : '')
-            + 'Les options 2OP/3CN et le seuil de cessions crypto concernent tout le foyer : vérifier tout autre revenu ou cession éventuel hors de ce portefeuille, sans en présumer l’existence.</div>';
+        // Le bandeau « Titres et cessions : ce portefeuille appartient uniquement
+        // à son propriétaire … » est retiré à la demande du propriétaire (2.2.6).
+        // L'avertissement sur le périmètre du FOYER n'est pas perdu : il subsiste
+        // dans la limite du comparateur 2OP (« 2OP est globale pour tous les RCM
+        // et gains mobiliers du foyer »), dans le bandeau du seuil crypto de 305 €
+        // (« Ce total ne suffit pas à prouver l'exonération du foyer fiscal ») et
+        // dans portee2086Foyer().
         var f1 = fraisReelsDeclarant(r, 1, annee);
         var f2 = couple ? fraisReelsDeclarant(r, 2, annee) : null;
 

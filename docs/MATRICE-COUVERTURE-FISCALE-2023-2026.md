@@ -994,3 +994,43 @@ produit du foyer non déterminé », « avis et montants du foyer non lus ») re
 des lecteurs et contrôle les deux sens de l'erreur : une panne masquée par des
 valeurs restées en cache reste rouge, et un motif inconnu retombe sur « manquant
 », jamais sur « ok ».
+
+**2.2.6** — aucun chiffre fiscal changé, aucune catégorie élargie, aucun taux
+activé. Quatre bandeaux d'en-tête sont retirés de l'écran Fiscalité à la demande du
+propriétaire : « Révision publiée des paramètres … », « Paramètres publiés pour les
+revenus … » (qui doublonnait avec le précédent dès qu'une révision était active),
+« Quotient familial : plafond général seulement … » et « Titres et cessions : ce
+portefeuille appartient uniquement à son propriétaire … ».
+
+Ce retrait ne fait disparaître **aucun** avertissement de fond, et deux faits ont
+été vérifiés avant d'agir plutôt que supposés :
+
+- la partie « personnalisée » du bandeau Quotient familial **ne s'est jamais
+  affichée**. Elle appelait `casParticuliersQF()` avec un nombre d'enfants déclaré
+  *plus bas* dans la même fonction : `var` le faisait valoir `undefined` à l'appel,
+  et aucun drapeau (parent isolé, invalidité, ancien combattant, veuvage) n'était
+  transmis. `blocages` et `avertissements` restaient vides — constaté par appel
+  direct sur cinq situations de foyer différentes. Le module
+  `fiscal_gardes_foyer.js` reste chargé, exporté et testé ;
+- les autres messages de `verifierMaj()` restent affichés (millésime absent,
+  constantes intégrées, valeurs DGFiP relues) : seul le message d'une révision
+  active est retiré.
+
+Les avertissements de fond sont **déplacés au contact des chiffres** qu'ils
+qualifient, ce qui est plus utile qu'un rappel général en haut d'écran : le
+périmètre du foyer subsiste dans la limite du comparateur 2OP (« 2OP est globale
+pour tous les RCM et gains mobiliers du foyer »), dans le bandeau du seuil crypto
+de 305 € (« Ce total ne suffit pas à prouver l'exonération du foyer fiscal :
+vérifiez aussi les cessions éventuelles du conjoint hors de ce portefeuille ») et
+dans `portee2086Foyer()` ; les plafonds QF particuliers subsistent dans la matrice
+de couverture (`qf_speciaux` = « non disponible », note « plafonds particuliers non
+modélisés ; le bilan et la recommandation 2OP ne sont pas certifiés pour un parent
+isolé, une invalidité ou une demi-part majorée »), repliée dans l'onglet de mise à
+jour ; l'état de la R2 subsiste dans le résumé copiable (« R2 publiée prioritaire »).
+
+`tests/test_fiscal_perimetre_ui.js` a été réécrit pour cette version : il ne se
+contente pas d'acter le retrait, il vérifie que les avertissements foyer subsistent
+là où ils ont été déplacés, et il **verrouille** le retrait — si l'un des quatre
+bandeaux réapparaît dans un rendu, la suite échoue. L'assertion porte sur le code
+hors commentaires, car les commentaires citent volontairement ces incipits pour
+documenter le retrait.
