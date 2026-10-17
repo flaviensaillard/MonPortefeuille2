@@ -90,16 +90,22 @@ for (const form of ['2042', '2042 C', '2047', '2074', '2074-CMV', '2086', '3916 
     assert.ok(html.includes('<h3>' + form + ' · revenus 2025</h3>'), form);
 for (const n of ['511', '512', '514', '515', '516', '517', '518', '520', '521', '522', '523', '524',
     '903 / PV', '903 / MV', '913 / total', '1133 / 1 · A', '1164', '211', '212', '213', '214',
-    '215', '216', '217', '218', '220', '221', '222', '223', '224', '51', '52',
-    '2TR', '2CG', '2BH', '2DF', '6DE', '2OP', '3VG', '3VH', '3SG', '3AN', '3BN', '3CN', '8UU'])
-    assert.ok(html.includes('<b>' + n + '</b>'), 'repère utile absent : ' + n);
+    '215', '217', '218', '220', '221', '223', '224', '51', '52',
+    '2TR', '2OP', '3VG', '3VH', '3AN', '3BN', '8UU'])
+    assert.ok(html.includes('<b>' + n + '</b>'), 'montant ou option enregistrée absente : ' + n);
+for (const n of ['216', '222', '2CG', '2BH', '2DF', '6DE', '3SG', '3CN']) {
+    assert.match(html, new RegExp(n), 'la limite propre à ' + n + ' doit être expliquée');
+    assert.ok(!html.includes('<b>' + n + '</b>'), 'ne pas afficher une fausse case chiffrée : ' + n);
+}
+assert.doesNotMatch(html, /À compléter depuis vos justificatifs/);
 assert.match(html, /913 existe : c’est le total du cadre/);
 assert.doesNotMatch(html, /Ligne 905 — total des plus-values|Ligne 913 — total des moins-values/);
 assert.match(html, /Chaque cession occupe une colonne/i);
 assert.match(html, /1 245,00 €/);
 assert.match(html, /511/);
-assert.match(html, /part connue seulement/);
-assert.match(html, /3AN.*À compléter au niveau du foyer/s);
+assert.match(html, /51[\s\S]*?part connue du foyer/);
+assert.match(html, /<b>3AN<\/b>[\s\S]*?<b class="dim">0 €<\/b>/);
+assert.match(html, /305 €.*foyer/);
 assert.match(html, /SWISSQUOTE|Swissquote/);
 assert.doesNotMatch(html, /<b>non fiable<\/b>/, 'les noms de comptes doivent être échappés');
 assert.match(html, /(?:&lt;|&amp;lt;)b(?:&gt;|&amp;gt;)non fiable/,
@@ -158,6 +164,6 @@ const ecran2035 = ctxFuture.PF.fiscal.vue({ transactions: [], transactionsCharge
 assert.match(ecran2035, /Revenus 2035 : calcul fiscal indisponible/);
 assert.match(ecran2035, /Vos formulaires de déclaration 2036/);
 assert.match(ecran2035, /REPÈRES des revenus 2025/);
-assert.match(ecran2035, /numéros ci-dessous sont les REPÈRES des revenus 2025/);
+assert.match(ecran2035, /fiches et sources ci-dessous sont les REPÈRES des revenus 2025/);
 
 console.log('Guide DGFiP 2.2.7 : 7 imprimés, calculs 2074/2086, garde du foyer et futur refusés sans source OK');

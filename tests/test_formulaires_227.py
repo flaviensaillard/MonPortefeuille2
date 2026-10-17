@@ -83,10 +83,12 @@ def test_page_streamlit_ne_retombe_pas_sur_les_anciens_reports():
     assert "d2074['ligne_913']" not in src and 'd2074["ligne_913"]' not in src
     assert 'Ligne `905` (Total des plus-values)' not in src
     assert 'Ligne `913` (Total des moins-values)' not in src
-    assert 'ligne `903`, colonne PV' in src.lower() or 'Ligne `903`, colonne PV' in src
+    assert "903/PV {ui.eur(d2074['ligne_903_pv'])}" in src
+    assert "903/MV {ui.eur(d2074['ligne_903_mv'])}" in src
+    assert '913 est le total du cadre 900 ; 905 concerne' in src
     assert 'Frais de cession :** `0 €`' not in src
     assert 'Frais d\'acquisition :** `0 €`' not in src
     assert 'Soulte reçue ou versée :** `0 €`' not in src
     assert 'Soultes reçues en cas d\'échanges antérieurs :** `0 €`' not in src
-    assert 'ligne 52 complète' in src
+    assert 'ligne 52 du foyer complet' in src
     assert 'total_cessions_218' in src, 'le seuil du 2086 porte sur le net des frais'

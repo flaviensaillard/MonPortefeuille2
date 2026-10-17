@@ -473,15 +473,20 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .onglet-collecte-titre { font-size: 13px; color: var(--txt-2); }
 .onglet-collecte[open] > summary { margin-bottom: 10px; }
 
-/* Guide fiscal : les formulaires sont repliables ; leur synthèse reste lisible
-   même fermée. Sur téléphone la VALEUR doit rester sur l'écran, jamais dans la
-   troisième colonne d'un tableau large de 520 px à faire défiler latéralement. */
+/* Fiscalité : chiffres de l'application d'abord, cases en cartes étroites,
+   détail par vente à la demande. Jamais de montant dans une colonne hors écran. */
 .fisc-guide { margin-top: 10px; }
+.fisc-apercu { margin: 12px 0 18px; padding: 14px; border: 1px solid var(--line-strong);
+    border-radius: 14px; background: var(--card-2); }
+.fisc-apercu h3 { margin: 0 0 8px; font-size: 17px; }
+.fisc-apercu .fisc-lignes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 8px; }
 .fisc-imprime { margin: 10px 0; padding: 0; }
 .fisc-imprime > summary { display: flex; align-items: center; gap: 10px; padding: 14px;
     cursor: pointer; list-style: none; min-height: 58px; }
-.fisc-imprime > summary::-webkit-details-marker { display: none; }
-.fisc-imprime > summary:focus-visible { outline: 2px solid var(--euro); outline-offset: -2px; border-radius: 14px; }
+.fisc-imprime > summary::-webkit-details-marker, .fisc-cession > summary::-webkit-details-marker,
+.fisc-limites > summary::-webkit-details-marker { display: none; }
+.fisc-guide summary:focus-visible { outline: 2px solid var(--euro); outline-offset: -2px; border-radius: 10px; }
 .fisc-imprime-tete { flex: 1; min-width: 0; }
 .fisc-imprime h3 { margin: 0 0 5px; font-size: 16px; }
 .fisc-imprime-resume { display: block; color: var(--euro); font-size: 12px;
@@ -490,31 +495,35 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .fisc-imprime[open] .fisc-imprime-chevron { transform: rotate(180deg); }
 .fisc-imprime-corps { padding: 0 14px 14px; }
 .fisc-imprime a { color: var(--euro); overflow-wrap: anywhere; }
-.fisc-cadre { margin: 14px 0; }
-.fisc-cadre h4 { font-size: 13px; margin: 6px 0; color: var(--gold); }
-.fisc-cadre .st { overflow-wrap: anywhere; }
+.fisc-cadre { margin: 16px 0; }
+.fisc-cadre h4, .fisc-details-titre { font-size: 13px; margin: 8px 0; color: var(--gold); }
+.fisc-cadre .st, .fisc-ligne { overflow-wrap: anywhere; }
+.fisc-ligne { padding: 10px 0; border-bottom: 1px solid var(--line); line-height: 1.4; }
+.fisc-apercu .fisc-ligne { padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
+.fisc-ligne-haut { display: flex; justify-content: space-between; align-items: baseline;
+    flex-wrap: wrap; gap: 4px 12px; font-size: 15px; }
+.fisc-ligne-haut > b:first-child { color: var(--gold); }
+.fisc-ligne-haut .up { color: var(--euro); }
+.fisc-ligne[data-fisc-etat="conditionnel"] .fisc-ligne-haut .dim { color: var(--gold); }
+.fisc-ligne-intitule, .fisc-ligne-note { color: var(--txt-2); font-size: 12px; }
+.fisc-ligne-note { margin-top: 4px; }
 .fisc-titre { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px;
     color: var(--txt-2); line-height: 1.5; overflow-wrap: anywhere; }
 .fisc-titre b { color: var(--euro); font-size: 14px; }
-.fisc-table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.fisc-formulaire-table { min-width: 520px; }
-.fisc-formulaire-table th:first-child, .fisc-formulaire-table td:first-child { min-width: 80px; }
-.fisc-formulaire-table th:nth-child(2), .fisc-formulaire-table td:nth-child(2) { min-width: 220px; white-space: normal; }
-.fisc-formulaire-table th:last-child, .fisc-formulaire-table td:last-child { min-width: 170px; white-space: normal; }
-.fisc-formulaire-table .st { font-size: 11px; line-height: 1.4; }
+.fisc-cession { margin: 7px 0; border: 1px solid var(--line); border-radius: 9px; }
+.fisc-cession > summary { display: flex; justify-content: space-between; gap: 10px;
+    align-items: baseline; padding: 12px; cursor: pointer; list-style: none; overflow-wrap: anywhere; }
+.fisc-cession > summary b { color: var(--euro); white-space: nowrap; }
+.fisc-cession-corps { padding: 0 12px 12px; }
+.fisc-limites { margin: 14px 0; font-size: 12px; color: var(--txt-2); }
+.fisc-limites > summary { cursor: pointer; list-style: none; color: var(--gold); }
+.fisc-limites > summary::before { content: '＋ '; }
+.fisc-limites[open] > summary::before { content: '− '; }
+.fisc-comptes { padding-left: 22px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-    .fisc-table-scroll { overflow-x: visible; }
-    .fisc-formulaire-table { display: block; min-width: 0; width: 100%; }
-    .fisc-formulaire-table thead { position: absolute; width: 1px; height: 1px;
-        padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-    .fisc-formulaire-table tbody { display: block; }
-    .fisc-formulaire-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
-    .fisc-formulaire-table td { display: block; min-width: 0 !important; padding: 0;
-        border: 0; text-align: left !important; white-space: normal; overflow-wrap: anywhere; }
-    .fisc-formulaire-table td:first-child { color: var(--gold); margin-bottom: 3px; }
-    .fisc-formulaire-table td:nth-child(2) { color: var(--txt-2); margin-bottom: 5px; }
-    .fisc-formulaire-table td:last-child { font-size: 15px; font-weight: 700; }
-    .fisc-formulaire-table td:last-child .up { color: var(--euro); }
+    .fisc-apercu .fisc-lignes { grid-template-columns: minmax(0, 1fr); }
+    .fisc-ligne-haut > b { font-size: 15px; }
+    .fisc-cession > summary { flex-wrap: wrap; }
 }
 #fiscAnneeGuide { background: var(--card-2); border: 1px solid var(--line-strong); color: var(--txt); border-radius: 9px; padding: 9px; margin: 7px 5px; }
 

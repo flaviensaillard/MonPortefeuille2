@@ -13,9 +13,8 @@
    Il survit à trois endroits, tous vérifiés ci-dessous :
      • la limite du comparateur 2OP (« 2OP est globale pour tous les RCM et gains
        mobiliers du foyer »), affichée avec la recommandation elle-même ;
-     • le bandeau du seuil crypto de 305 € (« Ce total ne suffit pas à prouver
-       l'exonération du foyer fiscal : vérifiez aussi les cessions éventuelles du
-       conjoint hors de ce portefeuille ») ;
+     • la note au CONTACT de la ligne 51 crypto (« Ce total ne suffit pas à
+       prouver l'exonération du foyer fiscal ») et les cessions du conjoint ;
      • `portee2086Foyer()`, qui porte la portée foyer de l'annexe 2086.
 
    Le test verrouille aussi le RETRAIT : si l'un des quatre bandeaux réapparaît
@@ -35,9 +34,10 @@ assert.match(texte, /2OP est globale pour tous les RCM et gains mobiliers du foy
     'la limite foyer du comparateur 2OP doit subsister');
 assert.match(guide, /Ce total ne suffit pas à prouver l’exonération du foyer fiscal/,
     'le seuil crypto de 305 € doit rester qualifié dans le formulaire 2086');
-assert.match(guide, /éventuelles du conjoint hors de ce portefeuille/,
+assert.match(guide, /cessions du conjoint hors de ce portefeuille/,
     'le conjoint hors portefeuille doit être explicitement mentionné');
-assert.match(guide, /seuil du foyer est respecté/);
+assert.match(guide, /seuil de 305 €.*cessions du conjoint hors de ce portefeuille/s,
+    'la condition de seuil doit figurer avec la part connue de 51');
 assert.match(texte, /portee2086Foyer/, 'la portée foyer de l’annexe 2086 doit subsister');
 assert.doesNotMatch(texte, /<b>exonéré<\/b>/,
     'sous le seuil, le mot « exonéré » ne doit pas être affirmé en gras');

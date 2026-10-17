@@ -1059,3 +1059,11 @@ millésimes, la page ne reprend pas les numéros de cases 2025, uniquement des
 estimations **non reportables**. Le périmètre DGFiP reste celui des imprimés
 revenus **2025** ; aucune preuve 2026 n'est ajoutée, aucune migration ni
 activation de taux n'est effectuée.
+
+**2.2.9 — chiffres de l’application en tête :**
+[CLARTE-FISCALE-2.2.9.md](CLARTE-FISCALE-2.2.9.md) explicite l’aperçu chiffré
+Android et Streamlit, le détail par vente replié/séparé, la disparition des
+placeholders génériques et les réserves regroupées seulement pour le foyer,
+les soultes et les autres données absentes. Les calculs, les sources du
+millésime 2025, la R2 prioritaire et l’absence d’imprimé futur vérifié
+restent inchangés.

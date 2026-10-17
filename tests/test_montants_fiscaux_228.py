@@ -103,8 +103,10 @@ def test_page_n_affiche_plus_de_total_partiel_et_garde_les_volets_independants()
     src = (Path(__file__).resolve().parents[1] / "pages/4_Fiscalite.py").read_text()
     assert "sim = tax.simuler_foyer_complet(" in src
     assert ") if bilan_calculable and precompte_connu else None" in src
-    assert 'if not presentation.calculable(d2074):' in src
-    assert 'if not presentation.calculable(d2086):' in src
+    assert 'titres_ok = presentation.calculable(d2074)' in src
+    assert 'crypto_ok = presentation.calculable(d2086)' in src
+    assert 'if not titres_ok:' in src and 'if not crypto_ok:' in src
+    assert 'st.tabs(["Montants par titre", "Détail de chaque cession · 510"' in src
     assert 'presentation.titres_par_actif(d2074["par_actif"])' in src
     assert 'presentation.crypto_par_actif(d2086["cessions"])' in src
     assert "st.stop()" not in src.split("d2086 = tax.detail_2086_de_lannee", 1)[1].split(
@@ -139,25 +141,45 @@ def test_streamlit_affiche_chaque_segment_calculable_meme_sans_ir(scenario):
     cases = rendu["cases"]
     assert cases["1AJ"] == "30 000 €"
     assert cases["1AK"] == "LAISSER VIDE"
+    assert rendu["metriques"]["2042 · 1AJ"] == "30 000 €", "chiffre avant les formulaires"
+    if scenario not in ("fx", "titres_excedentaires"):
+        assert "Montants par titre" in rendu["onglets"]
+        assert "Détail de chaque cession · 510" in rendu["onglets"]
+    if scenario != "crypto_excedentaire":
+        assert "Montants par crypto-actif" in rendu["onglets"]
+        assert "Détail de chaque cession · 2086" in rendu["onglets"]
     if scenario == "precompte":
-        assert cases["2TR"] == "300 €"
-        assert cases["2OP"] == "Indisponible"
+        assert cases["2TR"] == rendu["metriques"]["2042 · 2TR"] == "300 €"
+        assert rendu["annexes"]["2047"] == {
+            "252 → 2TR": "300 €", "250": "300 €", "251": "300 €"}
+        assert "2OP" not in cases, "une simulation suspendue n'est pas une fausse case"
     titre_valide = scenario not in ("fx", "titres_excedentaires")
     crypto_valide = scenario != "crypto_excedentaire"
     if titre_valide:
-        assert cases["3VG"] == "50 €"
+        assert cases["3VG"] == "50 €" and cases["3VH"] == "0 €"
+        assert rendu["metriques"]["2042 C · 3VG (ces titres)"] == "50 €"
         assert any("903/PV 50,00 €" in label for label in formulaires)
         assert any("Titre" in cols for cols in rendu["colonnes"])
+        assert rendu["annexes"]["vente2074"]["512"] == "2025-05-01"
+        assert rendu["annexes"]["vente2074"]["524"] == "50,00 €"
     else:
-        assert cases["3VG"] == "Indisponible"
+        assert "vente2074" not in rendu["annexes"]
+        assert "3VG" not in cases and "3VH" not in cases
+        assert "2042 C · 3VG (ces titres)" not in rendu["metriques"]
         assert not any("Titre" in cols for cols in rendu["colonnes"])
     if crypto_valide:
-        assert "400,00 €" in cases["3AN"]
-        assert any("224 400,00 €" in label for label in formulaires)
+        assert cases["3AN"].startswith("400,00 € · conditionnel")
+        assert cases["3BN"].startswith("0,00 € · conditionnel")
+        assert any("224 estimée 400,00 €" in label for label in formulaires)
         assert any("Crypto-actif" in cols for cols in rendu["colonnes"])
+        assert rendu["annexes"]["2086"] == {"224": "400,00 €", "51": "500,00 €", "52": "400,00 €"}
+        assert rendu["annexes"]["vente2086"]["211"] == "01/06/2025"
+        assert rendu["annexes"]["vente2086"]["218"] == "500,00 €"
     else:
-        assert cases["3AN"] == "Indisponible"
+        assert "2086" not in rendu["annexes"] and "vente2086" not in rendu["annexes"]
+        assert "3AN" not in cases and "3BN" not in cases
         assert not any("Crypto-actif" in cols for cols in rendu["colonnes"])
+    assert not any("À compléter depuis vos justificatifs" in m for m in rendu["markdown"])
     if scenario == "complet":
         assert not any("Bilan d'impôt indisponible" in e for e in rendu["errors"])
     else:

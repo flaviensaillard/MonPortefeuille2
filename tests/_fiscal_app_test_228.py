@@ -73,17 +73,31 @@ if scenario == "futur" and not app.exception:
     app.selectbox[0].set_value(2026).run()
 
 cases = {}
+annexes = {}
 for element in app.dataframe:
-    if "Case" in element.value.columns:
+    colonnes = element.value.columns
+    if "Case" in colonnes:
         cases = {str(r["Case"]): str(r["À inscrire"])
                  for _, r in element.value.iterrows()}
-        break
+    for code, montant in (("Ligne", "Montant connu"),
+                          ("Ligne", "Montant de l'application"),
+                          ("Ligne 510", "Montant de cette vente"),
+                          ("Ligne 2086", "Montant de cette vente")):
+        if code in colonnes and montant in colonnes:
+            annexe = ("2047" if montant == "Montant connu" else "2086"
+                      if montant == "Montant de l'application" else "vente2074"
+                      if code == "Ligne 510" else "vente2086")
+            annexes[annexe] = {str(r[code]): str(r[montant])
+                               for _, r in element.value.iterrows()}
 print(json.dumps({
     "exceptions": [e.message for e in app.exception],
     "labels": [e.label for e in app.expander],
     "ouverts": [e.proto.expanded for e in app.expander],
     "cases": cases,
+    "annexes": annexes,
     "colonnes": [list(e.value.columns) for e in app.dataframe],
+    "onglets": [e.label for e in app.tabs],
+    "metriques": {e.label: e.value for e in app.metric},
     "errors": [e.value for e in app.error],
     "warnings": [e.value for e in app.warning],
     "markdown": [e.value for e in app.markdown],

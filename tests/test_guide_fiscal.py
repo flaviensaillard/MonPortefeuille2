@@ -296,14 +296,15 @@ def test_formulaires_fiscaux_repliables_et_resumes_sans_ouvrir_les_parametres():
     """
     import pathlib
     src = pathlib.Path("pages/4_Fiscalite.py").read_text(encoding="utf-8")
-    formulaires = src.split("# --- VOLET 1 : FORMULAIRE", 1)[1]
+    formulaires = src.split("# Revenus 2025 seulement : les saisies confirmées", 1)[1]
     for titre in ("Formulaire 2042 & 2042-C", "Formulaire 2047",
                   "Formulaire 2074 / 2074-CMV", "Formulaire 2086",
                   "Formulaire 3916 / 3916-bis"):
         bloc = formulaires.split(titre, 1)[1].split("expanded=", 1)[1]
         assert bloc.startswith("False"), titre
     assert "903/PV {ui.eur(d2074['ligne_903_pv'])}" in src
-    assert "224 {ui.eur(d2086['plus_value_globale_224'])}" in src
+    assert "224 estimée {ui.eur(d2086['plus_value_globale_224'])}" in src
+    assert 'st.tabs(["Montants par titre", "Détail de chaque cession · 510"' in formulaires
     saisies = src.split("# 1. Paramètres du foyer", 1)[1].split("# 2. VOS FORMULAIRES", 1)[0]
     assert "expanded=False" in saisies, "la saisie des paramètres privés reste repliée"
 

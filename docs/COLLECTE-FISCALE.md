@@ -621,7 +621,7 @@ les deux états (avant / après 013), y compris avec une écriture réelle de l'
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
 
-### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7 → 2.2.8
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7 → 2.2.8 → 2.2.9
 
 Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
 release **depuis `main` seulement**. Or la release est **unique et immuable** : si
@@ -637,16 +637,19 @@ puis à **2.2.7 (code 37)** pour refaire les formulaires et corriger les reports
 2074/2086, enfin à **2.2.8 (code 38)** pour montrer les montants par titre et
 par case dans l'APK et sur Streamlit, restaurer les onglets repliables et ne plus
 effacer les ventes calculables lorsque l'impôt global est bloqué (voir
-[MONTANTS-FISCAUX-2.2.8.md](MONTANTS-FISCAUX-2.2.8.md)).
+[MONTANTS-FISCAUX-2.2.8.md](MONTANTS-FISCAUX-2.2.8.md)), puis à **2.2.9
+(code 39)** pour placer les chiffres de l’application avant les limites de
+foyer, séparer les cessions et retirer les demandes de justificatifs génériques
+(voir [CLARTE-FISCALE-2.2.9.md](CLARTE-FISCALE-2.2.9.md)).
 Une version étant déjà construite sous son numéro, il faut un code supérieur pour
 que deux APK différentes ne portent pas le même nom. Les fichiers imposés par la
 procédure du dépôt sont alignés (`AndroidManifest.xml`, `apk.yml` `VERSION_NAME`
 et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec les notes
-`telechargements/notes-2.2.8.md` et le nom d'artefact.
+`telechargements/notes-2.2.9.md` et le nom d'artefact.
 
 **Conséquence à connaître avant de fusionner** : une éventuelle fusion de la PR
 #24, décidée uniquement par le propriétaire, construirait puis **publierait
-la release `apk-2.2.8` depuis `main`**. Aucun de ces actes n'est effectué par
+la release `apk-2.2.9` depuis `main`**. Aucun de ces actes n'est effectué par
 cette livraison de branche. Une release est définitive : aucun écrasement n'est
 possible ensuite.
 

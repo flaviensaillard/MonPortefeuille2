@@ -25,24 +25,31 @@ const crypto = [
 // Faux DOM minimal : les attributs open sont réellement relus avant chaque
 // remplacement innerHTML, puis reconstruits depuis le HTML calculé.
 class FormContainer {
-    constructor() { this.attrs = { 'data-annee': '2025' }; this.states = {}; this._html = ''; }
+    constructor() {
+        this.attrs = { 'data-annee': '2025' };
+        this.states = {}; this.cessionStates = {}; this._html = '';
+    }
     getAttribute(k) { return this.attrs[k]; }
     querySelectorAll(sel) {
-        assert.equal(sel, '[data-fisc-imprime]');
-        return Object.entries(this.states).map(([nom, open]) => ({
-            getAttribute: k => k === 'data-fisc-imprime' ? nom : null, open
+        assert.ok(['[data-fisc-imprime]', '[data-fisc-cession]'].includes(sel));
+        const key = sel === '[data-fisc-imprime]' ? 'data-fisc-imprime' : 'data-fisc-cession';
+        const states = key === 'data-fisc-imprime' ? this.states : this.cessionStates;
+        return Object.entries(states).map(([nom, open]) => ({
+            getAttribute: k => k === key ? nom : null, open
         }));
     }
     set innerHTML(html) {
         this._html = html;
-        this.states = {};
-        const re = /<details class="card fisc-imprime" data-fisc-imprime="([^"]+)"( open)?>/g;
+        this.states = {}; this.cessionStates = {};
+        const formes = /<details class="card fisc-imprime" data-fisc-imprime="([^"]+)"( open)?>/g;
+        const ventes = /<details class="fisc-cession" data-fisc-cession="([^"]+)"( open)?>/g;
         let m;
-        while ((m = re.exec(html))) this.states[m[1]] = !!m[2];
+        while ((m = formes.exec(html))) this.states[m[1]] = !!m[2];
+        while ((m = ventes.exec(html))) this.cessionStates[m[1]] = !!m[2];
     }
     get innerHTML() { return this._html; }
 }
-const f = new FormContainer(), g = { innerHTML: '' };
+const f = new FormContainer(), g = { innerHTML: '', querySelectorAll: () => [] };
 const vueDOM = { dataset: {}, addEventListener: () => {} };
 const reglages = {
     statutFiscal: 'Célibataire', partsFiscales: 1, salaireNetImposable1: 30000,
@@ -87,7 +94,10 @@ function forme(html, nom) {
     assert.match(initial, /<b>2TR<\/b>[\s\S]*?300 €/, 'intérêts saisis visibles avant la lecture des ventes');
     f.states['2074'] = true; // ouverture pendant le calcul asynchrone
     await tick();
-    assert.match(f.innerHTML, /Simulation d’impôt indisponible : Indiquez si les prélèvements sociaux/);
+    assert.match(f.innerHTML, /Simulation d’impôt du foyer indisponible : Indiquez si les prélèvements sociaux/);
+    assert.match(f.innerHTML, /Vos chiffres dans l’application · revenus 2025/);
+    assert.doesNotMatch(f.innerHTML, /À compléter depuis vos justificatifs/);
+    assert.match(f.innerHTML, /<b>2074 · 903\/PV<\/b>[\s\S]*?1 020,00 €/);
     assert.match(g.innerHTML, /Impôt du foyer indisponible/);
     assert.equal(f.states['2074'], true, 'la 2074 ouverte ne se referme pas après le calcul');
     assert.equal(Object.keys(f.states).length, 7, 'sept imprimés vraiment repliables');
@@ -102,7 +112,9 @@ function forme(html, nom) {
     assert.match(forme(f.innerHTML, '2086'), /BTC · 1 cession\(s\) · résultat estimé -121,05 €/);
     assert.match(forme(f.innerHTML, '2086'), /Calcul \(hors case\)[\s\S]*?-121,05 €/);
     assert.match(forme(f.innerHTML, '2086'), /<b>224<\/b>[\s\S]*?-121,05 €/);
-    assert.match(forme(f.innerHTML, '2086'), /<b>52<\/b>[\s\S]*?À compléter après contrôle/);
+    assert.match(forme(f.innerHTML, '2086'), /<b>52<\/b>[\s\S]*?-121,05 €/);
+    assert.match(forme(f.innerHTML, '2086'), /<b>51<\/b>[\s\S]*?300,00 €/);
+    assert.match(forme(f.innerHTML, '2086'), /216\/222.*l’application ne les invente pas/);
     const sous305 = F.detail2086([
         { ticker: 'BTC', type: 'achat', date: '2025-02-01', quantite: 1, cours: 100, frais: 0, devise: 'EUR' },
         { ticker: 'BTC', type: 'vente', date: '2025-03-01', quantite: 1, cours: 200, frais: 0, devise: 'EUR' }
@@ -110,12 +122,16 @@ function forme(html, nom) {
     assert.equal(sous305.plus_value_globale_224, 100);
     assert.equal(sous305.case_3an, 0, 'le seuil porte sur les cessions de tout le foyer');
     const caseCrypto = forme(G.render(2025, { t2086: sous305 }), '2042 C');
-    assert.match(caseCrypto, /<b>3AN<\/b>[\s\S]*?portefeuille seul, si complet : 0 €/);
-    assert.match(caseCrypto, /résultat 224 100,00 €/);
+    assert.match(caseCrypto, /<b>3AN<\/b>[\s\S]*?<b class="dim">0 €<\/b>/);
+    assert.match(caseCrypto, /224 estimée : 100,00 €/);
     assert.doesNotMatch(caseCrypto, /<b>3AN<\/b>[\s\S]*?<b class="up">100 €/s,
         'un gain 224 sous le seuil ne devient pas une 3AN prête à saisir');
+    assert.match(forme(f.innerHTML, '2042'), /2CG, 2BH et 2DF[\s\S]*?6DE/);
     assert.doesNotMatch(forme(f.innerHTML, '2042'), /<b>6DE<\/b>[\s\S]*?<b class="up">0 €/,
         'les données du foyer inconnues ne sont pas certifiées à zéro');
+    assert.ok(Object.keys(f.cessionStates).length >= 4, 'ventes repliées, montants en tête');
+    assert.ok(Object.values(f.cessionStates).every(v => !v));
+    f.cessionStates['2074|X|2025-06-10|0'] = true;
 
     // Repli manuel persisté après nouveau rendu (PS connus). Le total du
     // portefeuille ne change pas ; seul l'arbitrage IR devient disponible.
@@ -124,6 +140,8 @@ function forme(html, nom) {
     F.vue(donnees);
     await tick();
     assert.equal(f.states['2074'], false, 'la 2074 repliée par l’utilisateur le reste');
+    assert.equal(f.cessionStates['2074|X|2025-06-10|0'], true,
+        'une vente ouverte reste ouverte après un recalcul de la même année');
     assert.doesNotMatch(g.innerHTML, /Impôt du foyer indisponible/);
     assert.match(forme(f.innerHTML, '2074'), /903 \/ PV/);
 
@@ -212,12 +230,12 @@ function forme(html, nom) {
     assert.match(fut, /X le 10\/06\/2030 : 487,50 €/);
     assert.doesNotMatch(forme(fut, '2074'), /<b class="up">.*?€<\/b>/s);
 
-    // La colonne de montants n'est PLUS rejetée à droite sur écran étroit.
+    // Les montants sont maintenant côte à côte avec leur case même sur mobile.
     const css = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/css/app.css'), 'utf8');
-    const mobile = css.split('@media (max-width: 600px) {').pop();
-    assert.match(mobile, /\.fisc-formulaire-table\s*\{[^}]*min-width:\s*0/);
-    assert.match(mobile, /\.fisc-formulaire-table td\s*\{[^}]*display:\s*block/);
-    assert.match(mobile, /\.fisc-formulaire-table td:last-child\s*\{[^}]*font-size:\s*15px/);
+    assert.match(css, /\.fisc-ligne-haut\s*\{[^}]*display:\s*flex/);
+    assert.match(css, /\.fisc-ligne-haut > b\s*\{[^}]*font-size:\s*15px/);
+    assert.doesNotMatch(css, /\.fisc-formulaire-table\s*\{[^}]*min-width:\s*520px/);
+    assert.match(css, /\.fisc-apercu \.fisc-lignes\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
 
-    console.log('Montants 2.2.8 : par titre/case visibles, repli conservé, IR/crypto indépendants, mobile et futur sûrs : OK');
+    console.log('Montants : chiffres en tête, détail repliable, IR/crypto indépendants, mobile et futur sûrs : OK');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -1737,6 +1737,12 @@
             Array.prototype.slice.call(ancien.querySelectorAll('[data-fisc-imprime]')).forEach(function (el) {
                 ouverts[el.getAttribute('data-fisc-imprime')] = el.open;
             });
+            // Les ventes sont aussi repliables ; conserver la lecture en cours
+            // lorsque les cours arrivent, sans rouvrir un autre millésime.
+            ouverts.cessions = Object.create(null);
+            Array.prototype.slice.call(ancien.querySelectorAll('[data-fisc-cession]')).forEach(function (el) {
+                ouverts.cessions[el.getAttribute('data-fisc-cession')] = el.open;
+            });
         }
         return PF.fiscalFormulairesDgfip.render(annee, donnees || {}, ouverts);
     }

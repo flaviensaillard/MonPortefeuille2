@@ -34,9 +34,9 @@
             sources: SOURCES,
             avertissement: annee === DERNIER_VERIFIE ? ''
                 : 'Les imprimés des revenus ' + annee + ' (déclaration ' + (annee + 1)
-                    + ') ne sont pas vérifiés ici. Les numéros ci-dessous sont les REPÈRES des revenus 2025, '
-                    + 'pas des cases officielles ' + annee + ' : recontrôlez chaque case et intitulé sur les '
-                    + 'formulaires DGFiP du bon millésime avant tout report.'
+                    + ') ne sont pas vérifiés ici. Les fiches et sources ci-dessous sont les REPÈRES des revenus 2025, '
+                    + 'sans numéros de case officiels pour ' + annee + ' : consultez les imprimés '
+                    + 'DGFiP du bon millésime avant tout report.'
         };
     }
 
@@ -46,27 +46,34 @@
     }
     function date(x) { return x && PF.util ? PF.util.jourMoisAnneeISO(x) : '—'; }
     function ligne(numero, intitule, valeur, etat, note) {
-        return { numero: String(numero), intitule: intitule,
-            valeur: valeur === undefined || valeur === null ? 'À vérifier' : String(valeur),
-            etat: etat || 'verifier', note: note || '' };
+        return { numero: String(numero), intitule: intitule, valeur: String(valeur),
+            etat: etat || 'calcule', note: note || '' };
     }
-    function calcul(numero, intitule, valeur, disponible, note) {
-        return ligne(numero, intitule, disponible ? valeur : 'Non disponible',
-            disponible ? 'calcule' : 'verifier', note);
-    }
+    /* Une carte par case : code, montant et explication restent côte à côte
+       sur téléphone. Ne pas intercaler un tableau de cases vides. */
     function tableau(lignes) {
-        return '<div class="fisc-table-scroll"><table class="tableau compact fisc-formulaire-table">'
-            + '<thead><tr><th scope="col">Case / ligne</th><th scope="col">Intitulé DGFiP</th><th scope="col">Montant connu / à contrôler</th></tr></thead><tbody>'
-            + lignes.map(function (l) {
-                return '<tr><td><b>' + h(l.numero) + '</b></td><td>' + h(l.intitule)
-                    + (l.note ? '<div class="st">' + h(l.note) + '</div>' : '')
-                    + '</td><td><b class="' + (l.etat === 'calcule' ? 'up' : 'dim') + '">'
-                    + h(l.valeur) + '</b></td></tr>';
-            }).join('') + '</tbody></table></div>';
+        return '<div class="fisc-lignes" role="list">' + lignes.map(function (l) {
+            return '<div class="fisc-ligne" role="listitem" data-fisc-etat="' + h(l.etat) + '">'
+                + '<div class="fisc-ligne-haut"><b>' + h(l.numero) + '</b>'
+                + '<b class="' + (l.etat === 'calcule' ? 'up' : 'dim') + '">'
+                + h(l.valeur) + '</b></div><div class="fisc-ligne-intitule">' + h(l.intitule) + '</div>'
+                + (l.note ? '<div class="st fisc-ligne-note">' + h(l.note) + '</div>' : '')
+                + '</div>';
+        }).join('') + '</div>';
     }
     function cadre(titre, lignes, note) {
-        return '<div class="fisc-cadre"><h4>' + h(titre) + '</h4>'
-            + (note ? '<p class="st">' + h(note) + '</p>' : '') + tableau(lignes) + '</div>';
+        if (!lignes.length) return '';
+        return '<section class="fisc-cadre"><h4>' + h(titre) + '</h4>'
+            + (note ? '<p class="st">' + h(note) + '</p>' : '') + tableau(lignes) + '</section>';
+    }
+    function message(texte, classe) {
+        return '<p class="' + (classe || 'st') + '">' + h(texte) + '</p>';
+    }
+    function cession(cle, titre, montant, corps, ouverts) {
+        return '<details class="fisc-cession" data-fisc-cession="' + h(cle) + '"'
+            + (ouverts && ouverts[cle] ? ' open' : '') + '><summary><span>'
+            + h(titre) + '</span><b>' + h(montant) + '</b></summary><div class="fisc-cession-corps">'
+            + corps + '</div></details>';
     }
     function complet(resultat) {
         return !!resultat && !(resultat.indisponible && resultat.indisponible.length);
@@ -78,33 +85,34 @@
         if (!s.structureVerifiee) return 'Repères 2025 uniquement · aucun montant reportable';
         var t = completPour(data.t2074, s.anneeRevenus) ? data.t2074 : null;
         var c = completPour(data.t2086, s.anneeRevenus) ? data.t2086 : null;
-        if (nom === '2074' && data.t2074 && !t) return 'Montants indisponibles · cours/position à vérifier';
-        if (nom === '2086' && data.t2086 && !c) return 'Montants indisponibles · cours/position à vérifier';
-        if (nom === '2074' && t && t.operations && t.operations.length)
-            return t.operations.length + ' cession(s) · 903/PV ' + eur(t.ligne_903_pv, 2)
-                + ' · 903/MV ' + eur(t.ligne_903_mv, 2) + ' (portefeuille)';
-        if (nom === '2086' && c && c.cessions && c.cessions.length)
-            return c.cessions.length + ' cession(s) · total connu 224 ' + eur(c.plus_value_globale_224, 2)
-                + ' (à contrôler pour le foyer)';
-        if (nom === '2042 C') {
-            var parties = [];
-            if (t && t.operations && t.operations.length)
-                parties.push('Titres : 3VG ' + eur(t.case_3vg, 2) + ' · 3VH ' + eur(t.case_3vh, 2));
-            if (c && c.cessions && c.cessions.length)
-                parties.push('Crypto : part connue 224 ' + eur(c.plus_value_globale_224, 2)
-                    + ' · 3AN/3BN du foyer à vérifier');
-            if (parties.length) return parties.join(' · ') + ' (portefeuille seul)';
-        }
-        if (nom === '2042' || nom === '2047') {
-            var interets = data.reglages && Number(data.reglages.interetsEtrangers);
-            if (Number.isFinite(interets) && interets > 0)
-                return 'Intérêts saisis : ' + eur(interets, 2) + ' · IFU/foyer à vérifier';
-            var salaires = data.sim && data.sim.annee === s.anneeRevenus
-                ? data.sim : data.base || {};
-            if (nom === '2042' && Number.isFinite(salaires.case_1aj) && salaires.case_1aj > 0)
-                return 'Salaire 1AJ saisi : ' + eur(salaires.case_1aj, 0) + ' · foyer à vérifier';
-        }
-        return 'Ouvrir les cases et montants connus';
+        var r = data.reglages || {}, interets = Number(r.interetsEtrangers);
+        var salaires = data.sim && data.sim.annee === s.anneeRevenus
+            ? data.sim : data.base || {};
+        if (nom === '2074') return data.t2074 && !t ? 'Total suspendu · cours ou position absent'
+            : t && t.operations && t.operations.length
+                ? '903/PV ' + eur(t.ligne_903_pv, 2) + ' · 903/MV ' + eur(t.ligne_903_mv, 2)
+                : 'Ventes de titres · aucune cession chiffrée';
+        if (nom === '2086') return data.t2086 && !c ? 'Total suspendu · cours ou position absent'
+            : c && c.cessions && c.cessions.length
+                ? '224 estimée ' + eur(c.plus_value_globale_224, 2) + ' · 51 ' + eur(c.total_cessions_218, 2)
+                : 'Crypto · aucune cession chiffrée';
+        if (nom === '2042 C') return t && t.operations && t.operations.length
+            ? 'Titres : 3VG ' + eur(t.case_3vg, 2) + ' · 3VH ' + eur(t.case_3vh, 2)
+                + (c && c.cessions && c.cessions.length ? ' · crypto : 224 estimée '
+                    + eur(c.plus_value_globale_224, 2) : '')
+            : c && c.cessions && c.cessions.length
+                ? 'Crypto : 224 estimée ' + eur(c.plus_value_globale_224, 2) + ' · seuil du foyer'
+                : 'Résultat titres et crypto · lire les cessions';
+        if (nom === '2042') return (Number.isFinite(salaires.case_1aj) && salaires.case_1aj > 0
+            ? '1AJ ' + eur(salaires.case_1aj, 0) : 'Salaires')
+            + (Number.isFinite(interets) && interets > 0 ? ' · 2TR ' + eur(interets, 0) : ' · intérêts');
+        if (nom === '2047') return Number.isFinite(interets) && interets > 0
+            ? 'Intérêts saisis ' + eur(interets, 0) + ' · qualification à confirmer'
+            : 'Revenus de source étrangère · si concernés';
+        if (nom === '2074-CMV') return 'Parcours alternatif · ne pas doubler la 2074';
+        if (nom === '3916 / 3916-bis') return (data.comptes || []).length
+            + ' compte(s) répertorié(s) · informations personnelles absentes';
+        return 'Voir les chiffres de l’application';
     }
     /* <details> est repliable au clavier et au toucher, sans gestionnaire JS.
        Son état open est restitué lors du remplacement asynchrone des montants. */
@@ -120,7 +128,6 @@
             + corps + '<p class="st">Source : <a href="' + h(s.sources[nom])
             + '" target="_blank" rel="noopener noreferrer">imprimé DGFiP revenus 2025</a>.</p></div></details>';
     }
-    function vide() { return 'À compléter depuis vos justificatifs'; }
     function raison(liste) {
         return (liste || []).map(function (m) {
             return (m.actif ? m.actif + ' · ' : '') + (m.devise || 'cours/position')
@@ -185,299 +192,309 @@
             }).join('') + '</div>';
     }
 
-    /* Lignes fiscales utiles à ce portefeuille : chaque cadre et ligne de
-       calcul réellement susceptible d'être reportée est affiché, y compris
-       lorsqu'une donnée (foyer, précompte, comptes) n'existe pas dans l'app.
-       Ce n'est PAS la transcription des cadres sans rapport avec ce portefeuille
-       (immobilier, PEA, actions gratuites, activité professionnelle, etc.). */
-    function donnees(annee, data) {
-        // Seuls les revenus 2025 portent des numéros/valeurs relus sur LEURS
-        // imprimés. Pour toute autre année, les tableaux sont un gabarit à
-        // revalider ; aucun montant n'y est injecté comme s'il était officiel.
-        var sim = annee === DERNIER_VERIFIE && data.sim && data.sim.annee === annee
-            ? data.sim : null;
-        var base = annee === DERNIER_VERIFIE ? data.base || {} : {};
-        var t = annee === DERNIER_VERIFIE && completPour(data.t2074, annee) ? data.t2074 : null;
-        var c = annee === DERNIER_VERIFIE && completPour(data.t2086, annee) ? data.t2086 : null;
-        var r = annee === DERNIER_VERIFIE ? data.reglages || {} : {};
-        var compte = data.comptes || [];
-        // Un prélèvement d'intérêts inconnu bloque l'IR, PAS les cases des
-        // titres, des crypto-actifs ou le montant d'intérêts déjà saisi.
-        // Une crypto non chiffrable ne doit pas effacer une 2074 complète.
-        var salaires = sim || base;
-        var cessionsTitres = !!(t && t.operations && t.operations.length);
-        var cessionsCrypto = !!(c && c.cessions && c.cessions.length);
+    /* Le guide commence par les données de l'application, pas par des lignes
+       vides. Les montants du portefeuille restent distincts des cases du foyer.
+       Un segment incomplet ne fournit aucun total partiel, sans effacer l'autre. */
+    function donnees(annee, data, ouverts) {
+        var a = {};
+        if (annee !== DERNIER_VERIFIE) {
+            Object.keys(SOURCES).forEach(function (imprime) {
+                a[imprime] = message('Modèle des revenus 2025 seulement : aucune case ni valeur '
+                    + 'du formulaire des revenus ' + annee + ' n’est vérifiée ici. Consultez l’imprimé '
+                    + 'publié pour ce millésime avant de reporter un montant.', 'info');
+            });
+            return a;
+        }
+        var sim = data.sim && data.sim.annee === annee ? data.sim : null;
+        var salaires = sim || data.base || {};
+        var r = data.reglages || {};
+        var comptes = Array.isArray(data.comptes) ? data.comptes : [];
+        var t = completPour(data.t2074, annee) ? data.t2074 : null;
+        var c = completPour(data.t2086, annee) ? data.t2086 : null;
+        var ventes = !!(t && t.operations && t.operations.length);
+        var crypto = !!(c && c.cessions && c.cessions.length);
         var interets = Number(r.interetsEtrangers);
         var interetsConnus = Number.isFinite(interets) && interets > 0;
-        var euros = function (n) { return eur(n, 0); };
-        var a = {};
-        a['2042'] = [
-            cadre('Cadre 1 · traitements et salaires · page 3 de la 2042', [
-                calcul('1AJ', 'Traitements et salaires — déclarant 1', euros(salaires.case_1aj),
-                    Number.isFinite(salaires.case_1aj), 'Montant saisi à rapprocher du salaire prérempli par l’employeur.'),
-                calcul('1AK', 'Frais réels — déclarant 1',
-                    salaires.case_1ak === null ? 'LAISSER VIDE (abattement 10 %)' : euros(salaires.case_1ak),
-                    Number.isFinite(salaires.case_1aj) && (salaires.case_1ak === null || Number.isFinite(salaires.case_1ak))),
-                ...(salaires.couple ? [
-                    calcul('1BJ', 'Traitements et salaires — déclarant 2', euros(salaires.case_1bj),
-                        Number.isFinite(salaires.case_1bj)),
-                    calcul('1BK', 'Frais réels — déclarant 2',
-                        salaires.case_1bk === null ? 'LAISSER VIDE (abattement 10 %)' : euros(salaires.case_1bk),
-                        Number.isFinite(salaires.case_1bj) && (salaires.case_1bk === null || Number.isFinite(salaires.case_1bk)))
-                ] : [])
-            ]),
-            cadre('Cadre 2 · revenus de capitaux mobiliers · page 3 de la 2042', [
-                calcul('2TR', 'Intérêts et autres produits de placement à revenu fixe',
-                    euros(interets), interetsConnus,
-                    'Montant saisi pour cette année ; vérifier la ligne 252 de la 2047, la qualification et les autres intérêts du foyer.'),
-                ligne('2CG', 'Revenus déjà soumis aux prélèvements sociaux sans CSG déductible',
-                    vide(), 'verifier', 'Produit et précompte du foyer non connus : ne pas inventer de 0 €.'),
-                ligne('2BH', 'Revenus déjà soumis aux prélèvements sociaux avec CSG déductible si option barème',
-                    vide(), 'verifier', 'Sous conditions (dont option 2OP) ; précompte réel à contrôler.'),
-                ligne('2DF', 'Autres revenus déjà soumis aux prélèvements sociaux avec CSG déductible',
-                    vide(), 'verifier', 'Selon la nature du produit et la date de versement ; précompte à contrôler.'),
-                ligne('2OP', 'Option globale pour le barème des revenus mobiliers et plus-values sur titres (cochez)',
-                    sim && sim.options_fiscales && sim.options_fiscales.assiette_2op > 0
-                        ? (sim.cocher_2op ? 'À ENVISAGER, après contrôle du foyer' : 'NON RETENUE selon simulation')
-                        : 'À contrôler sur TOUS les revenus du foyer', 'verifier',
-                    'Indépendante de la case crypto 3CN ; une simulation du seul portefeuille ne décide pas pour le foyer.')
-            ]),
-            cadre('Cadre 6 · charges déductibles · page 4 de la 2042', [
-                ligne('6DE', 'CSG déductible sur les revenus du patrimoine', vide(), 'verifier',
-                    'Période de paiement et avis officiel du foyer requis. NE PAS additionner ici les '
-                        + '6,8 % des cases 2BH/2DF : déjà déduits automatiquement, sans double compte.')
-            ]),
-            cadre('Cadre 8 · divers · page 4 de la 2042', [
-                ligne('8UU', 'Comptes ouverts, détenus, utilisés ou clos à l’étranger (cochez)',
-                    'À cocher après vérification des comptes du foyer et du/des 3916', 'verifier',
-                    compte.length + ' compte(s) décrits dans l’application : activité et titulaire à confirmer.')
-            ])
-        ].join('');
-        a['2042 C'] = cadre('Cadre 3 · plus-values et gains divers · 2042 C', [
-            calcul('3VG', 'Plus-value mobilière avant abattement, après imputation des moins-values',
-                cessionsTitres ? euros(t.case_3vg) : null, cessionsTitres,
-                'Portefeuille seul ; rapprocher des autres cessions/moins-values du foyer et des abattements éventuels.'),
-            calcul('3VH', 'Moins-value mobilière de l’année (montant positif)',
-                cessionsTitres ? euros(t.case_3vh) : null, cessionsTitres,
-                '0 € signifie seulement aucune perte NETTE sur les titres de ce portefeuille. Un gain et une perte de l’année se compensent ; vérifier les autres comptes du foyer.'),
-            ligne('3SG', 'Abattement pour durée de détention de droit commun', 'À vérifier si titres acquis avant 2018 et option 2OP',
-                'verifier', 'Ne jamais afficher 0 € comme établi sans contrôle des dates de chaque lot.'),
-            ligne('3AN', 'Plus-value globale du foyer sur actifs numériques (report ligne 52 du 2086)',
-                cessionsCrypto ? 'À compléter au niveau du foyer (portefeuille seul, si complet : '
-                    + euros(c.case_3an) + ' ; résultat 224 ' + eur(c.plus_value_globale_224, 2) + ')'
-                    : 'À vérifier', 'verifier',
-                'Le seuil de 305 € dépend de la ligne 51 du foyer entier, pas de ce seul portefeuille. '
-                    + 'Une annexe 2086 calculée ici n’est pas exhaustive.'),
-            ligne('3BN', 'Moins-value globale du foyer sur actifs numériques (report ligne 52 du 2086)',
-                cessionsCrypto ? 'À compléter au niveau du foyer (portefeuille seul, si complet : '
-                    + euros(c.case_3bn) + ' ; résultat 224 ' + eur(c.plus_value_globale_224, 2) + ')'
-                    : 'À vérifier', 'verifier',
-                'Les autres cessions du foyer peuvent changer le signe et le seuil : montant non reportable tel quel.'),
-            ligne('3CN', 'Option pour le barème des plus-values sur actifs numériques (cochez)',
-                sim && sim.options_fiscales && sim.options_fiscales.assiette_3cn > 0
-                    ? (sim.cocher_3cn ? 'À ENVISAGER, après contrôle du foyer' : 'NON RETENUE selon simulation')
-                    : 'À contrôler sur TOUS les gains crypto du foyer', 'verifier',
-                'Option distincte de 2OP.')
-        ]);
-        a['2047'] = [
-            cadre('Cadre 2 · revenus de valeurs mobilières étrangères · intérêts · page 2', [
-                ligne('250', 'Intérêts n’ouvrant pas droit à crédit d’impôt',
-                    Number(r.interetsEtrangers) > 0 ? euros(Number(r.interetsEtrangers)) : vide(), 'verifier',
-                    'Pays, source du revenu, retenue éventuelle et convention fiscale à confirmer sur justificatif ; '
-                        + 'ne pas conclure « aucun crédit d’impôt » du seul pays du courtier.'),
-                ligne('251', 'Total des intérêts imposables (238 + 240 + 250)',
-                    Number(r.interetsEtrangers) > 0 ? euros(Number(r.interetsEtrangers)) + ' si autres lignes nulles' : vide(), 'verifier'),
-                ligne('252', 'Dont intérêts et autres produits de placement à revenu fixe → case 2TR',
-                    Number(r.interetsEtrangers) > 0 ? euros(Number(r.interetsEtrangers)) + ' si montant et qualification confirmés' : vide(), 'verifier')
-            ], 'Si un crédit d’impôt étranger s’applique : remplir plutôt les lignes 231 à 240 et le cadre 7 ; montants non connus.'),
-            cadre('Cadre 3 · plus-values imposables en France · page 3', [
-                ligne('30', 'Plus-values sur valeurs mobilières, pays d’origine/encaissement et montant en euros',
-                    'À vérifier depuis les justificatifs et la convention fiscale', 'verifier',
-                    'La localisation du courtier seule ne prouve PAS que la plus-value est de source étrangère.')
-            ], 'Ne pas déduire un éventuel impôt étranger ; le crédit d’impôt (cadre 7 / 8VL) est à justifier séparément.')
-        ].join('');
-        var titres = [];
-        if (cessionsTitres) t.par_actif.forEach(function (op, idx) {
-            titres.push(cadre('Cadre 5 · §510 · cession ' + (idx + 1) + ' / ' + t.par_actif.length
-                + ' · ' + op.actif + ' · page 2 de la 2074', [
-                ligne('511', 'Nommez les titres ; nommez les intermédiaires financiers',
-                    op.actif + ' ; intermédiaire à confirmer', 'verifier'),
-                calcul('512', 'Date de la cession ou du rachat', date(op.ligne_512), true),
-                calcul('514', 'Valeur unitaire de cession', eur(op.ligne_514, 4), true),
-                calcul('515', 'Nombre de titres cédés', PF.util ? PF.util.quantite(op.ligne_515) : String(op.ligne_515), true),
-                calcul('516', 'Montant global = 514 × 515 (brut)', eur(op.ligne_516, 2), true),
-                calcul('517', 'Frais de cession', eur(op.ligne_517, 2), true),
-                calcul('518', 'Prix net de cession = 516 − 517', eur(op.ligne_518, 2), true),
-                calcul('520', 'Prix ou valeur d’acquisition unitaire hors frais', eur(op.ligne_520, 4), true),
-                calcul('521', 'Prix d’acquisition global', eur(op.ligne_521, 2), true),
-                calcul('522', 'Frais d’acquisition', eur(op.ligne_522, 2), true),
-                calcul('523', 'Prix de revient = 521 + 522', eur(op.ligne_523, 2), true),
-                calcul('524', 'Résultat signé = 518 − 523', eur(op.ligne_524, 2), true,
-                    'Reporter les gains/pertes en ligne 903, col. PV ou MV.')
-            ], 'Le formulaire a trois colonnes « Titres A/B/C » ; continuer sur un imprimé supplémentaire si nécessaire.'));
-        });
-        var erreurTitres = annee === DERNIER_VERIFIE && data.t2074 && !t
-            ? '<div class="erreur">Titres non chiffrables : '
-                + h(data.t2074.annee !== annee
-                    ? 'données d’une autre année refusées' : raison(data.t2074.indisponible))
-                + '. Aucun total 903 ou 3VG/3VH partiel ne peut être reporté.</div>' : '';
-        a['2074'] = erreurTitres
-            + (titres.length ? resumeTitres(t.par_actif) + titres.join('') : '<p class="info">'
-                + (t ? 'Aucune vente de titres détectée ' + h(annee) + ' dans ce portefeuille ; '
-                    + 'contrôlez vos autres intermédiaires.'
-                    : 'Montants par titre en attente des écritures et cours de change de ' + h(annee) + '.')
-                + '</p>')
-            + cadre('Cadre 900 · récapitulation · 2074', [
-                calcul('903 / PV', 'Cessions déterminées par vous-même (total des 524 positives)',
-                    cessionsTitres ? eur(t.ligne_903_pv, 2) : null, cessionsTitres,
-                    'Total du portefeuille uniquement ; autres gains éventuels du foyer à ajouter.'),
-                calcul('903 / MV', 'Cessions déterminées par vous-même (total des 524 négatives, en positif)',
-                    cessionsTitres ? eur(t.ligne_903_mv, 2) : null, cessionsTitres,
-                    'Total du portefeuille uniquement ; autres pertes éventuelles du foyer à ajouter.'),
-                ligne('913 / total', 'Total du cadre 900, colonne PV / colonne MV',
-                    cessionsTitres ? 'Part connue : PV ' + eur(t.ligne_903_pv, 2) + ' · MV '
-                        + eur(t.ligne_903_mv, 2) + ' ; compléter les autres cadres' : vide(), 'verifier',
-                    'La ligne 913 existe : c’est le total du cadre, pas la ligne des moins-values seules.')
-            ], 'La ligne 905 correspond aux profits sur instruments financiers à terme : n’y reportez pas vos ventes de titres.')
-            + cadre('Cadre 10 · pertes antérieures au 31/12/' + (annee - 1),
-                t && t.cadre_10 && t.cadre_10.length ? t.cadre_10.map(function (x) {
-                    return ligne(String(x.annee), 'Stock de moins-value de ' + x.annee + ' encore reportable',
-                        eur(x.montant, 2), 'verifier', 'À rapprocher des déclarations antérieures de TOUT le foyer.');
-                }) : [ligne('2015–2024', 'Stock antérieur (cases de la 2074 revenus 2025)', vide(), 'verifier',
-                    'Les années exactes glissent avec chaque formulaire : aucune perte historique du foyer certifiée ici.')])
-            + cadre('Cadre 11 · §1133 · compensation A à H · 2074 (pages 7–14)',
-                t && t.cadre_11 && t.cadre_11.length ? t.cadre_11.reduce(function (lignes, x, idx) {
-                    var prefixe = '1133 / ' + (idx + 1) + ' · ', titre = x.actif + ' · ';
-                    [['A', 'Plus-value de l’année avant abattement', x.col_a],
-                        ['B', 'Moins-value de l’année imputée', x.col_b],
-                        ['C', 'Solde A − B', x.col_c],
-                        ['D', 'Moins-values antérieures imputées', x.col_d],
-                        ['E', 'Solde C − D', x.col_e],
-                        ['F', 'Abattement de droit commun', x.col_f],
-                        ['G', 'Abattement renforcé', x.col_g],
-                        ['H', 'Solde E − F − G', x.col_h]].forEach(function (col) {
-                        lignes.push(ligne(prefixe + col[0], titre + col[1],
-                            col[2] === null ? 'À vérifier (acquisition avant 2018 / option 2OP)'
-                                : eur(col[2], 2), col[2] === null ? 'verifier' : 'calcule',
-                            'Montants des seuls titres suivis ; pertes et abattements du foyer à vérifier.'));
-                    });
-                    return lignes;
-                }, []) : [ligne('1133', 'A/B/C/D/E/F/G/H : imputation par catégorie', vide(), 'verifier')],
-                'Une ligne par titre et par colonne : 0 € est calculé seulement si aucune acquisition éligible '
-                + 'à l’abattement n’est connue. Pertes seules : ne pas remplir ce tableau ; reporter 3VH et actualiser le cadre 12.')
-            + cadre('Cadre 11 · ligne 1164 / cadre 12 · pertes reportables', [
-                calcul('1164', 'Total des pertes antérieures imputées (colonne D du cadre 11)',
-                    t && t.cadre_11 && t.cadre_11.length ? eur(t.ligne_1164, 2) : null,
-                    !!(t && t.cadre_11 && t.cadre_11.length)),
-                ...(t && t.cadre_12 && t.cadre_12.length
-                    ? t.cadre_12.map(function (x) { return ligne(String(x.annee),
-                        'Cadre 12 · moins-value de ' + x.annee + ' restant au 31/12/' + annee,
-                        eur(x.montant, 2), 'verifier', 'Stock du foyer à confirmer avec les déclarations antérieures.'); })
-                    : [ligne('12', 'Suivi du stock des moins-values', vide(), 'verifier')])
-            ]);
-        a['2074-CMV'] = cadre('Alternative : fiche 2074-CMV si DISPENSÉ de déposer la 2074', [
-            ligne('1', 'Rappel des moins-values antérieures reportables au 31/12/' + (annee - 1),
-                vide(), 'verifier', 'À confirmer à l’aide des déclarations antérieures du foyer.'),
-            ligne('21', 'Total des plus-values de l’année calculées par vos intermédiaires financiers',
-                vide(), 'verifier', 'À vérifier sur l’IFU. Le portefeuille donne 2074/903 PV = '
-                    + (cessionsTitres ? eur(t.ligne_903_pv, 2) : 'non disponible')
-                    + ', mais ce montant n’est PAS la ligne 21 de la 2074-CMV sans preuve de dispense de 2074.'),
-            ligne('22–24', 'Gains PEA (retrait avant cinq ans / ORA) et PEAC',
-                vide(), 'verifier', 'Seulement si ces opérations existent : hors des écritures suivies ici.'),
-            ligne('25', 'Total des moins-values de l’année calculées par vos intermédiaires financiers',
-                vide(), 'verifier', 'À vérifier sur l’IFU. Le portefeuille donne 2074/903 MV = '
-                    + (cessionsTitres ? eur(t.ligne_903_mv, 2) : 'non disponible')
-                    + ', mais ne recopiez pas la 2074 dans la 2074-CMV sans qualification de l’intermédiaire.'),
-            ligne('étape 2 / A–F', 'Imputation des MV de l’année et antérieures, puis abattement éventuel',
-                vide(), 'verifier', 'Ne pas saisir le résultat de la 2074 une deuxième fois dans la 2074-CMV.'),
-            ligne('5', 'Stock des pertes encore reportables au 31/12/' + annee,
-                vide(), 'verifier', 'La situation 1 (pertes seules) renvoie le total de la ligne 25 en 3VH.')
-        ], 'La 2074-CMV et la 2074 ne sont pas deux reports cumulables. Choisir le parcours correspondant '
-            + 'à la notice 2074-NOT-BIS et à l’IFU de l’intermédiaire, sinon double déclaration.');
-        var crypto = [];
-        if (cessionsCrypto) c.cessions.forEach(function (op, idx) {
-            crypto.push(cadre('Cadre 2 · déclarant 1 · cession ' + (idx + 1) + ' · '
-                + op.actif + ' le ' + date(op.date) + ' · 2086', [
-                calcul('211', 'Date de cession', date(op.date), true),
-                calcul('212', 'Valeur globale du portefeuille crypto au moment de la cession',
-                    eur(op.ligne_212, 2), true,
-                    'Portefeuille du détenteur sur TOUS les supports, y compris hors application : à compléter si nécessaire.'),
-                calcul('213', 'Prix brut de cession', eur(op.ligne_213, 2), true),
-                calcul('214', 'Frais de cession', eur(op.ligne_214, 2), true),
-                calcul('215', 'Prix net des frais (213 − 214)', eur(op.ligne_215, 2), true),
-                ligne('216', 'Soulte reçue ou versée', 'À vérifier sur les autres échanges', 'verifier',
-                    'Les écritures de cette application ne prouvent pas l’absence de soulte.'),
-                ligne('217', 'Prix net des soultes (213 ± 216)', eur(op.ligne_217, 2) + ' si aucune soulte', 'verifier'),
-                ligne('218', 'Prix net des frais et soultes (215 ± 216)', eur(op.ligne_218, 2) + ' si aucune soulte', 'verifier'),
-                ligne('220', 'Prix total d’acquisition du portefeuille', eur(op.ligne_220, 2) + ' (portefeuille suivi)', 'verifier'),
-                ligne('221', 'Fractions de capital initial déjà déduites', eur(op.ligne_221, 2) + ' (portefeuille suivi)', 'verifier'),
-                ligne('222', 'Soultes reçues lors d’échanges antérieurs', 'À vérifier', 'verifier'),
-                ligne('223', 'Prix total d’acquisition net (220 − 221 − 222)', eur(op.ligne_223, 2)
-                    + ' si aucune soulte antérieure', 'verifier'),
-                ligne('Calcul (hors case)', 'Contribution de ' + op.actif
-                    + ' à la ligne 224 : 218 − 223 × 217 / 212',
-                    eur(op.ligne_224, 2) + ' sous hypothèse sans soulte', 'verifier',
-                    'La 224 totalise toutes les cessions du déclarant, pas une ligne par vente.')
-            ], 'Le montant de cette cession ne peut être certifié sans toutes les plateformes, '
-                + 'tous les actifs et les éventuelles soultes.'));
-        });
-        var erreurCrypto = annee === DERNIER_VERIFIE && data.t2086 && !c
-            ? '<div class="erreur">Crypto-actifs non chiffrables : '
-                + h(data.t2086.annee !== annee
-                    ? 'données d’une autre année refusées' : raison(data.t2086.indisponible))
-                + '. Aucun total 224/51 ou 3AN/3BN partiel ne peut être reporté.</div>' : '';
-        a['2086'] = erreurCrypto + cadre('Cadre 2 · identité du déclarant 1 · 2086', [
-                ligne('2101', 'Nom', vide(), 'verifier'), ligne('2102', 'Prénoms', vide(), 'verifier'),
-                ligne('2103', 'Adresse', vide(), 'verifier')
-            ], 'Chaque cession occupe une colonne ; 5 cessions par déclaration, puis une 2086 supplémentaire.')
-            + (crypto.length ? resumeCrypto(c.cessions) + crypto.join('') : '<p class="info">'
-                + (c ? 'Aucune cession crypto détectée ' + h(annee)
-                    + ' dans ce portefeuille ; vérifier les autres plateformes du foyer.'
-                    : 'Montants crypto en attente des écritures, cours et positions de ' + h(annee) + '.')
-                + '</p>')
-            + cadre('Cadre 2 · total du déclarant / cadre 5 · récapitulatif du FOYER · 2086', [
-                ligne('224', 'Plus ou moins-value globale du déclarant 1',
-                    cessionsCrypto ? eur(c.plus_value_globale_224, 2) + ' — part connue, sous réserve'
-                        : vide(), 'verifier', 'Somme des cessions du déclarant 1, pas une ligne 224 par cession.'),
-                ligne('51', 'Total des prix de cession du foyer (218 + 258 + 318 + 413 + 423 + 433)',
-                    cessionsCrypto ? eur(c.total_cessions_218, 2) + ' — part connue seulement'
-                        : vide(), 'verifier',
-                    'Ce total ne suffit pas à prouver l’exonération du foyer fiscal : vérifiez aussi les cessions '
-                        + 'éventuelles du conjoint hors de ce portefeuille, des personnes à charge, et celles faites '
-                        + 'par personnes interposées ; vérifiez les soultes.'),
-                ligne('52', 'Total des plus et moins-values du foyer (224 + 264 + 324 + 415 + 425 + 435)',
-                    'À compléter après contrôle de toutes les cessions du foyer', 'verifier',
-                    'Reporter ensuite en 3AN (gain) ou 3BN (perte) de la 2042 C ; 3CN est une option distincte.')
-            ], 'Seuil de 305 € sur la ligne 51 : si ≤ 305 €, les cessions sont exonérées ; annexe à établir '
-                + 'même sous le seuil. Ne laisser 3AN/3BN vides que si le seuil du foyer est respecté. '
-                + 'Le portefeuille suivi n’est pas le foyer.');
-        a['3916 / 3916-bis'] = (compte.length ? compte : ['Compte du foyer']).map(function (nom, i) {
-            return cadre('Un 3916-3916 bis par compte · ' + nom, [
-                ligne('1.1', 'Titulaire : nom, prénoms, date et lieu de naissance ; adresse au 1er janvier', vide(), 'verifier'),
-                ligne('2', 'Nature : compte bancaire (cadres 3 et 5) ou actifs numériques (cadres 4 et 5)',
-                    'À vérifier dans le contrat', 'verifier'),
-                ligne('3.1', 'Compte bancaire : numéro, type, date d’ouverture/clôture, organisme et adresse', vide(), 'verifier'),
-                ligne('3.2', 'Compte bancaire : titulaire ou bénéficiaire de procuration', vide(), 'verifier'),
-                ligne('4.1', 'Compte crypto : numéro ou e-mail, date d’ouverture/clôture', vide(), 'verifier'),
-                ligne('4.2', 'Compte crypto : PSAN, adresse et URL si non référencé', vide(), 'verifier'),
-                ligne('4.3', 'Compte crypto : titulaire ou bénéficiaire de procuration', vide(), 'verifier'),
-                ligne('5', 'Usage : personnel, professionnel ou mixte', vide(), 'verifier')
-            ], 'L’application ne détient ni le numéro de compte ni ses dates d’ouverture et de clôture. '
-                + 'Vérifier aussi les comptes du conjoint et ceux non représentés ici.');
-        }).join('');
+        var etatCessions = ouverts && ouverts.cessions;
+        function anomalie(resultat, libelle, consequences) {
+            if (!resultat || completPour(resultat, annee)) return '';
+            return message(libelle + ' non chiffrables : '
+                + (resultat.annee !== annee ? 'données d’une autre année refusées'
+                    : raison(resultat.indisponible)) + '. ' + consequences, 'erreur');
+        }
+        function limites(titre, texte) {
+            return '<details class="fisc-limites"><summary>' + h(titre) + '</summary>'
+                + message(texte) + '</details>';
+        }
+
+        var salaireLignes = [];
+        if (Number.isFinite(salaires.case_1aj) && salaires.case_1aj > 0) {
+            salaireLignes.push(ligne('1AJ', 'Salaire net imposable · déclarant 1', eur(salaires.case_1aj, 0)));
+            if (salaires.case_1ak === null) salaireLignes.push(ligne('1AK', 'Frais réels',
+                'Case vide · abattement automatique de 10 %'));
+            else if (Number.isFinite(salaires.case_1ak)) salaireLignes.push(ligne('1AK',
+                'Frais réels · déclarant 1', eur(salaires.case_1ak, 0)));
+        }
+        if (salaires.couple && Number.isFinite(salaires.case_1bj) && salaires.case_1bj > 0) {
+            salaireLignes.push(ligne('1BJ', 'Salaire net imposable · déclarant 2', eur(salaires.case_1bj, 0)));
+            if (salaires.case_1bk === null) salaireLignes.push(ligne('1BK', 'Frais réels',
+                'Case vide · abattement automatique de 10 %'));
+            else if (Number.isFinite(salaires.case_1bk)) salaireLignes.push(ligne('1BK',
+                'Frais réels · déclarant 2', eur(salaires.case_1bk, 0)));
+        }
+        var revenus = interetsConnus ? [ligne('2TR', 'Intérêts étrangers saisis', eur(interets, 0),
+            'calcule', 'Montant de l’application ; ajouter, le cas échéant, les autres intérêts du foyer.')] : [];
+        if (sim && sim.options_fiscales && sim.options_fiscales.assiette_2op > 0)
+            revenus.push(ligne('2OP', 'Option globale pour le barème · revenus mobiliers et titres',
+                sim.cocher_2op ? 'Envisagée par la simulation' : 'Non retenue par la simulation',
+                'conditionnel', 'Décision du foyer entier ; indépendante de l’option crypto 3CN.'));
+        a['2042'] = cadre('1 · Salaires et frais saisis', salaireLignes)
+            + cadre('2 · Intérêts et option sur les titres', revenus)
+            + (comptes.length ? cadre('8 · Comptes à l’étranger', [ligne('8UU',
+                'Déclaration de comptes étrangers', comptes.length + ' compte(s) répertorié(s)',
+                'conditionnel', 'Vérifier les titulaires et les autres comptes du foyer dans la 3916.')]) : '')
+            + (salaireLignes.length || revenus.length || comptes.length ? ''
+                : message('Aucun salaire, intérêt ou compte enregistré dans ce guide pour cette année.', 'info'))
+            + limites('Ce que l’application ne renseigne pas · précompte et CSG',
+                'Les cases 2CG, 2BH et 2DF dépendent des prélèvements sociaux déjà acquittés ; '
+                + '6DE dépend de la CSG déductible du patrimoine effectivement payée par le foyer. '
+                + 'Elles ne valent pas zéro par défaut. Ne pas compter deux fois la CSG liée à 2BH/2DF dans 6DE.');
+
+        var resultats = [];
+        if (ventes) {
+            resultats.push(ligne('3VG', 'Gain sur titres après compensation · avant abattement',
+                eur(t.case_3vg, 0), 'calcule', 'Part de ce portefeuille ; tenir compte des autres comptes du foyer.'));
+            resultats.push(ligne('3VH', 'Perte nette sur titres (montant positif)',
+                eur(t.case_3vh, 0), 'calcule', '0 € signifie aucune perte nette dans ce portefeuille seulement.'));
+        }
+        if (crypto) {
+            resultats.push(ligne('3AN', 'Gain crypto · projection si le foyer se limite à ces cessions',
+                eur(c.case_3an, 0), 'conditionnel',
+                'Calcul avec le seuil de 305 € sur les seules cessions enregistrées, sans soulte ; '
+                    + 'ne pas reporter tel quel sans connaître la ligne 51 du foyer. 224 estimée : '
+                    + eur(c.plus_value_globale_224, 2) + '.'));
+            resultats.push(ligne('3BN', 'Perte crypto · projection si le foyer se limite à ces cessions',
+                eur(c.case_3bn, 0), 'conditionnel',
+                'Les autres cessions du foyer peuvent changer le seuil et le signe du résultat.'));
+        }
+        if (sim && sim.options_fiscales && sim.options_fiscales.assiette_3cn > 0)
+            resultats.push(ligne('3CN', 'Option barème des gains crypto',
+                sim.cocher_3cn ? 'Envisagée par la simulation' : 'Non retenue par la simulation',
+                'conditionnel', 'Décision du foyer entier, distincte de 2OP.'));
+        a['2042 C'] = cadre('3 · Résultat de vos titres et crypto-actifs', resultats)
+            + anomalie(data.t2074, 'Titres', 'Aucune 3VG/3VH partielle proposée.')
+            + anomalie(data.t2086, 'Crypto-actifs', 'Aucune 3AN/3BN partielle proposée.')
+            + (!resultats.length && !data.t2074 && !data.t2086
+                ? message('Les résultats des ventes apparaîtront après lecture des opérations.', 'info') : '')
+            + limites('Données du foyer et abattement éventuel (3SG)',
+                '3VG/3VH ne totalisent que les titres de l’application. 3AN/3BN et la ligne 52 '
+                + 'dépendent de toutes les cessions du foyer et du seuil calculé avec la ligne 51. '
+                + (t && t.abattementsNonVerifies
+                    ? 'Un titre acquis avant 2018 nécessite de vérifier l’abattement 3SG et l’option 2OP ; aucun 0 € n’est présumé.'
+                    : '3SG concerne seulement un éventuel abattement éligible avec option 2OP ; 3CN est une autre option.'));
+
+        a['2047'] = (interetsConnus ? cadre('2 · Intérêts saisis dans l’application', [
+            ligne('252 → 2TR', 'Intérêts étrangers enregistrés', eur(interets, 0), 'calcule',
+                'Montant saisi : pas d’autre calcul requis pour afficher ce chiffre.'),
+            ligne('250', 'Intérêts sans crédit d’impôt étranger', eur(interets, 0), 'conditionnel',
+                'Même montant si la qualification sans crédit d’impôt est confirmée.'),
+            ligne('251', 'Total 238 + 240 + 250', eur(interets, 0), 'conditionnel',
+                'Même montant seulement si les lignes 238 et 240 du foyer sont nulles.')
+        ]) : message('Aucun intérêt étranger positif saisi pour cette année.', 'info'))
+            + limites('Si la source fiscale ou la retenue étrangère diffère',
+                'Une banque étrangère ne prouve pas la source des intérêts ou des plus-values. '
+                + 'Si un crédit d’impôt s’applique, examiner les lignes 231–240 et le cadre 7. '
+                + 'Le cadre 3 / ligne 30 ne concerne que les plus-values de source étrangère : '
+                + 'la source et la retenue ne sont pas déduites du pays du courtier.');
+
+        var recapTitres = ventes ? cadre('900 · Totaux des ventes de ce portefeuille', [
+            ligne('903 / PV', 'Somme des résultats positifs de chaque vente', eur(t.ligne_903_pv, 2)),
+            ligne('903 / MV', 'Somme des résultats négatifs de chaque vente, en positif', eur(t.ligne_903_mv, 2)),
+            ligne('913 / total', 'Part connue du total du cadre 900',
+                'PV ' + eur(t.ligne_903_pv, 2) + ' · MV ' + eur(t.ligne_903_mv, 2),
+                'conditionnel', 'Inclure, s’il y en a, les autres rubriques du cadre et du foyer.')
+        ], '913 existe : c’est le total du cadre 900 ; 905 concerne les instruments à terme, pas les ventes de titres.') : '';
+        var ventesTitres = ventes ? t.par_actif.map(function (op, idx) {
+            var montants = [
+                ligne('511', 'Titre suivi', op.actif, 'calcule', 'Intermédiaire financier non renseigné dans ces transactions.'),
+                ligne('512', 'Date de la cession', date(op.ligne_512)),
+                ligne('514', 'Prix unitaire de cession', eur(op.ligne_514, 4)),
+                ligne('515', 'Nombre de titres cédés', PF.util ? PF.util.quantite(op.ligne_515) : String(op.ligne_515)),
+                ligne('516', 'Prix brut de cession', eur(op.ligne_516, 2)),
+                ligne('517', 'Frais de cession', eur(op.ligne_517, 2)),
+                ligne('518', 'Prix net de cession (516 − 517)', eur(op.ligne_518, 2)),
+                ligne('520', 'Prix d’acquisition unitaire hors frais', eur(op.ligne_520, 4)),
+                ligne('521', 'Prix d’acquisition global', eur(op.ligne_521, 2)),
+                ligne('522', 'Frais d’acquisition', eur(op.ligne_522, 2)),
+                ligne('523', 'Coût de revient (521 + 522)', eur(op.ligne_523, 2)),
+                ligne('524', 'Résultat de cette vente (518 − 523)', eur(op.ligne_524, 2))
+            ];
+            return cession('2074|' + op.actif + '|' + op.ligne_512 + '|' + idx,
+                op.actif + ' · ' + date(op.ligne_512) + ' · 510', eur(op.ligne_524, 2),
+                cadre('510 · détail de cette cession', montants,
+                    'Chaque cession occupe une colonne ; une même action peut avoir plusieurs dates et prix.'),
+                etatCessions);
+        }).join('') : '';
+        var pertesPassees = t && t.cadre_10 ? t.cadre_10.map(function (x) {
+            return ligne(String(x.annee), '10 · perte antérieure enregistrée', eur(x.montant, 2),
+                'conditionnel', 'Portefeuille suivi seulement ; tenir compte du foyer.');
+        }) : [];
+        var colonnes = t && t.cadre_11 ? t.cadre_11.reduce(function (lignes, x, idx) {
+            var prefixe = '1133 / ' + (idx + 1) + ' · ', titre = x.actif + ' · ';
+            [['A', 'Gain avant abattement', x.col_a], ['B', 'Pertes de l’année imputées', x.col_b],
+                ['C', 'Solde A − B', x.col_c], ['D', 'Pertes antérieures imputées', x.col_d],
+                ['E', 'Solde C − D', x.col_e], ['F', 'Abattement de droit commun', x.col_f],
+                ['G', 'Abattement renforcé', x.col_g], ['H', 'Solde E − F − G', x.col_h]]
+                .forEach(function (col) {
+                    if (col[2] !== null) lignes.push(ligne(prefixe + col[0], titre + col[1],
+                        eur(col[2], 2), 'calcule', 'Parts calculées pour ce portefeuille.'));
+                });
+            return lignes;
+        }, []) : [];
+        var pertesRestantes = t && t.cadre_12 ? t.cadre_12.map(function (x) {
+            return ligne(String(x.annee), '12 · perte restant reportable dans ce portefeuille',
+                eur(x.montant, 2), 'conditionnel', 'Historique fiscal du foyer à réunir.');
+        }) : [];
+        a['2074'] = anomalie(data.t2074, 'Titres', 'Aucun total 903 ou 3VG/3VH partiel proposé.')
+            + recapTitres
+            + (ventes ? resumeTitres(t.par_actif)
+                + '<h4 class="fisc-details-titre">Détail par cession · toucher une vente pour ses lignes 510</h4>'
+                + ventesTitres
+                : t ? message('Aucune vente de titres enregistrée pour ' + annee + '.', 'info')
+                    : !data.t2074 ? message('Lecture des ventes de titres en cours.', 'info') : '')
+            + cadre('10 · Pertes antérieures connues du portefeuille', pertesPassees)
+            + cadre('11 · Compensation des gains · colonnes A à H', colonnes,
+                'Un titre peut figurer plusieurs fois au cadre 510 ; ici la compensation suit les ventes.')
+            + (t && t.abattementsNonVerifies ? limites('Abattements F/G/H non chiffrés',
+                'Une acquisition avant 2018 et l’option 2OP peuvent modifier ces colonnes : '
+                + 'aucun zéro n’est déduit des opérations seules.') : '')
+            + (colonnes.length ? cadre('11 · Somme des pertes imputées', [ligne('1164',
+                'Total de la colonne D connue', eur(t.ligne_1164, 2), 'conditionnel',
+                'Ajouter les pertes des autres comptes du foyer, si elles existent.')]) : '')
+            + cadre('12 · Pertes encore reportables', pertesRestantes)
+            + limites('Autres éléments éventuels de la 2074',
+                'L’application calcule les ventes de titres présentes ici. L’intermédiaire financier, '
+                + 'les ventes et pertes antérieures hors application, les abattements avant 2018 '
+                + 'et les autres rubriques du cadre 900 ne sont pas établis par ces transactions.');
+
+        a['2074-CMV'] = message('Parcours alternatif : la fiche 2074-CMV est réservée aux cas '
+            + 'de dispense de la 2074 avec calculs par un intermédiaire. Ne pas reporter les '
+            + 'mêmes ventes sur la 2074 et la 2074-CMV.')
+            + (ventes ? cadre('Montants de l’application · rappel de la 2074, PAS cases CMV', [
+                ligne('903 / PV', 'Gains calculés par vos ventes', eur(t.ligne_903_pv, 2)),
+                ligne('903 / MV', 'Pertes calculées par vos ventes', eur(t.ligne_903_mv, 2))
+            ]) : '')
+            + limites('Quand les lignes 21–25 de la CMV sont utiles',
+                'Les lignes 21 et 25 reposent sur les calculs de l’intermédiaire financier ; '
+                + 'la ligne 1 reprend le stock antérieur du foyer et 22–24 concernent des produits '
+                + 'spécifiques (PEA/PEAC). Ces lignes ne sont pas déduites automatiquement de 903.');
+
+        var totalsCrypto = crypto ? cadre('2 · Total de vos cessions / 5 · part connue du foyer', [
+            ligne('224', 'Résultat estimé du déclarant avec les cessions enregistrées',
+                eur(c.plus_value_globale_224, 2), 'conditionnel', 'Sous hypothèse sans soulte.'),
+            ligne('51', 'Prix nets 218 de ces cessions · part connue du foyer',
+                eur(c.total_cessions_218, 2), 'conditionnel',
+                'Ce total ne suffit pas à prouver l’exonération du foyer fiscal : le seuil de 305 € '
+                    + 'porte aussi sur les cessions du conjoint hors de ce portefeuille, des personnes '
+                    + 'à charge et des autres supports.'),
+            ligne('52', 'Résultat de ces cessions · projection si foyer = application',
+                eur(c.plus_value_globale_224, 2), 'conditionnel',
+                '52 totalise le foyer entier (224 + autres déclarants), pas seulement cette application.')
+        ], '224 totalise les cessions du déclarant, 51 et 52 concernent tout le foyer ; '
+            + 'aucune projection 3AN/3BN n’est définitive sans ces autres opérations.') : '';
+        var ventesCrypto = crypto ? c.cessions.map(function (op, idx) {
+            return cession('2086|' + op.actif + '|' + op.date + '|' + idx,
+                op.actif + ' · ' + date(op.date) + ' · 2086', eur(op.ligne_224, 2) + ' estimés',
+                cadre('2 · cession ' + (idx + 1), [
+                    ligne('211', 'Date de cession', date(op.date)),
+                    ligne('212', 'Valeur globale du portefeuille crypto suivi', eur(op.ligne_212, 2),
+                        'conditionnel', 'Autres plateformes ou wallets non connus de l’application.'),
+                    ligne('213', 'Prix brut de cession', eur(op.ligne_213, 2)),
+                    ligne('214', 'Frais de cession', eur(op.ligne_214, 2)),
+                    ligne('215', 'Prix net des frais (213 − 214)', eur(op.ligne_215, 2)),
+                    ligne('217', 'Prix net des soultes · si aucune soulte (213 ± 216)',
+                        eur(op.ligne_217, 2), 'conditionnel'),
+                    ligne('218', 'Prix net des frais et soultes · si aucune soulte (215 ± 216)',
+                        eur(op.ligne_218, 2), 'conditionnel'),
+                    ligne('220', 'Prix total d’acquisition du portefeuille suivi', eur(op.ligne_220, 2), 'conditionnel'),
+                    ligne('221', 'Capital déjà déduit sur les cessions précédentes', eur(op.ligne_221, 2), 'conditionnel'),
+                    ligne('223', 'Coût restant · si aucune soulte antérieure (220 − 221 − 222)',
+                        eur(op.ligne_223, 2), 'conditionnel'),
+                    ligne('Calcul (hors case)', 'Contribution de cette vente à 224',
+                        eur(op.ligne_224, 2) + ' · sans soulte', 'conditionnel')
+                ], 'Chaque cession occupe une colonne, avec sa vraie date.'), etatCessions);
+        }).join('') : '';
+        a['2086'] = anomalie(data.t2086, 'Crypto-actifs',
+                'Aucun total 224/51 ou 3AN/3BN partiel proposé.')
+            + totalsCrypto
+            + (crypto ? resumeCrypto(c.cessions)
+                + '<h4 class="fisc-details-titre">Détail par cession · toucher une vente pour ses lignes 211–223</h4>'
+                + ventesCrypto
+                : c ? message('Aucune cession crypto enregistrée pour ' + annee + '.', 'info')
+                    : !data.t2086 ? message('Lecture des cessions crypto en cours.', 'info') : '')
+            + limites('Informations non présentes dans les transactions · 2086',
+                'Identité du déclarant (cadre 2), soultes éventuelles des lignes 216/222 et '
+                + 'avoirs crypto sur d’autres plateformes ou du foyer : l’application ne les '
+                + 'invente pas. Les lignes 217/218/223/224 et la projection 52 sont estimées sans soulte.');
+
+        a['3916 / 3916-bis'] = (comptes.length
+            ? message(comptes.length + ' compte(s) étranger(s) répertorié(s) dans l’application.')
+                + '<ul class="fisc-comptes">' + comptes.map(function (compte) {
+                    return '<li>' + h(compte) + '</li>';
+                }).join('') + '</ul>'
+            : message('Aucun compte étranger répertorié dans ce guide ; cela ne prouve pas '
+                + 'qu’il n’existe aucun autre compte du foyer.', 'info'))
+            + limites('Champs non enregistrés pour chaque 3916 / 3916-bis',
+                'Un imprimé par compte : identité et adresse du titulaire (cadre 1), type de compte (2), '
+                + 'numéro, dates et coordonnées bancaires (3.1–3.2) ou prestataire crypto (4.1–4.3), '
+                + 'usage (5). Les titulaires et comptes du foyer hors application restent à identifier.');
         return a;
+    }
+    function apercu(data, annee) {
+        var salaires = data.sim && data.sim.annee === annee ? data.sim : data.base || {};
+        var interets = Number((data.reglages || {}).interetsEtrangers);
+        var t = completPour(data.t2074, annee) ? data.t2074 : null;
+        var c = completPour(data.t2086, annee) ? data.t2086 : null;
+        var connus = [];
+        if (Number.isFinite(salaires.case_1aj) && salaires.case_1aj > 0)
+            connus.push(ligne('1AJ', 'Salaire saisi', eur(salaires.case_1aj, 0)));
+        if (salaires.couple && Number.isFinite(salaires.case_1bj) && salaires.case_1bj > 0)
+            connus.push(ligne('1BJ', 'Salaire du conjoint saisi', eur(salaires.case_1bj, 0)));
+        if (Number.isFinite(interets) && interets > 0)
+            connus.push(ligne('2TR', 'Intérêts saisis', eur(interets, 0)));
+        if (t && t.operations && t.operations.length) {
+            connus.push(ligne('3VG', 'Gain net de ces titres', eur(t.case_3vg, 0)));
+            connus.push(ligne('3VH', 'Perte nette de ces titres', eur(t.case_3vh, 0)));
+            connus.push(ligne('2074 · 903/PV', 'Somme des ventes positives', eur(t.ligne_903_pv, 2)));
+            connus.push(ligne('2074 · 903/MV', 'Somme des ventes négatives', eur(t.ligne_903_mv, 2)));
+        }
+        if (c && c.cessions && c.cessions.length) {
+            connus.push(ligne('2086 · 224', 'Résultat de ces cessions · sans soulte',
+                eur(c.plus_value_globale_224, 2), 'conditionnel'));
+            connus.push(ligne('2086 · 51', 'Prix nets connus · partie du foyer',
+                eur(c.total_cessions_218, 2), 'conditionnel'));
+        }
+        return '<section class="fisc-apercu" aria-label="Montants issus de l’application">'
+            + '<h3>Vos chiffres dans l’application · revenus ' + h(annee) + '</h3>'
+            + message('Les montants ci-dessous viennent de vos saisies et ventes enregistrées. '
+                + 'Les détails par titre et par cession sont dans les imprimés repliables ; '
+                + 'seules les données absentes du foyer restent à identifier.')
+            + (connus.length ? tableau(connus)
+                : message('Aucun montant encore calculable : lecture des opérations en cours '
+                    + 'ou aucune vente enregistrée.', 'info'))
+            + ((data.t2074 && !t) || (data.t2086 && !c)
+                ? message('Un segment sans cours, position ou année valide ne fournit aucun total partiel ; '
+                    + 'les autres montants affichés restent calculés.', 'attention') : '')
+            + '</section>';
     }
     function render(annee, data, ouverts) {
         var s = structure(annee);
         if (!s) return '<div class="erreur">Année des revenus invalide (2025 à 9999).</div>';
         annee = s.anneeRevenus;
         data = data || {};
-        var d = donnees(annee, data);
-        var ok = s.structureVerifiee && !!data.sim && data.sim.annee === annee
-            && completPour(data.t2074, annee) && completPour(data.t2086, annee)
-            && !data.erreur && !data.erreurSim;
-        var etat = s.structureVerifiee ? 'Revenus ' + annee + ' : repères des imprimés publiés.'
-            : s.avertissement;
+        var d = donnees(annee, data, ouverts);
+        var etat = s.structureVerifiee ? 'Revenus ' + annee + ' · déclaration ' + s.anneeDeclaration
+            + ' : numéros des imprimés DGFiP vérifiés pour ce millésime.' : s.avertissement;
         var estimations = [];
         if (!s.structureVerifiee) {
             if (completPour(data.t2074, annee) && data.t2074.operations && data.t2074.operations.length) {
@@ -498,14 +515,17 @@
             ? '<div class="info">Calcul des seules écritures connues, NON reportable avant publication des imprimés '
                 + '(ni garantie de complétude du foyer) : ' + h(estimations.join(' · ')) + '.</div>' : '';
         var simulation = data.erreurSim
-            ? '<div class="attention">Simulation d’impôt indisponible : ' + h(data.erreurSim)
-                + '. Les montants effectivement chiffrables restent visibles par titre et par case ; '
-                + 'les autres restent inconnus. Aucun total du foyer n’est certifié par ce guide.</div>' : '';
-        return '<div class="fisc-guide"><div class="' + (ok ? 'info' : 'attention') + '">'
-            + h(etat + (data.erreur ? ' Calcul suspendu : ' + data.erreur + '.' : ''))
-            + (ok ? ' Les montants des autres comptes, du conjoint et les justificatifs restent à contrôler.'
-                : ' Les montants non établis ne sont jamais remplis à la place du foyer.') + '</div>'
-            + estimation + simulation + Object.keys(SOURCES).map(function (n) {
+            ? '<div class="attention">Simulation d’impôt du foyer indisponible : ' + h(data.erreurSim)
+                + '. Les cases calculées ci-dessus restent consultables ; ce bilan ne valide '
+                + 'pas les autres opérations du foyer.</div>' : '';
+        return '<div class="fisc-guide"><div class="' + (s.structureVerifiee ? 'info' : 'attention') + '">'
+            + h(etat) + '</div>'
+            + (s.structureVerifiee ? apercu(data, annee) : estimation)
+            + (data.erreur ? message('Calcul suspendu : ' + data.erreur, 'attention') : '')
+            + simulation
+            + (s.structureVerifiee ? message('Ouvrez un imprimé pour voir ses cases. '
+                + 'Touchez une vente pour afficher toutes ses lignes de calcul.') : '')
+            + Object.keys(SOURCES).map(function (n) {
                 return formulaire(n, d[n], n === '2074' ? 'Cadres 5, 900, 10, 11, 12' :
                     n === '2086' ? 'Cadres 2 et 5' : n === '3916 / 3916-bis'
                         ? 'Cadres 1, 2, 3/4 et 5' : 'Cases/cadres utiles à ce portefeuille',
