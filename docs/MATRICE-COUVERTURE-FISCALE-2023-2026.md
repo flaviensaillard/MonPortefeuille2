@@ -1048,4 +1048,14 @@ restent « à compléter au niveau du foyer » sans supposer 0 soulte. Un guide
 2025 complet est disponible même pendant le chargement ; les années futures
 peuvent être demandées mais leur numérotation est explicitement un *modèle 2025
 à revalider*, **jamais une source officielle du futur millésime**. Bascule DGFiP
-totale : toujours **non**. Suite locale : 54 tests JS, 981 tests Python.
+totale : toujours **non**. Suite locale de la 2.2.7 : 54 tests JS, 981 tests Python.
+
+**2.2.8 — montants visibles et imprimés repliables** :
+[MONTANTS-FISCAUX-2.2.8.md](MONTANTS-FISCAUX-2.2.8.md) détaille le défaut de
+colonne hors écran, le refus d'impôt qui effaçait les montants de cession, les
+totaux par titre et la séparation des segments titres/crypto, dans l'APK **et**
+sur Streamlit. Les cinq volets Streamlit sont repliés par défaut ; pour les autres
+millésimes, la page ne reprend pas les numéros de cases 2025, uniquement des
+estimations **non reportables**. Le périmètre DGFiP reste celui des imprimés
+revenus **2025** ; aucune preuve 2026 n'est ajoutée, aucune migration ni
+activation de taux n'est effectuée.

@@ -621,7 +621,7 @@ les deux états (avant / après 013), y compris avec une écriture réelle de l'
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
 
-### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7 → 2.2.8
 
 Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
 release **depuis `main` seulement**. Or la release est **unique et immuable** : si
@@ -634,16 +634,21 @@ La version est donc passée à **2.2.3 (code 33)**, puis à **2.2.4 (code 34)** 
 le retour réel du 15/10, puis à **2.2.5 (code 35)** pour l'onglet replié de mise à
 jour, puis à **2.2.6 (code 36)** pour le retrait de quatre bandeaux d'en-tête,
 puis à **2.2.7 (code 37)** pour refaire les formulaires et corriger les reports
-2074/2086 — une version étant déjà construite sous son numéro, il faut un code
-supérieur pour que deux APK différentes ne portent pas le même nom. Les cinq
-endroits imposés par la procédure du dépôt sont alignés (`AndroidManifest.xml`,
-`apk.yml` `VERSION_NAME` et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
-`telechargements/notes-2.2.7.md` et le nom d'artefact.
+2074/2086, enfin à **2.2.8 (code 38)** pour montrer les montants par titre et
+par case dans l'APK et sur Streamlit, restaurer les onglets repliables et ne plus
+effacer les ventes calculables lorsque l'impôt global est bloqué (voir
+[MONTANTS-FISCAUX-2.2.8.md](MONTANTS-FISCAUX-2.2.8.md)).
+Une version étant déjà construite sous son numéro, il faut un code supérieur pour
+que deux APK différentes ne portent pas le même nom. Les fichiers imposés par la
+procédure du dépôt sont alignés (`AndroidManifest.xml`, `apk.yml` `VERSION_NAME`
+et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec les notes
+`telechargements/notes-2.2.8.md` et le nom d'artefact.
 
-**Conséquence à connaître avant de fusionner** : la fusion de la PR #24 construira
-puis **publiera automatiquement la release `apk-2.2.7`**. C'est le comportement
-normal du workflow (la 2.2.2 a été publiée ainsi), mais c'est bien une publication
-définitive : aucun écrasement n'est possible ensuite.
+**Conséquence à connaître avant de fusionner** : une éventuelle fusion de la PR
+#24, décidée uniquement par le propriétaire, construirait puis **publierait
+la release `apk-2.2.8` depuis `main`**. Aucun de ces actes n'est effectué par
+cette livraison de branche. Une release est définitive : aucun écrasement n'est
+possible ensuite.
 
 Un verrou manquait et a été ajouté dans `tests/test_livraison_securisee.js`
 (« Cohérence de la livraison ») : la version est **lue dans le workflow**, jamais

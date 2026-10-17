@@ -818,7 +818,8 @@ def detail_2074_de_lannee(
 
     classes_titres = {Classe.ACTION_ETF, Classe.OBLIGATION_ETF, Classe.OR}
     triees = sorted(
-        (t for t in transactions if classe_de(t.ticker) in classes_titres),
+        (t for t in transactions if classe_de(t.ticker) in classes_titres
+         and t.date.year <= annee),
         key=lambda x: (x.date, 0 if x.est_achat else 1),
     )
 
@@ -957,7 +958,10 @@ def detail_2074_de_lannee(
     return {
         "annee": annee,
         "indisponible": indisponible,
-        "calcul_complet": not indisponible,
+        # Une vente écartée rend les totaux de cette catégorie PARTIELS, même
+        # si toutes les ventes retenues ont un cours. L'autre catégorie reste
+        # indépendante et peut afficher ses montants.
+        "calcul_complet": not indisponible and not ventes_excedentaires,
         "operations": operations,
         "par_actif": par_actif,
         "ligne_903_pv": round(pv_903, 2),
@@ -993,12 +997,15 @@ def detail_2086_de_lannee(
 
     Aucun cours ni aucun taux manquant n'est ravalé : chacun rend le calcul
     incomplet (`calcul_complet` = False), et `indisponible` nomme ce qui manque.
+    Une vente excédentaire invalide aussi le total ; son motif figure dans
+    `ventes_excedentaires`, jamais dans un total partiel à reporter.
     """
     from . import fx, prices
     from .portfolio import classe_de, filtrer_ventes_excedentaires
 
     triees = sorted(
-        (t for t in transactions if classe_de(t.ticker) is Classe.CRYPTO),
+        (t for t in transactions if classe_de(t.ticker) is Classe.CRYPTO
+         and t.date.year <= annee),
         key=lambda x: (x.date, 0 if x.est_achat else 1),
     )
 
@@ -1150,7 +1157,7 @@ def detail_2086_de_lannee(
         "case_3bn": round(case_3bn, 2),
         "ventes_excedentaires": ventes_excedentaires,
         "indisponible": indisponible,
-        "calcul_complet": not indisponible,
+        "calcul_complet": not indisponible and not ventes_excedentaires,
         "sources_externes": sorted(sources_utilisees),
     }
 

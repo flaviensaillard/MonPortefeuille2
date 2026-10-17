@@ -772,10 +772,11 @@
     }
 
     function ajouterManquants(liste, ajout) {
-        var vus = {};
-        liste.forEach(function (m) { vus[m.devise + '|' + m.date] = 1; });
+        var vus = Object.create(null);
+        function cle(m) { return m.devise + '|' + m.date + '|' + (m.actif || ''); }
+        liste.forEach(function (m) { vus[cle(m)] = 1; });
         ajout.forEach(function (m) {
-            if (!vus[m.devise + '|' + m.date]) { vus[m.devise + '|' + m.date] = 1; liste.push(m); }
+            if (!vus[cle(m)]) { vus[cle(m)] = 1; liste.push(m); }
         });
         return liste;
     }
@@ -815,7 +816,8 @@
             if (CLASSES_2074.indexOf(PF.modele.classeDe(t.ticker)) < 0) return;
             var an = Number(String(t.date).slice(0, 4));
             var net = montantNetEur(t, taux);
-            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: String(t.date) }]); return; }
+            if (net === null) { manquants = ajouterManquants(manquants,
+                [{ devise: t.devise, date: String(t.date), actif: t.ticker }]); return; }
             var qte = U.num(t.quantite, 0);
             if (!soldes[t.ticker]) soldes[t.ticker] = { qte: 0, cout: 0, fraisAcq: 0, ancien: false };
             var etat = soldes[t.ticker];
@@ -828,7 +830,8 @@
                 return;
             }
             if (qte <= 0 || etat.qte + 1e-9 < qte) {
-                manquants = ajouterManquants(manquants, [{ devise: 'position ' + t.ticker, date: String(t.date) }]);
+                manquants = ajouterManquants(manquants,
+                    [{ devise: 'position non justifiée', date: String(t.date), actif: t.ticker }]);
                 return; // pas de coût d'acquisition inventé pour une vente sans lot
             }
 
@@ -989,7 +992,9 @@
         });
         if (!demandes.length) return Promise.resolve({});
         return Promise.all(demandes.map(function (d) {
-            return PF.net.cours(d.ticker, d.date).then(function (c) { return [d.ticker + '|' + d.date, c]; });
+            return Promise.resolve().then(function () { return PF.net.cours(d.ticker, d.date); })
+                .then(function (c) { return [d.ticker + '|' + d.date, c]; },
+                    function () { return [d.ticker + '|' + d.date, null]; });
         })).then(function (paires) {
             // Un cours absent reste absent : detail2086 le signale au lieu de
             // retirer la position de la valeur globale.
@@ -1011,11 +1016,12 @@
             var q = U.num(t.quantite, 0);
             var iso = String(t.date);
 
-            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: iso }]); return; }
+            if (net === null) { manquants = ajouterManquants(manquants,
+                [{ devise: t.devise, date: iso, actif: t.ticker }]); return; }
             if (estAchat(t)) { coutTotal += net; qtes[t.ticker] = (qtes[t.ticker] || 0) + q; return; }
             if (q <= 0 || (qtes[t.ticker] || 0) + 1e-9 < q) {
                 manquants = ajouterManquants(manquants,
-                    [{ devise: 'position crypto ' + t.ticker, date: iso }]);
+                    [{ devise: 'position crypto non justifiée', date: iso, actif: t.ticker }]);
                 return; // aucune valeur globale ni moins-value fabriquée
             }
 
@@ -1035,9 +1041,11 @@
                     var c = prix[tk + '|' + iso];
                     var tUsd = PF.util.tauxValide(taux['USD|' + iso]);
                     if (!PF.util.estNombre(c) || !(c > 0)) {
-                        manquants = ajouterManquants(manquants, [{ devise: 'cours ' + tk, date: iso }]);
+                        manquants = ajouterManquants(manquants,
+                            [{ devise: 'cours ' + tk, date: iso, actif: t.ticker }]);
                     } else if (tUsd === null) {
-                        manquants = ajouterManquants(manquants, [{ devise: 'USD', date: iso }]);
+                        manquants = ajouterManquants(manquants,
+                            [{ devise: 'USD', date: iso, actif: t.ticker }]);
                     } else {
                         valeurGlobale += qte * c * tUsd;
                     }
@@ -1098,7 +1106,10 @@
 
         return Promise.all(Object.keys(besoin).map(function (cle) {
             var p = cle.split('|');
-            return PF.net.taux(p[0], p[1], 'EUR').then(function (v) { return [cle, v]; });
+            // Un échec sur un cours crypto ne retire pas les titres calculables.
+            // Null est ensuite signalé comme manquant, jamais remplacé par 1.
+            return Promise.resolve().then(function () { return PF.net.taux(p[0], p[1], 'EUR'); })
+                .then(function (v) { return [cle, v]; }, function () { return [cle, null]; });
         })).then(function (paires) {
             var taux = {};
             paires.forEach(function (p) { taux[p[0]] = PF.util.tauxValide(p[1]); });
@@ -1108,19 +1119,36 @@
                contre les écritures retenues avant elle (ordre de lecture) : une vente
                excédentaire fabriquerait un PRU faux au 2074 et une cession fictive au
                2086. Elle est écartée ET annoncée, jamais calculée en silence. */
-            var ventesExcedentaires = [];
+            var ventesExcedentaires = [], ventesInvalidesTitres = [], ventesInvalidesCrypto = [];
             var retenues = [];
             txs.forEach(function (t) {
                 var exces = PF.portefeuille.erreurVenteExcedentaire(retenues, t, {});
-                if (exces) { ventesExcedentaires.push(exces); return; }
+                if (exces) {
+                    ventesExcedentaires.push(exces);
+                    // Ne PAS présenter le total des autres ventes de cette
+                    // catégorie comme un 903/224 complet : la vente rejetée
+                    // fausserait le report. L'autre catégorie reste autonome.
+                    var classe = PF.modele.classeDe(t.ticker);
+                    var manque = { devise: 'position de vente non justifiée',
+                        date: String(t.date), actif: t.ticker };
+                    if (CLASSES_2074.indexOf(classe) >= 0) ventesInvalidesTitres.push(manque);
+                    if (classe === 'crypto') ventesInvalidesCrypto.push(manque);
+                    return;
+                }
                 retenues.push(t);
             });
 
-            var t2074 = detail2074(retenues, annee, taux);
-            return besoinsPrixCrypto(retenues, annee).then(function (prix) {
-                var t2086 = detail2086(retenues, annee, taux, prix);
-                // Le bilan entier attend le cours : un 2074 juste et un 2086 faux
-                // ne se présentent pas ensemble comme une déclaration complète.
+            var t2074 = ventesInvalidesTitres.length
+                ? Object.assign(vide2074(annee), { indisponible: ventesInvalidesTitres })
+                : detail2074(retenues, annee, taux);
+            var attenteCrypto = ventesInvalidesCrypto.length ? Promise.resolve({})
+                : besoinsPrixCrypto(retenues, annee);
+            return attenteCrypto.then(function (prix) {
+                var t2086 = ventesInvalidesCrypto.length
+                    ? Object.assign(vide2086(annee), { indisponible: ventesInvalidesCrypto })
+                    : detail2086(retenues, annee, taux, prix);
+                // Un segment incomplet bloque le bilan IR, sans masquer les
+                // montants chiffrables de l'autre segment dans ses cases.
                 var indisponible = ajouterManquants(
                     ajouterManquants([], t2074.indisponible || []), t2086.indisponible || []);
                 return { t2074: t2074, t2086: t2086, indisponible: indisponible,
@@ -1313,7 +1341,7 @@
         };
     }
 
-    var anneeFiscale = null;
+    var anneeFiscale = null, sequenceVue = 0;
 
     function anneeEnCours() {
         if (anneeFiscale) return anneeFiscale;
@@ -1381,6 +1409,9 @@
             + '</div></details>';
     }
     function vue(ctx) {
+        // Une ancienne lecture asynchrone ne peut pas remplir le nouvel écran
+        // (autre année, rechargement ou autre compte) avec ses anciens montants.
+        var sequence = ++sequenceVue;
         var prefait = ctx && ctx.config ? appliquerConfig(ctx) : false;
         var r = PF.store.reglages();
         var annee = anneeEnCours();
@@ -1404,13 +1435,11 @@
             // affichées à part comme ESTIMATION, sans numéros « officiels » futurs.
             if (ctx && Array.isArray(ctx.transactions) && ctx.transactionsChargees !== false) {
                 bilanCessions(ctx, annee).then(function (b) {
-                    if (anneeEnCours() !== annee) return;
+                    if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
                     var f = document.getElementById('fiscFormulaires');
                     if (f && f.getAttribute('data-annee') === String(annee))
                         f.innerHTML = formulaireGuide(annee, {
-                            t2074: b.indisponible.length ? null : b.t2074,
-                            t2086: b.indisponible.length ? null : b.t2086,
-                            comptes: COMPTES_ETRANGER,
+                            t2074: b.t2074, t2086: b.t2086, comptes: COMPTES_ETRANGER,
                             erreur: b.indisponible.length ? 'Cours ou position manquante' : null
                         });
                 }).catch(function () { /* garde le guide : aucun montant inventé */ });
@@ -1511,6 +1540,7 @@
         // dans portee2086Foyer().
         var f1 = fraisReelsDeclarant(r, 1, annee);
         var f2 = couple ? fraisReelsDeclarant(r, 2, annee) : null;
+        var baseConnue = casesBaseConnues(f1, f2);
 
         out += '<div class="titre">1. Vos paramètres fiscaux <span class="n">cliquez pour modifier</span></div>';
 
@@ -1564,7 +1594,7 @@
         out += '<div class="titre">2. Vos formulaires de déclaration ' + (annee + 1)
             + ' <span class="n">revenus ' + annee + '</span></div>';
         out += '<div id="fiscFormulaires" data-annee="' + UI.h(annee) + '">'
-            + formulaireGuide(annee, { comptes: COMPTES_ETRANGER,
+            + formulaireGuide(annee, { comptes: COMPTES_ETRANGER, reglages: r, base: baseConnue,
                 erreur: 'Lecture des écritures en cours' }) + '</div>';
 
         // --- 3. Arbitrage, bilan et prélèvement à la source
@@ -1572,30 +1602,31 @@
         out += '<div id="fiscBilan"><div class="card"><div class="vide" style="padding:14px">Calcul en cours…</div></div></div>';
 
         bilanCessions(ctx, annee).then(function (b) {
-            // Une lecture FX lente ne doit pas remplir les formulaires de
-            // l'année suivante si l'utilisateur a changé de millésime.
-            if (anneeEnCours() !== annee) return;
+            if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
+            var sim = null, erreurSim = null;
             if (b.indisponible.length) {
-                var f0 = document.getElementById('fiscFormulaires');
-                if (f0) f0.innerHTML = formulairesIndisponibles(annee, b.indisponible);
-                var g0 = document.getElementById('fiscBilan');
-                if (g0) g0.innerHTML = bilanIndisponible(annee, b.indisponible);
-                return;
+                erreurSim = 'Cours ou positions manquants : ' + b.indisponible.map(libelleManquant).join(' ; ');
+            } else {
+                try {
+                    // L'IR peut nécessiter le précompte réel des intérêts. Son
+                    // absence ne doit PAS effacer les montants 2074/2086 déjà
+                    // calculés ni les intérêts saisis (2042/2047).
+                    sim = simulerFoyer({
+                        annee: annee, statut: r.statutFiscal, parts: r.partsFiscales,
+                        salaire1: r.salaireNetImposable1, salaire2: r.salaireNetImposable2,
+                        fraisReels1: U.estVrai(r.utiliserFraisReels1), km1: r.fraisKm1, cv1: r.cvFiscal1,
+                        joursRepas1: r.joursRepas1, elec1: U.estVrai(r.vehiculeElectrique1),
+                        fraisReels2: U.estVrai(r.utiliserFraisReels2), km2: r.fraisKm2, cv2: r.cvFiscal2,
+                        joursRepas2: r.joursRepas2, elec2: U.estVrai(r.vehiculeElectrique2),
+                        interetsEtrangers: r.interetsEtrangers, pays: r.paysEtranger,
+                        interetsPrecomptes: r['interetsPs' + annee] === 'oui' ? true
+                            : r['interetsPs' + annee] === 'non' ? false : null,
+                        bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
+                    });
+                } catch (err) { erreurSim = String(err && err.message || err); }
             }
-            var sim = simulerFoyer({
-                annee: annee, statut: r.statutFiscal, parts: r.partsFiscales,
-                salaire1: r.salaireNetImposable1, salaire2: r.salaireNetImposable2,
-                fraisReels1: U.estVrai(r.utiliserFraisReels1), km1: r.fraisKm1, cv1: r.cvFiscal1,
-                joursRepas1: r.joursRepas1, elec1: U.estVrai(r.vehiculeElectrique1),
-                fraisReels2: U.estVrai(r.utiliserFraisReels2), km2: r.fraisKm2, cv2: r.cvFiscal2,
-                joursRepas2: r.joursRepas2, elec2: U.estVrai(r.vehiculeElectrique2),
-                interetsEtrangers: r.interetsEtrangers, pays: r.paysEtranger,
-                interetsPrecomptes: r['interetsPs' + annee] === 'oui' ? true
-                    : r['interetsPs' + annee] === 'non' ? false : null,
-                bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
-            });
             var f = document.getElementById('fiscFormulaires');
-            if (f) {
+            if (f && f.getAttribute('data-annee') === String(annee)) {
                 var banniere = '';
                 if (b.ventes_excedentaires && b.ventes_excedentaires.length) {
                     banniere = '<div class="erreur" style="margin:0 0 10px">'
@@ -1603,27 +1634,28 @@
                         + 'aucun chiffre n’a été calculé dessus.<br>– '
                         + b.ventes_excedentaires.map(UI.h).join('<br>– ') + '</div>';
                 }
-                f.innerHTML = banniere + formulaires(annee, sim, b.t2074, b.t2086, r);
-                UI.lierAccordeons(f);
+                f.innerHTML = banniere + formulaires(annee, sim, b.t2074, b.t2086, r,
+                    baseConnue, erreurSim);
             }
             var g = document.getElementById('fiscBilan');
-            if (g) { g.innerHTML = bilanImpot(annee, sim, b.t2074, b.t2086); UI.lierAccordeons(g); }
+            if (g) {
+                if (sim) { g.innerHTML = bilanImpot(annee, sim, b.t2074, b.t2086); UI.lierAccordeons(g); }
+                else if (b.indisponible.length) g.innerHTML = bilanIndisponible(annee, b.indisponible);
+                else g.innerHTML = '<div class="erreur">Impôt du foyer indisponible : '
+                    + UI.h(erreurSim) + '. Vérifiez le précompte dans « Déclaration de base » ; '
+                    + 'les montants par titre restent visibles dans les imprimés.</div>';
+            }
         }).catch(function (err) {
-            /* Sans les cours de change du jour, les montants ne peuvent pas être
-               reconstitués : un formulaire à moitié rempli est pire qu'un
-               formulaire vide, on le dit au lieu de deviner. */
+            if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
             var erreur = String(err && err.message || err);
-            var psInconnus = erreur.indexOf('précomptés') >= 0;
-            var msg = '<div class="erreur">' + (psInconnus ? 'Bilan fiscal indisponible : ' : 'Formulaires non préremplis : ')
-                + UI.h(erreur)
-                + (psInconnus ? ' Choisissez Oui ou Non ci-dessus après vérification.'
-                    : ' Recopiez vos écritures depuis l’onglet Portefeuille › Opérations.') + '</div>';
-            var f2b = document.getElementById('fiscFormulaires');
-            if (f2b) f2b.innerHTML = msg;
-            var g2 = document.getElementById('fiscBilan');
-            if (g2) g2.innerHTML = '<div class="card"><div class="vide" style="padding:14px">'
-                + (psInconnus ? 'Bilan indisponible tant que le prélèvement des PS des intérêts n’est pas précisé.'
-                    : 'Bilan indisponible sans la lecture des écritures.') + '</div></div>';
+            var f = document.getElementById('fiscFormulaires');
+            if (f && f.getAttribute('data-annee') === String(annee)) {
+                f.innerHTML = formulaireGuide(annee, { comptes: COMPTES_ETRANGER,
+                    reglages: r, base: baseConnue, erreur: 'Lecture des écritures interrompue : ' + erreur });
+            }
+            var g = document.getElementById('fiscBilan');
+            if (g) g.innerHTML = '<div class="erreur">Bilan indisponible sans la lecture des écritures : '
+                + UI.h(erreur) + '.</div>';
         });
 
         return out;
@@ -1633,20 +1665,15 @@
        La liste dit quel cours manque, et les chiffres restent à « — ». */
     function libelleManquant(m) {
         var quand = U.jourMoisAnneeISO(m.date);
-        return /^cours /.test(m.devise)
-            ? m.devise + ' au ' + quand
-            : 'taux ' + m.devise + '/EUR au ' + quand;
+        var motif = /^cours /.test(m.devise) || /^position/.test(m.devise)
+            ? m.devise : 'taux ' + m.devise + '/EUR';
+        return (m.actif ? m.actif + ' : ' : '') + motif + ' au ' + quand;
     }
 
     function avisIndisponible(liste) {
-        return '<div class=\"erreur\">Montant non calculé, taux indisponible au '
+        return '<div class="erreur">Bilan non calculé, donnée indisponible : '
             + liste.map(function (m) { return UI.h(libelleManquant(m)); }).join(' ; ')
-            + '. Réessayez plus tard, quand le cours est disponible : rien n’a été estimé à la place.</div>';
-    }
-
-    function formulairesIndisponibles(annee, liste) {
-        var motif = (liste || []).map(libelleManquant).join(' ; ');
-        return formulaireGuide(annee, { erreur: motif || 'Cours manquant' });
+            + '. Aucun montant manquant n’a été estimé à la place.</div>';
     }
 
     function bilanIndisponible(annee, liste) {
@@ -1680,6 +1707,19 @@
         return morceaux.join(' · ');
     }
 
+    // Ces montants sont déjà saisis / calculés dans la section « Déclaration
+    // de base ». Ils restent visibles dans le guide si la simulation d'impôt
+    // échoue sur une donnée INDÉPENDANTE (précompte d'intérêts par exemple).
+    // Un zéro issu des valeurs par défaut n'est pas une saisie vérifiée.
+    function casesBaseConnues(f1, f2) {
+        var connu1 = !!f1 && f1.salaire > 0;
+        var connu2 = !!f2 && f2.salaire > 0;
+        return { couple: !!f2, case_1aj: connu1 ? f1.salaire : null,
+            case_1ak: connu1 ? f1.caseValeur : undefined,
+            case_1bj: connu2 ? f2.salaire : null,
+            case_1bk: connu2 ? f2.caseValeur : undefined };
+    }
+
     /* La section « Vos formulaires » a un SEUL moteur de rendu : le guide des
        lignes officielles relevées pour les revenus 2025. Si son module manque,
        on refuse au lieu de réafficher l'ancien formulaire (il inventait des
@@ -1687,11 +1727,23 @@
     function formulaireGuide(annee, donnees) {
         if (!PF.fiscalFormulairesDgfip)
             return '<div class="erreur">Guide de déclaration indisponible : module des imprimés DGFiP absent.</div>';
-        return PF.fiscalFormulairesDgfip.render(annee, donnees || {});
+        // L'utilisateur peut ouvrir un imprimé pendant la lecture des cours.
+        // Le remplacement de innerHTML (ou un nouveau rendu de la même année)
+        // ne doit ni le refermer ni rouvrir les imprimés qu'il a repliés.
+        var ouverts = Object.create(null);
+        var ancien = typeof document !== 'undefined' && document.getElementById
+            ? document.getElementById('fiscFormulaires') : null;
+        if (ancien && ancien.getAttribute('data-annee') === String(annee) && ancien.querySelectorAll) {
+            Array.prototype.slice.call(ancien.querySelectorAll('[data-fisc-imprime]')).forEach(function (el) {
+                ouverts[el.getAttribute('data-fisc-imprime')] = el.open;
+            });
+        }
+        return PF.fiscalFormulairesDgfip.render(annee, donnees || {}, ouverts);
     }
-    function formulaires(annee, sim, t2074, t2086, r) {
+    function formulaires(annee, sim, t2074, t2086, r, base, erreurSim) {
         return formulaireGuide(annee, { sim: sim, t2074: t2074,
-            t2086: t2086, reglages: r, comptes: COMPTES_ETRANGER });
+            t2086: t2086, reglages: r, base: base, erreurSim: erreurSim,
+            comptes: COMPTES_ETRANGER });
     }
 
     // ------------------------------------------- 3. arbitrage, bilan et source

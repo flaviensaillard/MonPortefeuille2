@@ -473,21 +473,49 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .onglet-collecte-titre { font-size: 13px; color: var(--txt-2); }
 .onglet-collecte[open] > summary { margin-bottom: 10px; }
 
-/* Guide de report DGFiP 2.2.7 : les six formulaires et toutes les lignes utiles
-   restent visibles sur téléphone, sans zoomer ni couper les montants. */
+/* Guide fiscal : les formulaires sont repliables ; leur synthèse reste lisible
+   même fermée. Sur téléphone la VALEUR doit rester sur l'écran, jamais dans la
+   troisième colonne d'un tableau large de 520 px à faire défiler latéralement. */
 .fisc-guide { margin-top: 10px; }
-.fisc-imprime { margin: 10px 0; }
-.fisc-imprime h3 { margin: 2px 0 6px; font-size: 16px; }
+.fisc-imprime { margin: 10px 0; padding: 0; }
+.fisc-imprime > summary { display: flex; align-items: center; gap: 10px; padding: 14px;
+    cursor: pointer; list-style: none; min-height: 58px; }
+.fisc-imprime > summary::-webkit-details-marker { display: none; }
+.fisc-imprime > summary:focus-visible { outline: 2px solid var(--euro); outline-offset: -2px; border-radius: 14px; }
+.fisc-imprime-tete { flex: 1; min-width: 0; }
+.fisc-imprime h3 { margin: 0 0 5px; font-size: 16px; }
+.fisc-imprime-resume { display: block; color: var(--euro); font-size: 12px;
+    font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.fisc-imprime-chevron { color: var(--txt-2); font-size: 20px; transition: transform .2s ease; }
+.fisc-imprime[open] .fisc-imprime-chevron { transform: rotate(180deg); }
+.fisc-imprime-corps { padding: 0 14px 14px; }
 .fisc-imprime a { color: var(--euro); overflow-wrap: anywhere; }
 .fisc-cadre { margin: 14px 0; }
 .fisc-cadre h4 { font-size: 13px; margin: 6px 0; color: var(--gold); }
 .fisc-cadre .st { overflow-wrap: anywhere; }
+.fisc-titre { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px;
+    color: var(--txt-2); line-height: 1.5; overflow-wrap: anywhere; }
+.fisc-titre b { color: var(--euro); font-size: 14px; }
 .fisc-table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .fisc-formulaire-table { min-width: 520px; }
 .fisc-formulaire-table th:first-child, .fisc-formulaire-table td:first-child { min-width: 80px; }
 .fisc-formulaire-table th:nth-child(2), .fisc-formulaire-table td:nth-child(2) { min-width: 220px; white-space: normal; }
 .fisc-formulaire-table th:last-child, .fisc-formulaire-table td:last-child { min-width: 170px; white-space: normal; }
 .fisc-formulaire-table .st { font-size: 11px; line-height: 1.4; }
+@media (max-width: 600px) {
+    .fisc-table-scroll { overflow-x: visible; }
+    .fisc-formulaire-table { display: block; min-width: 0; width: 100%; }
+    .fisc-formulaire-table thead { position: absolute; width: 1px; height: 1px;
+        padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    .fisc-formulaire-table tbody { display: block; }
+    .fisc-formulaire-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .fisc-formulaire-table td { display: block; min-width: 0 !important; padding: 0;
+        border: 0; text-align: left !important; white-space: normal; overflow-wrap: anywhere; }
+    .fisc-formulaire-table td:first-child { color: var(--gold); margin-bottom: 3px; }
+    .fisc-formulaire-table td:nth-child(2) { color: var(--txt-2); margin-bottom: 5px; }
+    .fisc-formulaire-table td:last-child { font-size: 15px; font-weight: 700; }
+    .fisc-formulaire-table td:last-child .up { color: var(--euro); }
+}
 #fiscAnneeGuide { background: var(--card-2); border: 1px solid var(--line-strong); color: var(--txt); border-radius: 9px; padding: 9px; margin: 7px 5px; }
 
 .noanim * { animation: none !important; transition: none !important; }

@@ -82,14 +82,14 @@ assert.equal(c.cessions[0].ligne_218, 300);
 assert.equal(c.cessions[0].ligne_224, -121.05);
 assert.equal(c.total_cessions_218, 300);
 
-const html = G.render(2025, { sim: { case_1aj: 30000, case_1ak: null, case_1bj: 0, case_1bk: null,
+const html = G.render(2025, { sim: { annee: 2025, case_1aj: 30000, case_1ak: null, case_1bj: 0, case_1bk: null,
     couple: false, options_fiscales: { assiette_2op: 1020, assiette_3cn: 0 }, cocher_2op: false },
     t2074: t, t2086: c, reglages: { interetsEtrangers: 300, paysEtranger: 'Suisse' },
     comptes: ['Swissquote <b>non fiable</b>'] });
 for (const form of ['2042', '2042 C', '2047', '2074', '2074-CMV', '2086', '3916 / 3916-bis'])
     assert.ok(html.includes('<h3>' + form + ' · revenus 2025</h3>'), form);
 for (const n of ['511', '512', '514', '515', '516', '517', '518', '520', '521', '522', '523', '524',
-    '903 / PV', '903 / MV', '913 / total', '1133 / 1', '1164', '211', '212', '213', '214',
+    '903 / PV', '903 / MV', '913 / total', '1133 / 1 · A', '1164', '211', '212', '213', '214',
     '215', '216', '217', '218', '220', '221', '222', '223', '224', '51', '52',
     '2TR', '2CG', '2BH', '2DF', '6DE', '2OP', '3VG', '3VH', '3SG', '3AN', '3BN', '3CN', '8UU'])
     assert.ok(html.includes('<b>' + n + '</b>'), 'repère utile absent : ' + n);
@@ -105,11 +105,18 @@ assert.doesNotMatch(html, /<b>non fiable<\/b>/, 'les noms de comptes doivent êt
 assert.match(html, /(?:&lt;|&amp;lt;)b(?:&gt;|&amp;gt;)non fiable/,
     'le HTML utilisateur doit être échappé, jamais interprété');
 
-const futur = G.render(2029, { sim: { case_1aj: 9999 }, t2074: t, t2086: c,
+const en2029 = txs => txs.map(tx => ({ ...tx, date: tx.date.replace('2025', '2029') }));
+const t29 = F.detail2074(en2029(titres), 2029, {});
+const c29 = F.detail2086(en2029(cryptoTxs), 2029, { 'USD|2029-08-01': 1 },
+    { 'ETH|2029-08-01': 500 });
+const futur = G.render(2029, { sim: { case_1aj: 9999 }, t2074: t29, t2086: c29,
     reglages: { interetsEtrangers: 9999 }, comptes: [] });
 assert.match(futur, /imprimés des revenus 2029.*NON vérifiées|imprimés des revenus 2029/s);
 assert.match(futur, /REPÈRES des revenus 2025/);
 assert.match(futur, /NON reportable avant publication/);
+const mauvaisMillesime = G.render(2029, { t2074: t, t2086: c });
+assert.doesNotMatch(mauvaisMillesime, /Calcul des seules écritures connues/,
+    'une estimation 2025 ne doit pas apparaître parmi les revenus 2029');
 assert.doesNotMatch(futur, /9 999 €/, 'aucun faux montant fiscal 2029 issu de la 2025');
 assert.doesNotMatch(futur, /<b class="up">.*€<\/b>/, 'aucune case future ne devient officielle');
 const futurSansCession = G.render(2030, { t2074: { operations: [], bilan_net: 0 },

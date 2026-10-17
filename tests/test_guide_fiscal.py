@@ -288,11 +288,11 @@ def test_frais_kilometriques_et_repas_et_simulation_foyer():
     assert sim["cocher_2op"] is False
 
 
-def test_formulaires_fiscaux_visibles_par_defaut_sans_ouvrir_les_parametres():
-    """2.2.7 : formulaires visibles ; situation familiale/base restent repliées.
+def test_formulaires_fiscaux_repliables_et_resumes_sans_ouvrir_les_parametres():
+    """2.2.8 : les imprimés sont de nouveau fermés ; leur titre chiffre le connu.
 
-    Des sections « cases à recopier » fermées donnaient l'impression que les
-    lignes avaient disparu. Le changement ne doit pas ouvrir les saisies privées.
+    Le retour des onglets repliables ne doit pas ouvrir les saisies privées,
+    ni cacher les chiffres connus dans les titres des volets fiscaux.
     """
     import pathlib
     src = pathlib.Path("pages/4_Fiscalite.py").read_text(encoding="utf-8")
@@ -301,7 +301,9 @@ def test_formulaires_fiscaux_visibles_par_defaut_sans_ouvrir_les_parametres():
                   "Formulaire 2074 / 2074-CMV", "Formulaire 2086",
                   "Formulaire 3916 / 3916-bis"):
         bloc = formulaires.split(titre, 1)[1].split("expanded=", 1)[1]
-        assert bloc.startswith("True"), titre
+        assert bloc.startswith("False"), titre
+    assert "903/PV {ui.eur(d2074['ligne_903_pv'])}" in src
+    assert "224 {ui.eur(d2086['plus_value_globale_224'])}" in src
     saisies = src.split("# 1. Paramètres du foyer", 1)[1].split("# 2. VOS FORMULAIRES", 1)[0]
     assert "expanded=False" in saisies, "la saisie des paramètres privés reste repliée"
 
