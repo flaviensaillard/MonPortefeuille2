@@ -325,6 +325,11 @@ migrations déjà exécutées**, et ne décrivent plus le bouton actuel.
 - `pf2_fiscal_collectes` reçoit historiquement le barème IR transmis par
   OpenFisca-France. Il s'agit d'une **source partielle**, pas d'un millésime prêt
   pour une déclaration. Les données d'un autre utilisateur sont invisibles (RLS).
+  Depuis la migration **013** (voir ci-dessous), elle reçoit aussi l'historique des
+  **collectes DGFiP** du bouton de l'APK : onze sources documentaires, chacune avec
+  l'adresse officiellement lue et les paramètres publics du document. Aucune donnée
+  personnelle n'y entre, et une ligne historisée n'est **pas** une règle publiée :
+  `pf2_fiscal_annees` reste insérable uniquement côté serveur.
 - Une rectification des chiffres d'une même année crée la **révision N+1**.
   C'est elle qui devient la plus récente ; la révision N reste consultable pour
   comprendre ce qui a changé. Une année différente ne change pas. La collecte
@@ -434,6 +439,237 @@ installer un APK signé avec une clé de développement par-dessus l'application
 Tests sans base : `python -m unittest tests.test_importer_fiscal_existant`,
 `node tests/test_fiscal_sources.js`.
 
+## Migration 013 : historique des collectes DGFiP — **APPLIQUÉE par le propriétaire le 15/10/2026**
+
+Constat au 16/10/2026 : les cinq lecteurs DGFiP de l'APK n'écrivaient **que dans le
+`localStorage` de l'appareil**. La table `pf2_fiscal_collectes`, limitée par 009 puis
+012 aux deux sources OpenFisca et à leurs deux adresses exactes, **refusait** toute
+ligne DGFiP ; `pf2_fiscal_annees` n'est accessible à l'APK qu'en lecture. Une
+réinstallation ou un changement d'appareil faisait donc perdre les preuves collectées.
+
+[`migrations/013_collectes_dgfip.sql`](../migrations/013_collectes_dgfip.sql)
+élargit les deux contraintes aux onze sources réellement lues par l'application,
+chacune n'étant acceptée qu'avec son adresse officielle (hôte DGFiP exact en `https`,
+chemin imposé, permalien BOFiP verrouillé sur la version lue ou adresse courte
+`/doctrine/` de la version en vigueur). Les sources OpenFisca historiques restent
+autorisées : aucune ligne existante ne devient orpheline.
+
+**Ce que la migration ne fait pas** : elle ne publie aucune règle et n'active aucun
+calcul ; elle n'autorise ni UPDATE ni DELETE (la table reste append-only, une
+rectification crée la révision suivante) ; elle n'élargit pas la RLS (chaque compte
+ne lit et n'écrit que ses lignes, `anon` n'a rien) ; elle ne touche pas à
+`pf2_fiscal_annees`, dont l'écriture reste `service_role`.
+
+**Exécutée par le propriétaire le 15/10/2026** dans Supabase SQL Editor, après
+012. **Ne pas la rejouer**, comme 009, 010, 011, 012 et le SQL R2 2025. Le script
+est rejouable sans perte (il ne supprime ni ne modifie aucune ligne), mais un rejeu
+n'apporte rien.
+
+La base accepte donc désormais les onze sources DGFiP — **et c'est vérifié en
+conditions réelles, pas seulement en test** : voir « Retour réel du 15/10/2026 »
+ci-dessous. L'écriture vient du module `js/fiscal_historique_supabase.js`, livré
+par l'APK **2.2.3** puis corrigé en **2.2.4**.
+
+**Vérifier soi-même, sans rien écrire** :
+[`docs/VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql`](VERIFIER-HISTORIQUE-COLLECTES-DGFIP.sql)
+est une sonde à coller dans Supabase SQL Editor. Elle ne contient **qu'un seul
+`select`** (aucun mot-clé d'écriture ne survit à la suppression des commentaires et
+des littéraux — c'est contrôlé par test), et n'affiche aucune donnée personnelle :
+ni `user_id`, ni montant, ni adresse de document. Elle rend dix lignes :
+
+| # | Contrôle | Avant 013 | Après 013 (15/10) | **Attendu maintenant** |
+| --- | --- | --- | --- | --- |
+| 1 | Migration 013 appliquée | NON | OUI | **OUI** |
+| 2 | Sources DGFiP autorisées | 0 | 11 sur 11 | **11 sur 11** |
+| 3 | Sources OpenFisca toujours autorisées | 2 sur 2 | 2 sur 2 | **2 sur 2** |
+| 4 | Lignes de collecte DGFiP historisées | 0 | 0 | **17 ou plus** |
+| 5 | Millésimes historisés | aucun | aucun | **2023, 2025** |
+| 6 | Droits de l'APK sur l'historique | INSERT, SELECT | INSERT, SELECT | **INSERT, SELECT** |
+| 7 | Droits de l'APK sur les règles publiées | SELECT seul | SELECT seul | **SELECT seul** |
+| 8 | Tables fiscales sous RLS | 2 | 2 | **2** |
+| 9 | Clés personnelles dans les lignes DGFiP | 0 | 0 | **0** |
+| 10 | Détail par millésime (lignes, révision max) | aucune | aucune | **2025 : 11 ligne(s), rév. max 1** |
+
+Les lignes 4 et 5 ne sont plus à deviner : le retour du téléphone sous APK 2.2.4
+pour les revenus 2025 dit **« déjà historisé à l'identique »**, ce qui exige que les
+11 documents soient présents dans la table et que chacun corresponde exactement à la
+collecte du jour. Le millésime 2023 avait déjà annoncé « 6 document(s) historisé(s) »
+le 15/10/2026. D'où 17 lignes au minimum — davantage si 2024 a été écrit depuis, ou
+si des révisions ont été empilées avant la 2.2.4.
+
+**La ligne 10 tranche ce que les lignes 4 et 5 ne peuvent pas trancher.** Elle rend
+le nombre de lignes et la révision maximale par millésime, au format
+`2023 : 6 ligne(s), rév. max 1 | 2025 : 11 ligne(s), rév. max 1`. Deux lectures :
+
+- **rév. max 1 partout** : chaque millésime n'a été écrit qu'une fois, l'historique
+  est propre.
+- **rév. max 2 ou plus**, avec un nombre de lignes multiple de celui des documents
+  lus : c'est la trace du défaut jsonb corrigé en 2.2.4. PostgreSQL réordonne les
+  clés d'un `jsonb`, si bien qu'une comparaison naïve voyait « différente » une
+  collecte strictement identique et recréait une révision à **chaque** clic. Ces
+  doublons ne faussent aucun calcul — le moteur ne relit pas cette table — et ne
+  peuvent pas être supprimés par l'APK, qui n'a que `INSERT, SELECT` sur une table
+  volontairement append-only.
+
+C'est la sonde, et non l'écran du téléphone, qui fait foi sur le contenu de la base.
+
+### Retour réel du 15/10/2026 (APK 2.2.3) — ce qui a marché, ce qui a échoué
+
+Premier clic réel du propriétaire après application de la 013. Résultat affiché par
+l'écran Fiscalité :
+
+| Millésime | Documents lus | Verdict |
+| --- | --- | --- |
+| Revenus 2023 | 6 | **6 document(s) historisé(s)** |
+| Revenus 2024 | 6 | NON historisé |
+| Revenus 2025 | 11 | NON historisé |
+| Revenus 2026 | 0 | rien à historiser (correct) |
+
+**Ce que ce retour prouve** :
+
+- la migration 013 **est appliquée et fonctionne** : sans elle aucune source
+  `dgfip_*` ne peut être écrite, or six lignes des revenus 2023 ont été acceptées ;
+- la contrainte d'adresse **n'est pas la cause** des échecs 2024 et 2025. Les 23
+  lignes réellement produites par les lecteurs (6 + 6 + 11), avec leurs vraies
+  adresses extraites de `fiscal_dgfip_sources.url()`, `fiscal_frais_sources.KM()`
+  et `repasUrl()`, `fiscal_regimes_sources.url()` et `urlPour()` des lecteurs PDF,
+  ont été rejouées sur un PostgreSQL réel avec 009 → 013 : **toutes sont acceptées**.
+
+**Ce que ce retour ne prouve pas** : la cause exacte des refus 2024 et 2025. Elle
+est **inconnue**, et elle l'est restée à cause d'un défaut du module : le résumé
+copiable disait « NON historisé, collecte conservée sur l'appareil » **sans le
+motif**. Aucune hypothèse n'est donc avancée ici comme un fait.
+
+**Quatre défauts réels, corrigés en 2.2.4** :
+
+1. *Le résumé taisait la raison.* C'est ce qui a rendu le retour du 15/10
+   inexploitable. La raison est maintenant reprise dans le résumé copiable, sans
+   adresse, et le résumé reste sous 600 caractères.
+2. *Tout refus était attribué à la migration 013.* Un conflit de révision (23505),
+   une session expirée (401/403), une cadence refusée (429) ou un droit insuffisant
+   (42501) ont des causes et des remèdes différents. Chaque code a son libellé, et
+   la 013 n'est plus nommée que pour un refus de contrainte (23514).
+3. *Aucun rejeu sur conflit.* Deux clics ou deux appareils peuvent lire la même
+   dernière révision avant d'écrire : le second reçoit 23505. `fiscal_sources.js`
+   relit et réessaie déjà deux fois pour OpenFisca ; ce module abandonnait tout le
+   millésime. Il relit désormais la ligne gagnante et réessaie, sans jamais UPDATE,
+   DELETE ni UPSERT.
+4. *Une collecte identique était vue comme différente.* PostgreSQL `jsonb` **ne
+   conserve pas l'ordre des clés** : une ligne écrite `{"quotient_familial":…,"document":…}`
+   est relue `{"document":…,"quotient_familial":…}`. La comparaison par
+   `JSON.stringify` brut concluait « différent », et **chaque clic aurait recréé une
+   révision**. La comparaison est canonique (clés triées des deux côtés).
+
+S'y ajoute un défaut d'honnêteté du compte rendu : un échec peut survenir **après**
+des écritures réussies, qui restent en base (append-only). Le résumé le dit — « N
+document(s) écrit(s), puis NON historisé — raison » — au lieu de laisser croire que
+rien n'est parti.
+
+Ces cinq points sont verrouillés par `tests/test_fiscal_historique_supabase.js`
+(§10 à §14) : clés réordonnées par jsonb ⇒ « inchangée » et zéro révision fantôme,
+conflit 23505 ⇒ relecture et réessai bornés sans doublon `(source, revision)`, six
+messages d'erreur ⇒ six diagnostics distincts dont un seul nomme la 013, échec
+partiel ⇒ les écritures réussies sont comptées, motif absent ⇒ « raison inconnue »
+et jamais un silence.
+
+### Retour réel sous APK 2.2.4 (revenus 2025) — le correctif jsonb validé en base
+
+Ligne rendue par l'écran Fiscalité du téléphone, recopiée telle quelle :
+
+> Revenus 2025 (déclaration 2026) — R2 publiée prioritaire. DGFiP : IR/décote/QF
+> 3/3, frais salariés 3/3, PS titres lu. PDF : nouveautés CSG lu, notice 2086 lu,
+> brochure crypto lu, RCM lu, charges/CSG lu. RCM personnels, PS crypto 2025 et
+> déduction CSG du foyer non vérifiés ; aucun nouveau taux activé. Bascule DGFiP
+> totale : non. **Supabase : déjà historisé à l'identique.**
+
+« Déjà historisé à l'identique » est l'état `inchangée` du module. Il n'est atteint
+que si trois conditions sont réunies : des lignes existent déjà pour ce millésime,
+les 11 documents du jour ont chacun retrouvé leur ligne, et **leurs valeurs relues
+depuis PostgreSQL ont été reconnues identiques** à celles recalculées.
+
+**Ce que cette ligne prouve** :
+
+- les 11 documents des revenus 2025 **sont écrits dans la base réelle** — ce n'est
+  plus un résultat de test, c'est l'état de la table du propriétaire ;
+- la lecture `SELECT` fonctionne sous RLS avec le rôle `authenticated` de l'APK ;
+- le défaut n° 4 est corrigé **en conditions réelles**. Les valeurs relues viennent
+  d'un `jsonb` dont PostgreSQL a réordonné les clés ; avec la comparaison naïve de la
+  2.2.3 ce même clic aurait conclu « différent » et écrit une révision 2 pour les 11
+  documents. Il n'a rien écrit. C'est exactement le comportement attendu.
+
+**Ce que cette ligne ne prouve pas** :
+
+- l'état des revenus **2024**. Le refus du 15/10 sous 2.2.3 n'a pas été re-reporté
+  depuis, et sa cause reste **inconnue** — aucune hypothèse n'est avancée ici comme
+  un fait. Sous 2.2.4 la raison est imprimée dans le résumé : le prochain clic la
+  nommera.
+- l'état des revenus **2023** au-delà de leur existence. Le clic du 15/10 a écrit 6
+  documents ; si un second clic a eu lieu sous 2.2.3, le défaut jsonb a pu empiler
+  une révision 2. Seule la **ligne 10 de la sonde** le dira (`rév. max`).
+- la version d'APK exacte du téléphone. Le verdict `inchangée` existait déjà en
+  2.2.3, mais il y était pratiquement inatteignable pour un millésime déjà écrit,
+  précisément à cause du défaut n° 4. Ce retour est donc une forte présomption de
+  2.2.4, pas une preuve.
+
+Les revenus 2026 restent à « rien à historiser » : aucun document du millésime 2026
+n'est publié, et rien n'est inventé.
+
+Les lignes 6 à 9 sont des garde-fous : si l'une d'elles bouge, la sécurité de la
+table a changé et il faut s'arrêter. La sonde est elle-même verrouillée par
+`tests/test_verifier_collectes_dgfip.py`, qui la rejoue sur un PostgreSQL réel dans
+les deux états (avant / après 013), y compris avec une écriture réelle de l'APK sous
+RLS, et qui exige que sa liste de sources reste **identique** à celle de la
+contrainte de la 013 (sinon une douzième source serait ignorée en silence).
+
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7 → 2.2.8 → 2.2.9
+
+Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
+release **depuis `main` seulement**. Or la release est **unique et immuable** : si
+`apk-2.2.2` existe déjà avec un APK de SHA256 différent, l'étape de publication
+fait `exit 1`. La PR #24 modifie des fichiers sous `app/` : la fusionner sous la
+version 2.2.2 aurait donc **fait échouer la construction sur `main`**, sans APK
+installable à la clé.
+
+La version est donc passée à **2.2.3 (code 33)**, puis à **2.2.4 (code 34)** après
+le retour réel du 15/10, puis à **2.2.5 (code 35)** pour l'onglet replié de mise à
+jour, puis à **2.2.6 (code 36)** pour le retrait de quatre bandeaux d'en-tête,
+puis à **2.2.7 (code 37)** pour refaire les formulaires et corriger les reports
+2074/2086, enfin à **2.2.8 (code 38)** pour montrer les montants par titre et
+par case dans l'APK et sur Streamlit, restaurer les onglets repliables et ne plus
+effacer les ventes calculables lorsque l'impôt global est bloqué (voir
+[MONTANTS-FISCAUX-2.2.8.md](MONTANTS-FISCAUX-2.2.8.md)), puis à **2.2.9
+(code 39)** pour placer les chiffres de l’application avant les limites de
+foyer, séparer les cessions et retirer les demandes de justificatifs génériques
+(voir [CLARTE-FISCALE-2.2.9.md](CLARTE-FISCALE-2.2.9.md)).
+Une version étant déjà construite sous son numéro, il faut un code supérieur pour
+que deux APK différentes ne portent pas le même nom. Les fichiers imposés par la
+procédure du dépôt sont alignés (`AndroidManifest.xml`, `apk.yml` `VERSION_NAME`
+et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec les notes
+`telechargements/notes-2.2.9.md` et le nom d'artefact.
+
+**Conséquence à connaître avant de fusionner** : une éventuelle fusion de la PR
+#24, décidée uniquement par le propriétaire, construirait puis **publierait
+la release `apk-2.2.9` depuis `main`**. Aucun de ces actes n'est effectué par
+cette livraison de branche. Une release est définitive : aucun écrasement n'est
+possible ensuite.
+
+Un verrou manquait et a été ajouté dans `tests/test_livraison_securisee.js`
+(« Cohérence de la livraison ») : la version est **lue dans le workflow**, jamais
+recopiée dans le test, puis le fichier de notes, le nom d'artefact, le manifeste,
+`build.sh` et `core/__init__.py` doivent tous la porter. Sans ce verrou, un
+`--notes-file` pointant vers un fichier absent n'aurait échoué **qu'au moment de la
+publication sur `main`**, c'est-à-dire après la fusion.
+
+Côté application, l'écriture est faite par `js/fiscal_historique_supabase.js`
+(`PF.fiscalHistorique`), appelé par le bouton de collecte après le rechargement des
+caches, un millésime après l'autre. Le détail de ce qui s'écrit et de ce qui ne
+s'écrit pas est dans
+[`MATRICE-COUVERTURE-FISCALE-2023-2026.md`](MATRICE-COUVERTURE-FISCALE-2023-2026.md) §7.7.
+Deux jeux de tests la verrouillent : `tests/test_fiscal_sql_dgfip.py` (009 → 013
+rejouées sur un PostgreSQL embarqué, adresses inventées refusées, append-only, RLS
+inchangée) et `tests/test_fiscal_historique_supabase.js` (hors réseau, avec contrôle
+de **parité** entre les lignes produites par le module et les contraintes du SQL).
+
 ## Historique : extension des paramètres isolés (APK antérieures)
 
 **Migration 012 exécutée par le propriétaire le 13/10/2026 (succès communiqué), après le run de sauvegarde/restauration 38396580535 réussi. Ne pas la rejouer.** Avant cela, la table 009/010 limitait
@@ -528,3 +764,44 @@ tant que la page salariale pour l’année 2026 ne les publie pas.
 
 Test hors réseau : `node tests/test_fiscal_frais_sources.js` (année exacte,
 format complet, cohérence, rectification, isolation des comptes).
+
+---
+
+## Matrice de couverture par millésime et catégorie (14/10/2026)
+
+`app/src/main/assets/www/js/fiscal_couverture.js` calcule, pour les revenus
+**2023, 2024, 2025 et 2026**, le statut de chaque catégorie : `établi` (texte
+DGFiP du millésime), `recoupement` (dérivation documentée d'au moins deux textes,
+jamais activée), `partiel` (document lu, portée insuffisante) ou `non disponible`.
+Les trois dates sont séparées : **année des revenus**, **année de déclaration**,
+**date de publication du document**.
+
+Une constante embarquée dans le code n'est jamais une preuve : sans collecte, les
+52 cases (4 millésimes × 13 catégories) sont « non disponible ». `basculeComplete`
+n'est vrai que si toutes les cases sont « établi » ; un recoupement ne suffit pas.
+Aujourd'hui : **bascule DGFiP totale : non**.
+
+Les catégories qui ne peuvent pas être établies par un document public — plafonds
+QF particuliers, RCM personnels (produit, précompte réel, option 2OP du foyer,
+2CG/2BH/2DF), CSG déductible personnelle, exhaustivité de la 2086 du foyer,
+changements de formule et arrondis — restent affichées « non disponible » ou
+« partiel », jamais comme une estimation officielle.
+
+Trois garde-fous du foyer sont ajoutés (`fiscal_gardes_foyer.js`) :
+
+- `csgDeductible6DE()` : la part 6,8 % × (2BH + 2DF) est calculée
+  automatiquement par l'administration ; un 6DE qui la contient est **bloqué**
+  comme double compte. Aucun montant n'est produit sans saisie personnelle, donc
+  jamais à partir de la seule lecture des brochures.
+- `portee2086Foyer()` : `certifieFoyer` reste `false`. Seule l'inférence à sens
+  unique est admise — un total du seul portefeuille supérieur à 305 € exclut
+  l'exonération du foyer, un total inférieur ne la prouve pas. Les options 3CN et
+  2OP restent distinctes.
+- `casParticuliersQF()` : un cas particulier déclaré, ou une demi-part non
+  expliquée par la règle générale, bloque le bilan et la recommandation 2OP.
+
+`PROVENANCE_PS` qualifie chaque taux de PS embarqué ; pour 2026 il dit
+explicitement « reconduction de 2025 … non établi », et `verifierMaj` l'affiche.
+
+Détail des sources, passages probants, contradictions et tests :
+**`docs/MATRICE-COUVERTURE-FISCALE-2023-2026.md`**.

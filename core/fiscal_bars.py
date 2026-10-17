@@ -56,28 +56,28 @@ BAREMES: dict[int, Bareme] = {
         annee=2022,
         tranches=(10_777.0, 27_478.0, 78_570.0, 168_994.0),
         taux=(0.11, 0.30, 0.41, 0.45),
-        decote_base_celibataire=846.0,
-        decote_plafond_celibataire=1_870.0,
-        decote_base_couple=1_395.0,
-        decote_plafond_couple=3_100.0,
+        decote_base_celibataire=833.0,
+        decote_plafond_celibataire=1_841.0,
+        decote_base_couple=1_378.0,
+        decote_plafond_couple=3_045.0,
     ),
     2023: Bareme(
         annee=2023,
         tranches=(11_294.0, 28_797.0, 82_341.0, 177_106.0),
         taux=(0.11, 0.30, 0.41, 0.45),
-        decote_base_celibataire=906.0,
-        decote_plafond_celibataire=2_002.0,
-        decote_base_couple=1_493.0,
-        decote_plafond_couple=3_300.0,
+        decote_base_celibataire=873.0,
+        decote_plafond_celibataire=1_929.0,
+        decote_base_couple=1_444.0,
+        decote_plafond_couple=3_191.0,
     ),
     2024: Bareme(
         annee=2024,
-        tranches=(11_520.0, 29_370.0, 83_984.0, 180_648.0),
+        tranches=(11_497.0, 29_315.0, 83_823.0, 180_294.0),
         taux=(0.11, 0.30, 0.41, 0.45),
-        decote_base_celibataire=924.0,
-        decote_plafond_celibataire=2_042.0,
-        decote_base_couple=1_523.0,
-        decote_plafond_couple=3_365.0,
+        decote_base_celibataire=889.0,
+        decote_plafond_celibataire=1_965.0,
+        decote_base_couple=1_470.0,
+        decote_plafond_couple=3_249.0,
     ),
     2025: Bareme(
         annee=2025,
@@ -100,19 +100,25 @@ BAREMES: dict[int, Bareme] = {
 }
 
 SOURCE_PAR_ANNEE: dict[int, str] = {
-    2022: "Constantes embarquées historiques non vérifiées",
-    2023: "Constantes embarquées historiques non vérifiées",
-    2024: "Constantes embarquées historiques non vérifiées",
+    2022: "Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 26/06/2023)",
+    2023: "Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 18/06/2024)",
+    2024: "Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 14/04/2025)",
     2025: "Tranches et décote recoupées BOFiP — autres règles encore à valider",
     2026: "Hypothèses provisoires — revenus 2026 non vérifiés",
 }
 
-# Plafond général QF : seul 2025 a été recoupé pour ce correctif.
-# Les valeurs héritées 2022-2024 restent non auditées, 2026 est PROVISOIRE.
+# Plafond général QF par demi-part supplémentaire, recoupé au BOFiP
+# BOI-IR-LIQ-20-20-20 le 16/10/2026, version par millésime :
+#   revenus 2022 → 1 678 € (publication 26/06/2023)
+#   revenus 2023 → 1 759 € (publication 18/06/2024)
+#   revenus 2024 → 1 791 € (publication 14/04/2025)
+#   revenus 2025 → 1 807 € (publication 07/04/2026)
+# 2022 et 2024 portaient la valeur 2023 reconduite : elles sont corrigées.
+# 2026 reste PROVISOIRE : aucun document « revenus 2026 » n'est publié.
 # Les plafonds particuliers (parent isolé, etc.) exigent un modèle distinct.
 # https://bofip.impots.gouv.fr/bofip/2494-PGP.html/identifiant=BOI-IR-LIQ-20-20-20-20260407
 PLAFOND_QF_GENERAL_PAR_ANNEE: dict[int, float] = {
-    2022: 1_759.0, 2023: 1_759.0, 2024: 1_759.0,
+    2022: 1_678.0, 2023: 1_759.0, 2024: 1_791.0,
     2025: 1_807.0, 2026: 1_807.0,
 }
 

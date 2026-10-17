@@ -58,13 +58,24 @@ const transactions = { transactions: [] };
     await f.actualiserRevisions(transactions);
     assert.throws(() => f.baremeDe(2026), /non disponible/, 'OpenFisca ne débloque plus 2026');
     assert.deepEqual(clone(f.baremeDe(2025)), reference2025, 'R2 2025 inchangée');
-    assert.equal(f.baremeDe(2024).tranches[0], 11520, 'aucun recopiage historique sans BOFiP');
+    // Valeur officielle des revenus 2024 (BOFiP 14/04/2025) depuis la correction du
+    // 16/10/2026 : ce n'est plus la reconduction à 1,02 des seuils 2023, et chaque
+    // millésime garde ses propres seuils.
+    assert.equal(f.baremeDe(2024).tranches[0], 11497, 'barème officiel 2024 embarqué');
+    assert.equal(f.baremeDe(2024).tranches.join(','), '11497,29315,83823,180294');
+    assert.equal(f.baremeDe(2023).tranches[0], 11294, 'aucun recopiage 2024 vers 2023');
+    assert.notEqual(f.baremeDe(2024).tranches.join(','), f.baremeDe(2023).tranches.join(','));
+    assert.notEqual(f.baremeDe(2024).tranches.join(','), f.baremeDe(2025).tranches.join(','));
     assert.equal(f.revisionActive(2026), false);
     const bilan = f.bilanMiseAJour(2026, { boi: { etats: { ir: 'année absente' } }, frais: {} });
     assert.match(bilan, /collecte partielle DGFiP/);
     assert.doesNotMatch(bilan, /12000|OpenFisca/);
     assert.match(bilan, /non disponible/);
-    assert.throws(() => f.baremeDe(2027), /Aucun barème enregistré/);
+    // Un millésime postérieur au dernier embarqué n'est pas « absent du code » : il
+    // est refusé tant que la DGFiP ne l'a pas publié et qu'il n'a pas été collecté.
+    assert.throws(() => f.baremeDe(2027), /Revenus 2027 : barème, décote ou plafond QF DGFiP non disponible/);
+    assert.equal(f.annéeSimulable(2027), false, 'revenus 2027 non simulables sans collecte');
+    assert.ok(f.annéesSimulables().indexOf(2027) < 0, 'revenus 2027 absents de l’écran');
     compte = 'b';
     await f.actualiserRevisions(transactions);
     assert.throws(() => f.baremeDe(2026), /non disponible/);

@@ -370,7 +370,11 @@ class TestQuotientFamilialCoupleEnfants:
         d24 = tax.detail_2074_de_lannee(txs, 2024)
         assert d24["case_3vh"] == pytest.approx(200.0)
         d25 = tax.detail_2074_de_lannee(txs, 2025)
-        assert d25["ligne_905"] == pytest.approx(500.0)
+        assert d25["ligne_903_pv"] == pytest.approx(500.0)
+        assert d25["ligne_903_mv"] == pytest.approx(0.0)
+        assert d25["cadre_10"] == [{"annee": 2024, "montant": 200.0}]
+        assert d25["ligne_1164"] == pytest.approx(200.0)
+        assert d25["cadre_12"] == []
         assert d25["mv_anterieures_reportables"] == pytest.approx(200.0)
         assert d25["cadre_11"][0]["Col D — Pertes antérieures (€)"] == pytest.approx(200.0)
         assert d25["cadre_11"][0]["Col E — Gain net imposable (C − D) (€)"] == pytest.approx(300.0)

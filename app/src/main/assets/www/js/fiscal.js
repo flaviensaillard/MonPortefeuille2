@@ -8,10 +8,17 @@
 
     // ------------------------------------------------------------------ barèmes
 
+    /* Barèmes et décotes recoupés au BOFiP le 16/10/2026, version par millésime :
+       revenus 2022 (publication 26/06/2023), 2023 (18/06/2024), 2024 (14/04/2025),
+       2025 (07/04/2026). Les valeurs historiques non conformes ont été REMPLACÉES
+       par les valeurs officielles ; l'écart et sa source sont consignés dans
+       PF.fiscalCouverture.CORRECTIONS_OFFICIELLES et dans
+       docs/MATRICE-COUVERTURE-FISCALE-2023-2026.md §5.3. 2026 reste provisoire :
+       aucun document « revenus 2026 » n'est publié. */
     var BAREMES = {
-        2022: { tranches: [10777, 27478, 78570, 168994], taux: [0.11, 0.30, 0.41, 0.45], dc: 846, dcPlafond: 1870, dcCouple: 1395, dcPlafondCouple: 3100 },
-        2023: { tranches: [11294, 28797, 82341, 177106], taux: [0.11, 0.30, 0.41, 0.45], dc: 906, dcPlafond: 2002, dcCouple: 1493, dcPlafondCouple: 3300 },
-        2024: { tranches: [11520, 29370, 83984, 180648], taux: [0.11, 0.30, 0.41, 0.45], dc: 924, dcPlafond: 2042, dcCouple: 1523, dcPlafondCouple: 3365 },
+        2022: { tranches: [10777, 27478, 78570, 168994], taux: [0.11, 0.30, 0.41, 0.45], dc: 833, dcPlafond: 1841, dcCouple: 1378, dcPlafondCouple: 3045 },
+        2023: { tranches: [11294, 28797, 82341, 177106], taux: [0.11, 0.30, 0.41, 0.45], dc: 873, dcPlafond: 1929, dcCouple: 1444, dcPlafondCouple: 3191 },
+        2024: { tranches: [11497, 29315, 83823, 180294], taux: [0.11, 0.30, 0.41, 0.45], dc: 889, dcPlafond: 1965, dcCouple: 1470, dcPlafondCouple: 3249 },
         2025: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 897, dcPlafond: 1982, dcCouple: 1483, dcPlafondCouple: 3277 },
         2026: { tranches: [11600, 29579, 84577, 181917], taux: [0.11, 0.30, 0.41, 0.45], dc: 898, dcPlafond: 1986, dcCouple: 1486, dcPlafondCouple: 3284 }
     };
@@ -21,9 +28,9 @@
     var SEUILS_KM_VOITURE = [5000, 20000];
     var MAJORATION_VOITURE_ELECTRIQUE = 0.20;
     var SOURCE_PAR_ANNEE = {
-        2022: 'Constantes embarquées historiques non vérifiées',
-        2023: 'Constantes embarquées historiques non vérifiées',
-        2024: 'Constantes embarquées historiques non vérifiées',
+        2022: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 26/06/2023)',
+        2023: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 18/06/2024)',
+        2024: 'Barème, décote et plafond QF recoupés BOFiP le 16/10/2026 (versions du 14/04/2025)',
         2025: 'Tranches et décote recoupées BOFiP — autres règles à valider',
         2026: 'Hypothèses provisoires — revenus 2026 non vérifiés'
     };
@@ -38,6 +45,18 @@
     var PS_PRECOMPTES_PAR_ANNEE = {
         2018: 0.172, 2019: 0.172, 2020: 0.172, 2021: 0.172, 2022: 0.172,
         2023: 0.172, 2024: 0.172, 2025: 0.172, 2026: 0.186
+    };
+    /* Provenance des taux de PS embarqués, millésime par millésime. 2026 est
+       une RECONDUCTION de 2025 : aucun document du millésime « revenus 2026 »
+       n'existe, elle ne peut donc pas être présentée comme officielle. Cette
+       table ne change aucun calcul ; elle interdit de faire passer une
+       constante recopiée pour une mise à jour vérifiée. */
+    var PROVENANCE_PS = {
+        2023: 'BOFiP crypto/titres : 17,2 % stable, attribution par année de cession non vérifiée',
+        2024: 'BOFiP crypto/titres : 17,2 % stable, attribution par année de cession non vérifiée',
+        2025: 'titres : aide du simulateur 2026 (revenus 2025 explicites), divergence notice 2042 signalée ; '
+            + 'crypto : recoupement BOFiP + brochure nouveautés revenus 2025, non activé',
+        2026: 'reconduction de 2025, aucun document du millésime revenus 2026 : non établi'
     };
     var CSG_DEDUCTIBLE = 0.068;
     var CRYPTO_FRANCHISE_CESSIONS = 305.0;    // seuil sur le TOTAL des prix de cession
@@ -61,9 +80,21 @@
     // Collectes BOFiP / frais DGFiP par année et compte. Les anciennes
     // collectes OpenFisca restent en base mais ne sont plus relues ni appliquées.
     var revisionsActives = Object.create(null), officiels = Object.create(null),
-        fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null);
+        fraisOfficiels = Object.create(null), titresOfficiels = Object.create(null),
+        recoupementsCrypto = Object.create(null);
     var sequenceLecture = 0, rapportsControle = Object.create(null);
+    /* Résultat de l'historisation Supabase (table pf2_fiscal_collectes) par
+       millésime. Ce n'est qu'un état affiché : le moteur ne relit jamais cette
+       table, il n'utilise que le cache local revérifié à chaque ouverture. */
+    var historiques = Object.create(null);
     var compteRevisions = null, contexteRevisions = null, etatR2 = 'non lue', compteRapports = null;
+    /* Dernière interruption du bouton de mise à jour. Elle survit au rendu parce
+       que c'est un ÉCHEC DE RÉCUPÉRATION : elle doit mettre l'onglet en rouge et
+       nommer la raison, pas disparaître au prochain tracé de l'écran.
+       `interruptionAnnees` borne l'échec aux millésimes réellement demandés :
+       sans cela un clic interrompu sur 2023 à 2025 peindrait en rouge des
+       millésimes qui n'ont jamais été tentés. */
+    var derniereInterruption = null, interruptionAnnees = [];
     function paramsActifs(annee) { return revisionsActives[annee] || null; }
     function baremePartiel(annee) { return !paramsActifs(annee) && officiels[annee] && officiels[annee].ir || null; }
     function franchiseCrypto(annee) {
@@ -86,6 +117,7 @@
         var courant = PF.net && PF.net.auth && PF.net.auth.utilisateur();
         if (compteRapports && (!courant || courant.id !== compteRapports)) {
             rapportsControle = Object.create(null); // pas de rapport du compte précédent
+            historiques = Object.create(null);      // ni état d'historisation
             compteRapports = null;
         }
         ++sequenceLecture;
@@ -93,20 +125,40 @@
         officiels = Object.create(null);
         fraisOfficiels = Object.create(null);
         titresOfficiels = Object.create(null);
+        recoupementsCrypto = Object.create(null);
         compteRevisions = null;
         contexteRevisions = null;
         etatR2 = 'non lue';
     }
+    /* Millésimes dont un cache DGFiP peut exister : les années embarquées, plus
+       tout millésime jusqu'à l'année courante — les documents des revenus N
+       paraissent en N+1, donc un millésime postérieur au dernier embarqué peut
+       avoir été collecté sans que le code ait changé. Lire un cache absent ne
+       coûte rien et n'invente rien : la valeur vient du document lu, jamais d'une
+       autre année. */
+    function annéesCachables() {
+        var embarquees = annees();
+        var borne = Math.max(embarquees[embarquees.length - 1], new Date().getFullYear());
+        var liste = [];
+        for (var an = 2023; an <= borne; an++) liste.push(an);
+        return liste;
+    }
     function chargerCachesDgfip(compte) {
         if (!compte || !compte.id) return;
-        if (PF.fiscalFraisSources) annees().forEach(function (an) {
-            if (an >= 2023) fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
+        var cibles = annéesCachables();
+        if (PF.fiscalFraisSources) cibles.forEach(function (an) {
+            fraisOfficiels[an] = PF.fiscalFraisSources.lireCache(an);
         });
-        if (PF.fiscalDgfipSources) annees().forEach(function (an) {
-            if (an >= 2023) officiels[an] = PF.fiscalDgfipSources.lireCache(an);
+        if (PF.fiscalDgfipSources) cibles.forEach(function (an) {
+            officiels[an] = PF.fiscalDgfipSources.lireCache(an);
         });
-        if (PF.fiscalRegimesSources) annees().forEach(function (an) {
-            if (an >= 2023) titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
+        if (PF.fiscalRegimesSources) cibles.forEach(function (an) {
+            titresOfficiels[an] = PF.fiscalRegimesSources.lireCache(an);
+        });
+        // Le recoupement PS crypto est relu et REVALIDÉ à chaque lecture : une
+        // ligne en cache n'est jamais une preuve en soi.
+        if (PF.fiscalCryptoPsRecoupement) cibles.forEach(function (an) {
+            recoupementsCrypto[an] = PF.fiscalCryptoPsRecoupement.lireCache(an);
         });
     }
     function perimetreR2(ctx) {
@@ -177,6 +229,45 @@
 
     function annees() { return Object.keys(BAREMES).map(Number).sort(function (a, b) { return a - b; }); }
     function derniereAnnee() { var a = annees(); return a[a.length - 1]; }
+
+    /* Un millésime est complet quand les quatre familles que le moteur exige ont
+       été LUES pour cette année de revenus : barème, décote, plafond QF (BOFiP) et
+       frais salariés (aide du simulateur). À partir des revenus 2026, c'est la
+       seule voie : aucune constante embarquée n'est utilisée, aucune valeur d'une
+       autre année n'est recopiée. */
+    function millésimeComplet(annee) {
+        var o = officiels[annee] || {}, fr = fraisOfficiels[annee] || {};
+        return !!(o.ir && o.decote && o.qf && fr.repas && fr.km && fr.abatt);
+    }
+    function annéeSimulable(annee) {
+        if (paramsActifs(annee)) return true;
+        if (annee >= 2026) return millésimeComplet(annee);
+        return !!BAREMES[annee];
+    }
+    /* Années proposées à l'écran et au bilan : les millésimes embarqués, plus ceux
+       qu'une collecte complète a rendus utilisables (revenus 2027 collectés au
+       printemps 2028, 2029 collectés en 2030, etc.). */
+    /* Plage parcourue par le bouton « tout vérifier » : du premier millésime décrit
+       (2023) jusqu'à l'année des revenus en cours de déclaration. Elle s'étend seule
+       au 1er janvier : au printemps 2028 le bouton proposera les revenus 2027 sans
+       qu'aucune constante, aucun libellé ni aucune liste n'ait été modifié. */
+    function plageCollecte() {
+        var borne = Math.max(derniereAnnee(), new Date().getFullYear() - 1);
+        var liste = [];
+        for (var an = 2023; an <= borne; an++) liste.push(an);
+        return liste;
+    }
+    function libelléPlage() {
+        var p = plageCollecte();
+        return p.length > 1 ? p[0] + ' à ' + p[p.length - 1] : String(p[0]);
+    }
+    function annéesSimulables() {
+        var liste = annees().slice();
+        annéesCachables().forEach(function (an) {
+            if (liste.indexOf(an) < 0 && annéeSimulable(an)) liste.push(an);
+        });
+        return liste.sort(function (a, b) { return a - b; });
+    }
     function baremeDe(annee) {
         var p = paramsActifs(annee);
         if (p) {
@@ -185,14 +276,17 @@
                 dcPlafond: b.decote_plafond_celibataire, dcCouple: b.decote_base_couple,
                 dcPlafondCouple: b.decote_plafond_couple };
         }
-        if (!BAREMES[annee]) throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : ' + annees().join(', ') + '.');
         var officiel = officiels[annee] || {};
-        var embarque = BAREMES[annee];
-        // 2026 ne peut pas simuler l'IR avec le barème recopié de 2025.
-        if (annee >= 2026 && (!officiel.ir || !officiel.decote || !officiel.qf ||
-            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
-            !fraisOfficiels[annee].abatt))
+        var embarque = BAREMES[annee] || {};
+        // À partir des revenus 2026, un millésime n'existe que s'il a été collecté :
+        // ni constante provisoire, ni barème recopié d'une autre année. Un millésime
+        // postérieur au dernier embarqué (2027, 2028…) devient donc calculable par la
+        // seule collecte, sans modification du code.
+        if (annee >= 2026 && !millésimeComplet(annee))
             throw new Error('Revenus ' + annee + ' : barème, décote ou plafond QF DGFiP non disponible ; simulation suspendue.');
+        if (!BAREMES[annee] && !millésimeComplet(annee))
+            throw new Error('Aucun barème enregistré pour ' + annee + '. Années disponibles : '
+                + annéesSimulables().join(', ') + '.');
         return { tranches: officiel.ir ? officiel.ir.tranches : embarque.tranches,
             taux: officiel.ir ? officiel.ir.taux : embarque.taux,
             dc: officiel.decote ? officiel.decote.dc : embarque.dc,
@@ -223,7 +317,28 @@
         if (PS_PRECOMPTES_PAR_ANNEE[annee] === undefined) throw new Error('Aucun taux de PS précomptés pour ' + annee + '.');
         return PS_PRECOMPTES_PAR_ANNEE[annee];
     }
-    var PLAFOND_QF_GENERAL = { 2022: 1759, 2023: 1759, 2024: 1759, 2025: 1807, 2026: 1807 }; // 2026 provisoire
+    /* Taux de PS des plus-values de titres ÉTABLI pour un millésime : une
+       révision publiée ou un document DGFiP de ce millésime. Renvoie null
+       sinon — jamais la constante embarquée, qui peut être une reconduction
+       silencieuse de l'année précédente (2026 = copie de 2025). */
+    function tauxPSEtabli(annee) {
+        var p = paramsActifs(annee);
+        if (p) return { taux: p.prelevements_sociaux_par_categorie.plus_values_titres,
+            statut: 'révision publiée', provenance: 'R2 publiée par le propriétaire (Supabase)' };
+        if (titresOfficiels[annee]) return { taux: titresOfficiels[annee].ps, statut: 'établi',
+            provenance: PROVENANCE_PS[annee] || 'document DGFiP du millésime' };
+        return null;
+    }
+    /* Recoupement PS crypto : statut « recoupement » ou « partiel », jamais
+       une activation. La R2 publiée reste prioritaire. */
+    function psCryptoRecoupement(annee) { return recoupementsCrypto[annee] || null; }
+
+    /* Plafond général du quotient familial, par demi-part supplémentaire, recoupé
+       au BOFiP BOI-IR-LIQ-20-20-20 le 16/10/2026 : 1 678 € « à compter de
+       l'imposition des revenus de l'année 2022 », 1 759 € pour 2023, 1 791 € pour
+       2024, 1 807 € pour 2025. 2022 et 2024 portaient la valeur 2023 reconduite.
+       2026 reste provisoire : rien n'est publié pour les revenus 2026. */
+    var PLAFOND_QF_GENERAL = { 2022: 1678, 2023: 1759, 2024: 1791, 2025: 1807, 2026: 1807 };
     function plafondQF(annee) {
         var p = paramsActifs(annee);
         if (p) return p.quotient_familial.plafond_general_par_demi_part;
@@ -297,11 +412,15 @@
     }
 
     function abattement10(salaire, annee) {
-        if (!paramsActifs(annee) && (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined))
+        /* Plancher et plafond : révision publiée, aide officielle du millésime
+           collectée, ou à défaut constante embarquée. Un millésime futur (2027 et
+           suivants) n'a pas de constante : seule sa collecte l'ouvre. */
+        var frais = fraisOfficiels[annee] && fraisOfficiels[annee].abatt;
+        if (!paramsActifs(annee) && !frais &&
+            (PLANCHER_ABATTEMENT_10[annee] === undefined || PLAFOND_ABATTEMENT_10[annee] === undefined))
             throw new Error('Aucun abattement 10 % pour les revenus ' + annee + '.');
         var sal = Math.max(0, U.num(salaire, 0));
         if (sal <= 0) return 0;
-        var frais = fraisOfficiels[annee] && fraisOfficiels[annee].abatt;
         var plancher = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plancher : frais ? frais.min : PLANCHER_ABATTEMENT_10[annee];
         var plafond = paramsActifs(annee) ? paramsActifs(annee).abattement_10.plafond : frais ? frais.max : PLAFOND_ABATTEMENT_10[annee];
         return euro2025(Math.min(Math.max(sal * (paramsActifs(annee) ? paramsActifs(annee).abattement_10.taux : TAUX_ABATTEMENT_SALAIRES), Math.min(sal, plancher)), plafond), annee);
@@ -355,12 +474,14 @@
     }
 
     function fraisKilometriques(km, cv, electrique, annee) {
-        if (!paramsActifs(annee) && !BAREME_KM_PAR_ANNEE[annee])
+        /* Même règle : révision publiée, barème officiel du millésime collecté, ou
+           constante embarquée. Un millésime futur s'ouvre par sa seule collecte. */
+        var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
+        if (!paramsActifs(annee) && !sourceKm && !BAREME_KM_PAR_ANNEE[annee])
             throw new Error('Aucun barème kilométrique pour les revenus ' + annee + '.');
         var d = Math.max(0, U.num(km, 0));
         if (d <= 0) return { montant: 0, formule: '0 km' };
         var cle = Math.min(Math.max(Math.round(U.num(cv, 5)), 3), 7);
-        var sourceKm = !paramsActifs(annee) && fraisOfficiels[annee] && fraisOfficiels[annee].km;
         if (annee >= 2026 && !sourceKm && !paramsActifs(annee))
             throw new Error('Barème kilométrique DGFiP des revenus ' + annee + ' non disponible.');
         var f = paramsActifs(annee) ? paramsActifs(annee).bareme_km[cle]
@@ -487,10 +608,16 @@
         var an = auj.getFullYear();
         var cible = anneeCible || an;
         var derniere = derniereAnnee();
-        if (an > derniere || cible > derniere) {
+        var simulables = annéesSimulables();
+        var borne = Math.max(derniere, simulables[simulables.length - 1]);
+        /* La garde porte sur le MILLÉSIME DEMANDÉ, pas sur l'année civile : en 2028
+           le millésime à déclarer est 2027, et c'est 2027 qui doit être nommé. Un
+           millésime connu mais non collecté tombe dans les branches suivantes, qui
+           disent exactement ce qui manque. */
+        if (cible > borne) {
             return {
-                disponible: true, derniere_annee: derniere, url: URL_MAJ_BAREMES,
-                message: 'Revenus ' + Math.max(an, cible) + ' absents (dernier millésime : ' + derniere
+                disponible: true, derniere_annee: borne, url: URL_MAJ_BAREMES,
+                message: 'Revenus ' + cible + ' absents (dernier millésime : ' + borne
                     + '). Vérifiez leur publication officielle avant tout ajout.'
             };
         }
@@ -514,8 +641,8 @@
         return {
             disponible: false, derniere_annee: derniere, url: URL_MAJ_BAREMES,
             message: 'Constantes intégrées jusqu’aux revenus ' + derniere + ' (PFU titres '
-                + U.nombre(tauxPFU(derniere) * 100, 1) + ' %). '
-                + 'Cela ne prouve ni l’exactitude des règles ni l’absence de rectification.'
+                + U.nombre(tauxPFU(derniere) * 100, 1) + ' % — ' + (PROVENANCE_PS[derniere] || 'provenance non documentée')
+                + '). Cela ne prouve ni l’exactitude des règles ni l’absence de rectification.'
         };
     }
 
@@ -645,10 +772,11 @@
     }
 
     function ajouterManquants(liste, ajout) {
-        var vus = {};
-        liste.forEach(function (m) { vus[m.devise + '|' + m.date] = 1; });
+        var vus = Object.create(null);
+        function cle(m) { return m.devise + '|' + m.date + '|' + (m.actif || ''); }
+        liste.forEach(function (m) { vus[cle(m)] = 1; });
         ajout.forEach(function (m) {
-            if (!vus[m.devise + '|' + m.date]) { vus[m.devise + '|' + m.date] = 1; liste.push(m); }
+            if (!vus[cle(m)]) { vus[cle(m)] = 1; liste.push(m); }
         });
         return liste;
     }
@@ -662,8 +790,16 @@
     }
 
     function vide2074(annee) {
-        return { annee: annee, operations: [], par_actif: [], ligne_905: 0, ligne_913: 0,
-            bilan_net: 0, mv_anterieures_reportables: 0, case_3vg: 0, case_3vh: 0, cadre_11: [] };
+        return { annee: annee, operations: [], par_actif: [],
+            // Report officiel : les totaux de la ligne 524 vont ligne 903 du cadre
+            // 900, en colonne Plus-value ou Moins-value. La ligne 905 du même cadre
+            // concerne les profits sur instruments financiers à terme ; la ligne
+            // 913 est le TOTAL du cadre, pas le total des moins-values seules.
+            // Les anciennes clés ligne_905/ligne_913 étaient mal nommées.
+            ligne_903_pv: 0, ligne_903_mv: 0,
+            bilan_net: 0, mv_anterieures_reportables: 0, case_3vg: 0, case_3vh: 0,
+            cadre_10: [], cadre_11: [], cadre_12: [], ligne_1164: 0,
+            abattementsNonVerifies: true };
     }
 
     function vide2086(annee) {
@@ -671,8 +807,8 @@
             plus_value_globale_224: 0, exonere_305: false, case_3an: 0, case_3bn: 0 };
     }
 
-    /* Formulaire 2074 : synthèse 905/913, cadre 5 ligne par ligne et cadre 11
-       (imputation des moins-values, colonnes A à E). */
+    /* Formulaire 2074 : résultats des cessions à reporter au cadre 900 ligne 903
+       (PV/MV), puis imputation des moins-values au cadre 11, colonnes A à H. */
     function detail2074(txs, annee, taux) {
         var soldes = {}, operations = [], pvParAnnee = {}, manquants = [];
 
@@ -680,31 +816,45 @@
             if (CLASSES_2074.indexOf(PF.modele.classeDe(t.ticker)) < 0) return;
             var an = Number(String(t.date).slice(0, 4));
             var net = montantNetEur(t, taux);
-            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: String(t.date) }]); return; }
+            if (net === null) { manquants = ajouterManquants(manquants,
+                [{ devise: t.devise, date: String(t.date), actif: t.ticker }]); return; }
             var qte = U.num(t.quantite, 0);
-            if (!soldes[t.ticker]) soldes[t.ticker] = { qte: 0, cout: 0 };
+            if (!soldes[t.ticker]) soldes[t.ticker] = { qte: 0, cout: 0, fraisAcq: 0, ancien: false };
             var etat = soldes[t.ticker];
 
             if (estAchat(t)) {
                 etat.qte += qte;
                 etat.cout += net;
+                etat.fraisAcq += U.num(t.frais, 0) * tauxTransaction(t, taux);
+                if (an < 2018) etat.ancien = true;
                 return;
             }
-            if (etat.qte <= 1e-9) return;                  // vente sans lot : on ne invente pas de PRU
+            if (qte <= 0 || etat.qte + 1e-9 < qte) {
+                manquants = ajouterManquants(manquants,
+                    [{ devise: 'position non justifiée', date: String(t.date), actif: t.ticker }]);
+                return; // pas de coût d'acquisition inventé pour une vente sans lot
+            }
 
             var pru = etat.cout / etat.qte;
             var acq = pru * qte;
+            var fraisAcq = etat.fraisAcq / etat.qte * qte;
+            var brut = qte * U.num(t.cours, 0) * tauxTransaction(t, taux);
+            var fraisCession = U.num(t.frais, 0) * tauxTransaction(t, taux);
+            var ancien = etat.ancien;
             var pv = net - acq;
             etat.qte = Math.max(0, etat.qte - qte);
             etat.cout = Math.max(0, etat.cout - acq);
-            if (etat.qte <= 1e-6) { etat.qte = 0; etat.cout = 0; }
+            etat.fraisAcq = Math.max(0, etat.fraisAcq - fraisAcq);
+            if (etat.qte <= 1e-6) { etat.qte = 0; etat.cout = 0; etat.fraisAcq = 0; etat.ancien = false; }
 
             pvParAnnee[an] = (pvParAnnee[an] || 0) + pv;
             if (an === annee) {
                 operations.push({
                     actif: t.ticker, date: String(t.date), quantite: qte,
                     pru_unitaire_eur: pru, acq_globale_eur: acq,
-                    cession_globale_eur: net, plus_value_eur: pv
+                    acq_hors_frais_eur: acq - fraisAcq, frais_acq_eur: fraisAcq,
+                    cession_brute_eur: brut, frais_cession_eur: fraisCession,
+                    cession_globale_eur: net, acquisition_avant_2018: ancien, plus_value_eur: pv
                 });
             }
         });
@@ -730,26 +880,27 @@
         files = files.filter(function (f) { return annee - f[0] <= 10 && f[1] > 1e-6; });
         var mvAnterieures = U.arrondi(files.reduce(function (s, f) { return s + f[1]; }, 0), 2);
 
-        // --- Cadre 5 : une ligne de 511 à 524 par titre, agrégée sur l'année
-        var parActif = [], actifs = {};
-        operations.forEach(function (op) { actifs[op.actif] = 1; });
-        Object.keys(actifs).sort().forEach(function (actif) {
-            var ops = operations.filter(function (o) { return o.actif === actif; });
-            var qteTot = ops.reduce(function (s, o) { return s + o.quantite; }, 0);
-            var cessionTot = ops.reduce(function (s, o) { return s + o.cession_globale_eur; }, 0);
-            var acqTot = ops.reduce(function (s, o) { return s + o.acq_globale_eur; }, 0);
-            var pvTot = ops.reduce(function (s, o) { return s + o.plus_value_eur; }, 0);
-            parActif.push({
-                actif: actif, nb_operations: ops.length,
-                ligne_511: actif + ' (agrégé annuel) — Swissquote Bank Europe SA',
-                ligne_512: '31/12/' + annee,
-                ligne_514: qteTot > 0 ? cessionTot / qteTot : 0,
-                ligne_515: qteTot, ligne_516: cessionTot, ligne_517: 0, ligne_518: cessionTot,
-                ligne_520: qteTot > 0 ? acqTot / qteTot : 0,
-                ligne_521: acqTot, ligne_522: 0, ligne_523: acqTot, ligne_524: pvTot
-            });
+        /* Cadre 510 : une colonne par CESSION, avec sa vraie date. Agréger des
+           ventes à prix différents sous la date fictive 31/12 faussait 512,
+           514 et 516. Les frais de cession et d'acquisition restent distincts
+           sur les lignes 517 et 522 ; 518 et 523 sont les montants nets. */
+        var parActif = operations.map(function (op) {
+            return {
+                actif: op.actif, nb_operations: 1,
+                ligne_511: op.actif + ' — intermédiaire financier à confirmer',
+                ligne_512: op.date,
+                ligne_514: op.cession_brute_eur / op.quantite,
+                ligne_515: op.quantite, ligne_516: op.cession_brute_eur,
+                ligne_517: op.frais_cession_eur, ligne_518: op.cession_globale_eur,
+                ligne_520: op.acq_hors_frais_eur / op.quantite,
+                ligne_521: op.acq_hors_frais_eur, ligne_522: op.frais_acq_eur,
+                ligne_523: op.acq_globale_eur, ligne_524: op.plus_value_eur,
+                acquisition_avant_2018: op.acquisition_avant_2018
+            };
         });
-
+        var abattementPossible = parActif.some(function (op) {
+            return op.ligne_524 > 0 && op.acquisition_avant_2018;
+        });
         var l905 = parActif.reduce(function (s, a) { return s + (a.ligne_524 > 0 ? a.ligne_524 : 0); }, 0);
         var l913 = Math.abs(parActif.reduce(function (s, a) { return s + (a.ligne_524 < 0 ? a.ligne_524 : 0); }, 0));
         var bilanNet = U.arrondi(l905 - l913, 2);
@@ -757,30 +908,71 @@
         // on n'en présente aucun chiffre.
         if (manquants.length) return Object.assign(vide2074(annee), { indisponible: manquants });
 
-        // --- Cadre 11 (bloc 1133) : colonnes A à E
-        var cadre11 = [], mvRestante = l913, mvAntRestante = mvAnterieures;
+        /* Cadre 10 — stock de moins-values antérieures au 31.12 de l'année
+           PRÉCÉDENTE, avant toute imputation de l'année. C'est l'état que la
+           déclaration précédente a laissé ; il se recopie tel quel. */
+        var cadre10 = files.map(function (f) { return { annee: f[0], montant: U.arrondi(f[1], 2) }; });
+
+        /* Cadre 11 — le tableau officiel a HUIT colonnes, pas cinq :
+             A  plus-values de l'année avant abattement
+             B  moins-values de l'année imputées
+             C  A − B (ou report de A si B = 0)
+             D  moins-values antérieures imputées
+             E  C − D (ou report de C si D = 0)
+             F  abattement de droit commun        — NON CALCULÉ
+             G  abattement renforcé               — NON CALCULÉ
+             H  E − F − G, plus-value imposable
+           F et G sont réservés aux titres acquis ou souscrits avant le 01/01/2018
+           et à l'option 2OP. Ce moteur ne vérifie pas la date d'acquisition : il
+           ne les calcule donc pas et le dit, plutôt que de les mettre à zéro en
+           silence — un zero affirmé à tort réduirait l'impôt affiché. */
+        var cadre11 = [], mvRestante = l913, i, pris;
         parActif.forEach(function (a) {
             if (a.ligne_524 <= 0) return;
             var gain = a.ligne_524;
             var imput = Math.min(gain, mvRestante);
             mvRestante = Math.max(0, mvRestante - imput);
             var colC = gain - imput;
-            var imputAnt = Math.min(colC, mvAntRestante);
-            mvAntRestante = Math.max(0, mvAntRestante - imputAnt);
+            // Les moins-values antérieures s'imputent sur le gain subsistant, la
+            // plus ancienne d'abord : c'est ce suivi, année par année, qui alimente
+            // le cadre 12.
+            var imputAnt = 0;
+            for (i = 0; i < files.length && colC - imputAnt > 1e-9; i++) {
+                if (files[i][1] <= 1e-9) continue;
+                pris = Math.min(colC - imputAnt, files[i][1]);
+                files[i][1] -= pris;
+                imputAnt += pris;
+            }
             cadre11.push({
                 actif: a.actif,
                 col_a: U.arrondi(gain, 2), col_b: U.arrondi(imput, 2), col_c: U.arrondi(colC, 2),
-                col_d: U.arrondi(imputAnt, 2), col_e: U.arrondi(colC - imputAnt, 2)
+                col_d: U.arrondi(imputAnt, 2), col_e: U.arrondi(colC - imputAnt, 2),
+                // F/G/H ne sont chiffrables que si aucun lot potentiellement
+                // éligible à l'abattement (acquis avant 2018) n'est présent.
+                col_f: abattementPossible ? null : 0,
+                col_g: abattementPossible ? null : 0,
+                col_h: abattementPossible ? null : U.arrondi(colC - imputAnt, 2)
             });
         });
+        files = files.filter(function (f) { return f[1] > 1e-6; });
+        // Ligne 1164 : total de la colonne D des lignes 1131 à 1161.
+        var ligne1164 = U.arrondi(cadre11.reduce(function (s, l) { return s + l.col_d; }, 0), 2);
+        /* Cadre 12 — stock restant au 31.12 de l'année des revenus. Une moins-value
+           nette de l'année s'y ajoute : elle sera imputable sur les plus-values de
+           même nature des dix années suivantes. */
+        var cadre12 = files.map(function (f) { return { annee: f[0], montant: U.arrondi(f[1], 2) }; });
+        if (bilanNet < 0) cadre12.push({ annee: annee, montant: U.arrondi(Math.abs(bilanNet), 2) });
+        cadre12.sort(function (a, b) { return a.annee - b.annee; });
 
         return {
             annee: annee, operations: operations, par_actif: parActif,
-            ligne_905: U.arrondi(l905, 2), ligne_913: U.arrondi(l913, 2), bilan_net: bilanNet,
+            ligne_903_pv: U.arrondi(l905, 2), ligne_903_mv: U.arrondi(l913, 2), bilan_net: bilanNet,
             mv_anterieures_reportables: mvAnterieures,
             case_3vg: bilanNet > 0 ? U.arrondi(Math.max(0, bilanNet - mvAnterieures), 2) : 0,
             case_3vh: bilanNet < 0 ? U.arrondi(Math.abs(bilanNet), 2) : 0,
-            cadre_11: cadre11
+            case_3sg: null,                       // abattement : non calculé, jamais 0 affirmé
+            cadre_10: cadre10, cadre_11: cadre11, cadre_12: cadre12, ligne_1164: ligne1164,
+            abattementsNonVerifies: abattementPossible
         };
     }
 
@@ -800,7 +992,9 @@
         });
         if (!demandes.length) return Promise.resolve({});
         return Promise.all(demandes.map(function (d) {
-            return PF.net.cours(d.ticker, d.date).then(function (c) { return [d.ticker + '|' + d.date, c]; });
+            return Promise.resolve().then(function () { return PF.net.cours(d.ticker, d.date); })
+                .then(function (c) { return [d.ticker + '|' + d.date, c]; },
+                    function () { return [d.ticker + '|' + d.date, null]; });
         })).then(function (paires) {
             // Un cours absent reste absent : detail2086 le signale au lieu de
             // retirer la position de la valeur globale.
@@ -822,8 +1016,14 @@
             var q = U.num(t.quantite, 0);
             var iso = String(t.date);
 
-            if (net === null) { manquants = ajouterManquants(manquants, [{ devise: t.devise, date: iso }]); return; }
+            if (net === null) { manquants = ajouterManquants(manquants,
+                [{ devise: t.devise, date: iso, actif: t.ticker }]); return; }
             if (estAchat(t)) { coutTotal += net; qtes[t.ticker] = (qtes[t.ticker] || 0) + q; return; }
+            if (q <= 0 || (qtes[t.ticker] || 0) + 1e-9 < q) {
+                manquants = ajouterManquants(manquants,
+                    [{ devise: 'position crypto non justifiée', date: iso, actif: t.ticker }]);
+                return; // aucune valeur globale ni moins-value fabriquée
+            }
 
             // 2086 : 213/217 (brut hors frais) sert au quotient de capital ;
             // 218 (net des frais) sert au premier terme de la plus-value et
@@ -841,9 +1041,11 @@
                     var c = prix[tk + '|' + iso];
                     var tUsd = PF.util.tauxValide(taux['USD|' + iso]);
                     if (!PF.util.estNombre(c) || !(c > 0)) {
-                        manquants = ajouterManquants(manquants, [{ devise: 'cours ' + tk, date: iso }]);
+                        manquants = ajouterManquants(manquants,
+                            [{ devise: 'cours ' + tk, date: iso, actif: t.ticker }]);
                     } else if (tUsd === null) {
-                        manquants = ajouterManquants(manquants, [{ devise: 'USD', date: iso }]);
+                        manquants = ajouterManquants(manquants,
+                            [{ devise: 'USD', date: iso, actif: t.ticker }]);
                     } else {
                         valeurGlobale += qte * c * tUsd;
                     }
@@ -862,9 +1064,13 @@
                     actif: t.ticker, date: iso, quantite: q,
                     ligne_212: U.arrondi(valeurGlobale, 2),
                     ligne_213: U.arrondi(brut, 2), ligne_214: U.arrondi(frais, 2),
-                    ligne_217: U.arrondi(brut, 2), ligne_218: U.arrondi(net, 2),
+                    ligne_215: U.arrondi(brut - frais, 2),
+                    // Les écritures ne décrivent pas les échanges avec soulte :
+                    // ne PAS annoncer 0 comme une valeur certaine sur l'imprimé.
+                    ligne_216: null, ligne_217: U.arrondi(brut, 2), ligne_218: U.arrondi(net, 2),
                     ligne_220: U.arrondi(l220, 2), ligne_221: U.arrondi(l221, 2),
-                    ligne_223: U.arrondi(l223, 2),
+                    ligne_222: null, ligne_223: U.arrondi(l223, 2),
+                    hypothese_sans_soulte: true,
                     fraction_capital: U.arrondi(fraction, 2), ligne_224: U.arrondi(l224, 2)
                 });
             }
@@ -900,7 +1106,10 @@
 
         return Promise.all(Object.keys(besoin).map(function (cle) {
             var p = cle.split('|');
-            return PF.net.taux(p[0], p[1], 'EUR').then(function (v) { return [cle, v]; });
+            // Un échec sur un cours crypto ne retire pas les titres calculables.
+            // Null est ensuite signalé comme manquant, jamais remplacé par 1.
+            return Promise.resolve().then(function () { return PF.net.taux(p[0], p[1], 'EUR'); })
+                .then(function (v) { return [cle, v]; }, function () { return [cle, null]; });
         })).then(function (paires) {
             var taux = {};
             paires.forEach(function (p) { taux[p[0]] = PF.util.tauxValide(p[1]); });
@@ -910,19 +1119,36 @@
                contre les écritures retenues avant elle (ordre de lecture) : une vente
                excédentaire fabriquerait un PRU faux au 2074 et une cession fictive au
                2086. Elle est écartée ET annoncée, jamais calculée en silence. */
-            var ventesExcedentaires = [];
+            var ventesExcedentaires = [], ventesInvalidesTitres = [], ventesInvalidesCrypto = [];
             var retenues = [];
             txs.forEach(function (t) {
                 var exces = PF.portefeuille.erreurVenteExcedentaire(retenues, t, {});
-                if (exces) { ventesExcedentaires.push(exces); return; }
+                if (exces) {
+                    ventesExcedentaires.push(exces);
+                    // Ne PAS présenter le total des autres ventes de cette
+                    // catégorie comme un 903/224 complet : la vente rejetée
+                    // fausserait le report. L'autre catégorie reste autonome.
+                    var classe = PF.modele.classeDe(t.ticker);
+                    var manque = { devise: 'position de vente non justifiée',
+                        date: String(t.date), actif: t.ticker };
+                    if (CLASSES_2074.indexOf(classe) >= 0) ventesInvalidesTitres.push(manque);
+                    if (classe === 'crypto') ventesInvalidesCrypto.push(manque);
+                    return;
+                }
                 retenues.push(t);
             });
 
-            var t2074 = detail2074(retenues, annee, taux);
-            return besoinsPrixCrypto(retenues, annee).then(function (prix) {
-                var t2086 = detail2086(retenues, annee, taux, prix);
-                // Le bilan entier attend le cours : un 2074 juste et un 2086 faux
-                // ne se présentent pas ensemble comme une déclaration complète.
+            var t2074 = ventesInvalidesTitres.length
+                ? Object.assign(vide2074(annee), { indisponible: ventesInvalidesTitres })
+                : detail2074(retenues, annee, taux);
+            var attenteCrypto = ventesInvalidesCrypto.length ? Promise.resolve({})
+                : besoinsPrixCrypto(retenues, annee);
+            return attenteCrypto.then(function (prix) {
+                var t2086 = ventesInvalidesCrypto.length
+                    ? Object.assign(vide2086(annee), { indisponible: ventesInvalidesCrypto })
+                    : detail2086(retenues, annee, taux, prix);
+                // Un segment incomplet bloque le bilan IR, sans masquer les
+                // montants chiffrables de l'autre segment dans ses cases.
                 var indisponible = ajouterManquants(
                     ajouterManquants([], t2074.indisponible || []), t2086.indisponible || []);
                 return { t2074: t2074, t2086: t2086, indisponible: indisponible,
@@ -1115,7 +1341,7 @@
         };
     }
 
-    var anneeFiscale = null;
+    var anneeFiscale = null, sequenceVue = 0;
 
     function anneeEnCours() {
         if (anneeFiscale) return anneeFiscale;
@@ -1129,6 +1355,31 @@
     }
     // Un compte rendu utile sur téléphone doit tenir en quelques lignes.
     // L'audit intégral reste accessible, mais n'est plus affiché d'emblée.
+    /* Une clause, pas une page : le résumé copiable doit rester sous 600
+       caractères et sans adresse. Absente tant qu'aucune historisation n'a été
+       tentée (rapport antérieur, module non chargé). */
+    /* Le motif brut peut contenir l'adresse renvoyée par le serveur : le résumé
+       copiable doit rester court et sans URL, donc on la remplace et on tronque.
+       Sans la raison, « NON historisé » ne permet aucun diagnostic. */
+    function raisonCourte(motif) {
+        var m = String(motif || 'raison inconnue')
+            .replace(/https?:\/\/[^\s'"]+/gi, '<adresse>').replace(/\s+/g, ' ').trim();
+        return m.length > 100 ? m.slice(0, 97) + '…' : m;
+    }
+
+    function clauseSupabase(h) {
+        if (!h || !h.etat) return '';
+        var ecrits = (h.ajoutees ? h.ajoutees.length : 0) + (h.corrigees ? h.corrigees.length : 0);
+        if (h.etat === 'historisée') return ' Supabase : ' + ecrits + ' document(s) historisé(s)'
+            + (h.ignorees && h.ignorees.length ? ', ' + h.ignorees.length + ' inchangé(s)' : '') + '.';
+        if (h.etat === 'inchangée') return ' Supabase : déjà historisé à l’identique.';
+        if (h.etat === 'rien à historiser') return ' Supabase : rien à historiser.';
+        // Un échec peut survenir APRÈS des écritures réussies : append-only, elles
+        // restent en base. Le taire ferait croire à tort que rien n'est parti.
+        return ' Supabase : ' + (ecrits ? ecrits + ' document(s) écrit(s), puis ' : '')
+            + 'NON historisé — ' + raisonCourte(h.motif) + '.';
+    }
+
     function resumeRapport(annee, r) {
         if (!r || typeof r !== 'object') return String(r || '');
         var boi = r.boi && r.boi.valeurs || {}, frais = r.frais && r.frais.valeurs || {};
@@ -1145,7 +1396,8 @@
             + ', notice 2086 ' + lu(crypto.notice) + ', brochure crypto ' + lu(crypto.brochure)
             + ', RCM ' + lu(rcm.rcm) + ', charges/CSG ' + lu(rcm.charges)
             + '. RCM personnels, PS crypto 2025 et déduction CSG du foyer non vérifiés ; '
-            + 'aucun nouveau taux activé. Bascule DGFiP totale : non.';
+            + 'aucun nouveau taux activé. Bascule DGFiP totale : non.'
+            + clauseSupabase(r.historique);
     }
     function htmlRapport(annee) {
         if (!rapportsControle[annee]) return '';
@@ -1157,31 +1409,54 @@
             + '</div></details>';
     }
     function vue(ctx) {
+        // Une ancienne lecture asynchrone ne peut pas remplir le nouvel écran
+        // (autre année, rechargement ou autre compte) avec ses anciens montants.
+        var sequence = ++sequenceVue;
         var prefait = ctx && ctx.config ? appliquerConfig(ctx) : false;
         var r = PF.store.reglages();
         var annee = anneeEnCours();
         var out = '';
         var maj = verifierMaj(annee);
 
-        out += '<div class="chips">' + annees().map(function (a) {
+        out += '<div class="chips">' + annéesSimulables().map(function (a) {
             return '<button class="chip' + (a === annee ? ' actif' : '') + '" data-fisc="annee" data-valeur="' + a + '">Revenus ' + a + '</button>';
         }).join('') + '</div>';
-        if (!BAREMES[annee] || (annee >= 2026 && (!officiels[annee] ||
-            !officiels[annee].ir || !officiels[annee].decote || !officiels[annee].qf ||
-            !fraisOfficiels[annee] || !fraisOfficiels[annee].repas || !fraisOfficiels[annee].km ||
-            !fraisOfficiels[annee].abatt))) {
+        // Une année non publiée ne figure pas dans les puces de simulation. Elle
+        // reste pourtant accessible comme guide des FORMULAIRES (sans faux barème
+        // ni cases proclamées officielles). La saisie couvre toute année à venir.
+        out += '<label class="st" for="fiscAnneeGuide">Autre année des revenus (2025 et suivantes) : </label>'
+            + '<input id="fiscAnneeGuide" type="number" min="2025" max="9999" step="1" inputmode="numeric"'
+            + ' value="' + (annee >= 2025 ? annee : 2025) + '" style="width:90px">'
+            + '<button class="btn ghost" data-fisc="annee-guide">Voir les formulaires</button>';
+        if (!annéeSimulable(annee)) {
+            // Les PARAMÈTRES d'IR ne sont pas publiés, mais le plan de déclaration
+            // reste consultable : ne pas supprimer toute la section formulaires.
+            // Les éventuelles PV calculées sur les transactions connues sont
+            // affichées à part comme ESTIMATION, sans numéros « officiels » futurs.
+            if (ctx && Array.isArray(ctx.transactions) && ctx.transactionsChargees !== false) {
+                bilanCessions(ctx, annee).then(function (b) {
+                    if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
+                    var f = document.getElementById('fiscFormulaires');
+                    if (f && f.getAttribute('data-annee') === String(annee))
+                        f.innerHTML = formulaireGuide(annee, {
+                            t2074: b.t2074, t2086: b.t2086, comptes: COMPTES_ETRANGER,
+                            erreur: b.indisponible.length ? 'Cours ou position manquante' : null
+                        });
+                }).catch(function () { /* garde le guide : aucun montant inventé */ });
+            }
             return out + '<div class="info"><b>Revenus ' + UI.h(annee)
                 + ' : calcul fiscal indisponible.</b> IR, décote, plafond QF ou frais salariés officiels de ce millésime non réunis. '
                 + 'Le barème isolé d’une source externe ne suffit pas à produire un bilan ; '
                 + 'les chiffres d’une autre année ne sont pas réutilisés. Déclaration ' + UI.h(annee + 1) + ' ≠ revenus ' + UI.h(annee) + '.'
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="collecter">'
                 + '⟳ Mettre à jour les données fiscales disponibles</button></div>'
-                + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus 2023 à 2026 (DGFiP)</button></div>'
+                + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="collecter-tout">Vérifier les revenus ' + UI.h(libelléPlage()) + ' (DGFiP)</button></div>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + htmlRapport(annee)
-                + '</div>' + Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; })
-                    .sort().map(function (an) { return '<div class="st" style="margin-top:10px;overflow-wrap:anywhere">'
-                        + htmlRapport(an) + '</div>'; }).join('') + '</div>';
+                + htmlOngletCollecte(annee) + '</div></div>'
+                + '<div class="titre">2. Vos formulaires de déclaration ' + UI.h(annee + 1)
+                + ' <span class="n">revenus ' + UI.h(annee) + '</span></div>'
+                + '<div id="fiscFormulaires" data-annee="' + UI.h(annee) + '">'
+                + formulaireGuide(annee, { comptes: COMPTES_ETRANGER }) + '</div>';
         }
 
         // Le cache d'accueil ne contient aucune transaction : tant que la
@@ -1193,16 +1468,23 @@
                 + 'La R2 sera évaluée après synchronisation des transactions ; réessayez ⟳ si le chargement a échoué. '
                 + 'Les documents publics DGFiP peuvent être consultés séparément.</div>'
                 + '<button class="btn sec" data-fisc="collecter">Vérifier cette année (DGFiP)</button>'
-                + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+                + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
                 + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-                + htmlRapport(annee) + '</div>';
+                + htmlOngletCollecte(annee) + '</div>'
+                + '<div class="titre">2. Vos formulaires de déclaration ' + UI.h(annee + 1)
+                + ' <span class="n">revenus ' + UI.h(annee) + '</span></div>'
+                + '<div id="fiscFormulaires" data-annee="' + UI.h(annee) + '">'
+                + formulaireGuide(annee, { comptes: COMPTES_ETRANGER,
+                    erreur: 'Écritures du portefeuille non chargées' }) + '</div>';
         }
 
         // --- Bandeau de mise à jour
-        if (revisionActive(annee)) {
-            out += '<div class="ok-vert">Révision publiée des paramètres ' + UI.h(annee)
-                + ' appliquée automatiquement depuis votre compte Supabase. Les montants personnels, le PAS officiel et les cas particuliers restent des estimations ou hors périmètre.</div>';
-        } else {
+        // Le bandeau « Révision publiée des paramètres … » est retiré à la
+        // demande du propriétaire (2.2.6). Il doublonnait avec le message
+        // « Paramètres publiés pour les revenus … » de verifierMaj(), retiré
+        // lui aussi. L'état R2 reste lisible dans le résumé copiable
+        // (« R2 publiée prioritaire ») et dans l'onglet de mise à jour.
+        if (!revisionActive(annee)) {
             var valeurDGFiP = officiels[annee] || {};
             var utilises = [];
             if (valeurDGFiP.ir) utilises.push('barème IR');
@@ -1220,7 +1502,12 @@
             out += '<div class="info"><b>Vérification fiscale requise.</b> ' + UI.h(maj.message)
                 + '<div style="margin-top:8px"><button class="btn sec" data-fisc="ouvrir-lien">Ouvrir l’assistant de mise à jour</button></div>'
                 + '<div style="margin-top:8px"><button class="btn ghost" data-fisc="prompt">Voir le prompt à envoyer à l’IA</button></div></div>';
-        } else {
+        } else if (!revisionActive(annee)) {
+            // Le message « Paramètres publiés pour les revenus … » — celui que
+            // renvoie verifierMaj() quand une R2 est active — est retiré à la
+            // demande du propriétaire (2.2.6). Les AUTRES messages de
+            // verifierMaj() restent affichés : millésime absent, constantes
+            // intégrées, valeurs DGFiP relues.
             out += '<div class="ok-vert">' + UI.h(maj.message) + '</div>';
         }
         // Collectes sourcées partielles ; une révision complète garde priorité.
@@ -1228,26 +1515,32 @@
             + '<b>Mise à jour fiscale — revenus ' + UI.h(annee) + '</b>'
             + '<div class="st" style="margin:6px 0">Sources DGFiP uniquement. Collecte partielle : les paramètres non vérifiés restent signalés, les révisions précédentes conservées. Résumé ci-dessous ; détails disponibles au besoin.</div>'
             + '<button class="btn sec" data-fisc="collecter">⟳ Vérifier cette année (DGFiP)</button>'
-            + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier 2023 à 2026</button>'
+            + '<button class="btn ghost" data-fisc="collecter-tout">Vérifier ' + UI.h(libelléPlage()) + '</button>'
             + '<div id="etatCollecteFiscale" class="st" style="margin-top:6px;overflow-wrap:anywhere">'
-            + htmlRapport(annee)
-            + '</div></div>';
-        var autresRapports = Object.keys(rapportsControle).filter(function (an) { return Number(an) !== annee; });
-        if (autresRapports.length) out += '<div class="card tight"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
-            + autresRapports.sort().map(function (an) { return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
-                + htmlRapport(an) + '</div>'; }).join('') + '</div>';
+            + htmlOngletCollecte(annee) + '</div></div>';
         if (annee === 2026 && !revisionActive(annee)) {
             out += '<div class="info">Revenus 2026 : décote et autres hypothèses provisoires, à revérifier pour la déclaration 2027.</div>';
         }
-        out += '<div class="info">Quotient familial : plafond général seulement. Si vous êtes parent isolé ou bénéficiez d’une demi-part particulière, ne vous fiez pas au bilan ni à la recommandation 2OP.</div>';
+        // Le bandeau « Quotient familial : plafond général seulement … » est
+        // retiré à la demande du propriétaire (2.2.6). Sa partie « personnalisée »
+        // (casParticuliersQF) ne s'est JAMAIS affichée : `enfants` était déclaré
+        // plus bas dans la fonction, donc `var` le faisait valoir undefined à
+        // l'appel, et aucun drapeau (parentIsole, invalidite…) n'était transmis —
+        // blocages et avertissements restaient vides dans tous les cas. Le module
+        // fiscal_gardes_foyer.js reste chargé, exporté et testé.
 
         // --- 1. Paramètres fiscaux
         var couple = estCouple(r.statutFiscal);
-        out += '<div class="info">Titres et cessions : ce portefeuille appartient uniquement à son propriétaire. '
-            + (couple ? 'Le mariage ne rend pas le conjoint codétenteur ; l’IR utilise cependant les revenus saisis pour les deux déclarants. ' : '')
-            + 'Les options 2OP/3CN et le seuil de cessions crypto concernent tout le foyer : vérifier tout autre revenu ou cession éventuel hors de ce portefeuille, sans en présumer l’existence.</div>';
+        // Le bandeau « Titres et cessions : ce portefeuille appartient uniquement
+        // à son propriétaire … » est retiré à la demande du propriétaire (2.2.6).
+        // L'avertissement sur le périmètre du FOYER n'est pas perdu : il subsiste
+        // dans la limite du comparateur 2OP (« 2OP est globale pour tous les RCM
+        // et gains mobiliers du foyer »), dans le bandeau du seuil crypto de 305 €
+        // (« Ce total ne suffit pas à prouver l'exonération du foyer fiscal ») et
+        // dans portee2086Foyer().
         var f1 = fraisReelsDeclarant(r, 1, annee);
         var f2 = couple ? fraisReelsDeclarant(r, 2, annee) : null;
+        var baseConnue = casesBaseConnues(f1, f2);
 
         out += '<div class="titre">1. Vos paramètres fiscaux <span class="n">cliquez pour modifier</span></div>';
 
@@ -1300,35 +1593,40 @@
         // --- 2. Formulaires (remplis après lecture des écritures de l'année)
         out += '<div class="titre">2. Vos formulaires de déclaration ' + (annee + 1)
             + ' <span class="n">revenus ' + annee + '</span></div>';
-        out += '<div id="fiscFormulaires"><div class="card"><div class="vide" style="padding:14px">'
-            + 'Lecture de vos écritures ' + annee + ' en cours…</div></div></div>';
+        out += '<div id="fiscFormulaires" data-annee="' + UI.h(annee) + '">'
+            + formulaireGuide(annee, { comptes: COMPTES_ETRANGER, reglages: r, base: baseConnue,
+                erreur: 'Lecture des écritures en cours' }) + '</div>';
 
         // --- 3. Arbitrage, bilan et prélèvement à la source
         out += '<div class="titre">3. Impôt du foyer, arbitrage PFU / barème et taux à la source</div>';
         out += '<div id="fiscBilan"><div class="card"><div class="vide" style="padding:14px">Calcul en cours…</div></div></div>';
 
         bilanCessions(ctx, annee).then(function (b) {
+            if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
+            var sim = null, erreurSim = null;
             if (b.indisponible.length) {
-                var f0 = document.getElementById('fiscFormulaires');
-                if (f0) f0.innerHTML = formulairesIndisponibles(annee, b.indisponible);
-                var g0 = document.getElementById('fiscBilan');
-                if (g0) g0.innerHTML = bilanIndisponible(annee, b.indisponible);
-                return;
+                erreurSim = 'Cours ou positions manquants : ' + b.indisponible.map(libelleManquant).join(' ; ');
+            } else {
+                try {
+                    // L'IR peut nécessiter le précompte réel des intérêts. Son
+                    // absence ne doit PAS effacer les montants 2074/2086 déjà
+                    // calculés ni les intérêts saisis (2042/2047).
+                    sim = simulerFoyer({
+                        annee: annee, statut: r.statutFiscal, parts: r.partsFiscales,
+                        salaire1: r.salaireNetImposable1, salaire2: r.salaireNetImposable2,
+                        fraisReels1: U.estVrai(r.utiliserFraisReels1), km1: r.fraisKm1, cv1: r.cvFiscal1,
+                        joursRepas1: r.joursRepas1, elec1: U.estVrai(r.vehiculeElectrique1),
+                        fraisReels2: U.estVrai(r.utiliserFraisReels2), km2: r.fraisKm2, cv2: r.cvFiscal2,
+                        joursRepas2: r.joursRepas2, elec2: U.estVrai(r.vehiculeElectrique2),
+                        interetsEtrangers: r.interetsEtrangers, pays: r.paysEtranger,
+                        interetsPrecomptes: r['interetsPs' + annee] === 'oui' ? true
+                            : r['interetsPs' + annee] === 'non' ? false : null,
+                        bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
+                    });
+                } catch (err) { erreurSim = String(err && err.message || err); }
             }
-            var sim = simulerFoyer({
-                annee: annee, statut: r.statutFiscal, parts: r.partsFiscales,
-                salaire1: r.salaireNetImposable1, salaire2: r.salaireNetImposable2,
-                fraisReels1: U.estVrai(r.utiliserFraisReels1), km1: r.fraisKm1, cv1: r.cvFiscal1,
-                joursRepas1: r.joursRepas1, elec1: U.estVrai(r.vehiculeElectrique1),
-                fraisReels2: U.estVrai(r.utiliserFraisReels2), km2: r.fraisKm2, cv2: r.cvFiscal2,
-                joursRepas2: r.joursRepas2, elec2: U.estVrai(r.vehiculeElectrique2),
-                interetsEtrangers: r.interetsEtrangers, pays: r.paysEtranger,
-                interetsPrecomptes: r['interetsPs' + annee] === 'oui' ? true
-                    : r['interetsPs' + annee] === 'non' ? false : null,
-                bilanPvActions: b.t2074.bilan_net, pvCryptoImposable: b.t2086.case_3an
-            });
             var f = document.getElementById('fiscFormulaires');
-            if (f) {
+            if (f && f.getAttribute('data-annee') === String(annee)) {
                 var banniere = '';
                 if (b.ventes_excedentaires && b.ventes_excedentaires.length) {
                     banniere = '<div class="erreur" style="margin:0 0 10px">'
@@ -1336,27 +1634,28 @@
                         + 'aucun chiffre n’a été calculé dessus.<br>– '
                         + b.ventes_excedentaires.map(UI.h).join('<br>– ') + '</div>';
                 }
-                f.innerHTML = banniere + formulaires(annee, sim, b.t2074, b.t2086, r);
-                UI.lierAccordeons(f);
+                f.innerHTML = banniere + formulaires(annee, sim, b.t2074, b.t2086, r,
+                    baseConnue, erreurSim);
             }
             var g = document.getElementById('fiscBilan');
-            if (g) { g.innerHTML = bilanImpot(annee, sim, b.t2074, b.t2086); UI.lierAccordeons(g); }
+            if (g) {
+                if (sim) { g.innerHTML = bilanImpot(annee, sim, b.t2074, b.t2086); UI.lierAccordeons(g); }
+                else if (b.indisponible.length) g.innerHTML = bilanIndisponible(annee, b.indisponible);
+                else g.innerHTML = '<div class="erreur">Impôt du foyer indisponible : '
+                    + UI.h(erreurSim) + '. Vérifiez le précompte dans « Déclaration de base » ; '
+                    + 'les montants par titre restent visibles dans les imprimés.</div>';
+            }
         }).catch(function (err) {
-            /* Sans les cours de change du jour, les montants ne peuvent pas être
-               reconstitués : un formulaire à moitié rempli est pire qu'un
-               formulaire vide, on le dit au lieu de deviner. */
+            if (sequenceVue !== sequence || anneeEnCours() !== annee) return;
             var erreur = String(err && err.message || err);
-            var psInconnus = erreur.indexOf('précomptés') >= 0;
-            var msg = '<div class="erreur">' + (psInconnus ? 'Bilan fiscal indisponible : ' : 'Formulaires non préremplis : ')
-                + UI.h(erreur)
-                + (psInconnus ? ' Choisissez Oui ou Non ci-dessus après vérification.'
-                    : ' Recopiez vos écritures depuis l’onglet Portefeuille › Opérations.') + '</div>';
-            var f2b = document.getElementById('fiscFormulaires');
-            if (f2b) f2b.innerHTML = msg;
-            var g2 = document.getElementById('fiscBilan');
-            if (g2) g2.innerHTML = '<div class="card"><div class="vide" style="padding:14px">'
-                + (psInconnus ? 'Bilan indisponible tant que le prélèvement des PS des intérêts n’est pas précisé.'
-                    : 'Bilan indisponible sans la lecture des écritures.') + '</div></div>';
+            var f = document.getElementById('fiscFormulaires');
+            if (f && f.getAttribute('data-annee') === String(annee)) {
+                f.innerHTML = formulaireGuide(annee, { comptes: COMPTES_ETRANGER,
+                    reglages: r, base: baseConnue, erreur: 'Lecture des écritures interrompue : ' + erreur });
+            }
+            var g = document.getElementById('fiscBilan');
+            if (g) g.innerHTML = '<div class="erreur">Bilan indisponible sans la lecture des écritures : '
+                + UI.h(erreur) + '.</div>';
         });
 
         return out;
@@ -1366,23 +1665,15 @@
        La liste dit quel cours manque, et les chiffres restent à « — ». */
     function libelleManquant(m) {
         var quand = U.jourMoisAnneeISO(m.date);
-        return /^cours /.test(m.devise)
-            ? m.devise + ' au ' + quand
-            : 'taux ' + m.devise + '/EUR au ' + quand;
+        var motif = /^cours /.test(m.devise) || /^position/.test(m.devise)
+            ? m.devise : 'taux ' + m.devise + '/EUR';
+        return (m.actif ? m.actif + ' : ' : '') + motif + ' au ' + quand;
     }
 
     function avisIndisponible(liste) {
-        return '<div class=\"erreur\">Montant non calculé, taux indisponible au '
+        return '<div class="erreur">Bilan non calculé, donnée indisponible : '
             + liste.map(function (m) { return UI.h(libelleManquant(m)); }).join(' ; ')
-            + '. Réessayez plus tard, quand le cours est disponible : rien n’a été estimé à la place.</div>';
-    }
-
-    function formulairesIndisponibles(annee, liste) {
-        return '<div class=\"card\"><div class=\"lbl\">Formulaires 2074 et 2086 ' + annee + '</div>'
-            + avisIndisponible(liste)
-            + ligneResultat('Plus-values de cession (2074, case 3VG / 3VH)', '—')
-            + ligneResultat('Plus-values de cryptos-actifs (2086, case 3AN / 3BN)', '—')
-            + '</div>';
+            + '. Aucun montant manquant n’a été estimé à la place.</div>';
     }
 
     function bilanIndisponible(annee, liste) {
@@ -1416,260 +1707,49 @@
         return morceaux.join(' · ');
     }
 
-    /* Un tableau de cases : c'est la seule forme qui se recopie sans se
-       tromper — la case, ce qu'elle attend, et le montant exact. */
-    function tableauCases(lignes) {
-        if (!lignes.length) return '<div class="info">Rien à inscrire sur ce formulaire cette année.</div>';
-        return '<table class="tableau compact"><tr><th>Case</th><th>Rubrique</th><th>À inscrire</th></tr>'
-            + lignes.map(function (l) {
-                return '<tr><td style="white-space:nowrap"><b>' + UI.h(l[0]) + '</b></td>'
-                    + '<td style="text-align:left;font-size:12px;color:var(--txt-2)">' + UI.h(l[1])
-                    + (l[3] ? '<div style="font-size:11px;color:var(--txt-3);margin-top:3px">' + UI.h(l[3]) + '</div>' : '')
-                    + '</td>'
-                    + '<td style="text-align:right;white-space:nowrap"><b>' + UI.h(l[2]) + '</b></td></tr>';
-            }).join('') + '</table>';
+    // Ces montants sont déjà saisis / calculés dans la section « Déclaration
+    // de base ». Ils restent visibles dans le guide si la simulation d'impôt
+    // échoue sur une donnée INDÉPENDANTE (précompte d'intérêts par exemple).
+    // Un zéro issu des valeurs par défaut n'est pas une saisie vérifiée.
+    function casesBaseConnues(f1, f2) {
+        var connu1 = !!f1 && f1.salaire > 0;
+        var connu2 = !!f2 && f2.salaire > 0;
+        return { couple: !!f2, case_1aj: connu1 ? f1.salaire : null,
+            case_1ak: connu1 ? f1.caseValeur : undefined,
+            case_1bj: connu2 ? f2.salaire : null,
+            case_1bk: connu2 ? f2.caseValeur : undefined };
     }
 
-    // --------------------------------------------------- les cinq formulaires
-
-    function formulaires(annee, sim, t2074, t2086, r) {
-        var out = '';
-
-        // ---- 2042 & 2042 C
-        var resume2042 = ['1AJ : ' + U.eur(sim.case_1aj, { dec: 0 })];
-        if (sim.case_1ak !== null) resume2042.push('1AK : ' + U.eur(sim.case_1ak, { dec: 0 }));
-        if (sim.case_1bj) resume2042.push('1BJ : ' + U.eur(sim.case_1bj, { dec: 0 }));
-        if (sim.case_1bk !== null) resume2042.push('1BK : ' + U.eur(sim.case_1bk, { dec: 0 }));
-        if (t2074.case_3vg > 0) resume2042.push('3VG : ' + U.eur(t2074.case_3vg, { dec: 0 }));
-        else if (t2074.case_3vh > 0) resume2042.push('3VH : ' + U.eur(t2074.case_3vh, { dec: 0 }));
-
-        var cases2042 = [];
-        if (sim.case_1aj > 0) cases2042.push(['1AJ', 'Traitements et salaires — déclarant 1',
-            U.eur(sim.case_1aj, { dec: 0 }), 'Vérifier le montant prérempli par l’employeur.']);
-        cases2042.push(['1AK', 'Frais réels — déclarant 1',
-            sim.case_1ak !== null ? U.eur(sim.case_1ak, { dec: 0 }) : 'LAISSER VIDE',
-            sim.case_1ak !== null ? sim.note_1ak
-                : 'Abattement 10 % (' + U.eur(sim.abattement_10_1, { dec: 0 }) + ') plus avantageux.']);
-        if (sim.couple && sim.case_1bj) {
-            cases2042.push(['1BJ', 'Traitements et salaires — déclarant 2',
-                U.eur(sim.case_1bj, { dec: 0 }), 'Vérifier le montant prérempli par l’employeur.']);
-            cases2042.push(['1BK', 'Frais réels — déclarant 2',
-                sim.case_1bk !== null ? U.eur(sim.case_1bk, { dec: 0 }) : 'LAISSER VIDE',
-                sim.case_1bk !== null ? sim.note_1bk
-                    : 'Abattement 10 % (' + U.eur(sim.abattement_10_2, { dec: 0 }) + ') plus avantageux.']);
+    /* La section « Vos formulaires » a un SEUL moteur de rendu : le guide des
+       lignes officielles relevées pour les revenus 2025. Si son module manque,
+       on refuse au lieu de réafficher l'ancien formulaire (il inventait des
+       lignes 905/913 et la date 31/12 pour des ventes à d'autres dates). */
+    function formulaireGuide(annee, donnees) {
+        if (!PF.fiscalFormulairesDgfip)
+            return '<div class="erreur">Guide de déclaration indisponible : module des imprimés DGFiP absent.</div>';
+        // L'utilisateur peut ouvrir un imprimé pendant la lecture des cours.
+        // Le remplacement de innerHTML (ou un nouveau rendu de la même année)
+        // ne doit ni le refermer ni rouvrir les imprimés qu'il a repliés.
+        var ouverts = Object.create(null);
+        var ancien = typeof document !== 'undefined' && document.getElementById
+            ? document.getElementById('fiscFormulaires') : null;
+        if (ancien && ancien.getAttribute('data-annee') === String(annee) && ancien.querySelectorAll) {
+            Array.prototype.slice.call(ancien.querySelectorAll('[data-fisc-imprime]')).forEach(function (el) {
+                ouverts[el.getAttribute('data-fisc-imprime')] = el.open;
+            });
+            // Les ventes sont aussi repliables ; conserver la lecture en cours
+            // lorsque les cours arrivent, sans rouvrir un autre millésime.
+            ouverts.cessions = Object.create(null);
+            Array.prototype.slice.call(ancien.querySelectorAll('[data-fisc-cession]')).forEach(function (el) {
+                ouverts.cessions[el.getAttribute('data-fisc-cession')] = el.open;
+            });
         }
-        if (sim.case_2tr) cases2042.push(['2TR', 'Intérêts et produits de placement à revenu fixe',
-            U.eur(sim.case_2tr, { dec: 0 }), 'Reporté depuis la ligne 252 du formulaire 2047.']);
-        if (sim.options_fiscales.assiette_2op > 0) cases2042.push(['2OP', 'Option globale titres et revenus mobiliers (indépendante de 3CN)',
-            sim.cocher_2op ? '☑ À ENVISAGER' : '☐ NON RETENUE selon simulation',
-            'Estimation sur les seules assiettes saisies : vérifier tous les revenus mobiliers du foyer.']);
-        if (sim.options_fiscales.assiette_3cn > 0) cases2042.push(['3CN', 'Option barème des gains crypto privés (indépendante de 2OP)',
-            sim.cocher_3cn ? '☑ À ENVISAGER' : '☐ NON RETENUE selon simulation',
-            'Option sur tous les gains crypto privés du foyer ; vérifier la déclaration 2086.']);
-        if (t2074.case_3vg > 0) cases2042.push(['3VG', 'Plus-value nette imposable de cession de valeurs mobilières',
-            U.eur(t2074.case_3vg, { dec: 0 }),
-            'Calcul : ' + U.eur(t2074.ligne_905, { dec: 0 }) + ' − ' + U.eur(t2074.ligne_913, { dec: 0 }) + '.']);
-        else if (t2074.case_3vh > 0) cases2042.push(['3VH', 'Moins-value nette reportable 10 ans',
-            U.eur(t2074.case_3vh, { dec: 0 }), 'Inscrire en POSITIF, sans signe moins.']);
-        if (t2086.cessions.length) {
-            if (t2086.exonere_305) cases2042.push(['3AN / 3BN', 'Plus ou moins-value sur actifs numériques',
-                'À VÉRIFIER (seuil du foyer ≤ 305 €)',
-                'Cessions de ce portefeuille (ligne 51, nets de frais) : ' + U.eur(t2086.total_cessions_218, { dec: 0 })
-                + ' ; vérifier aussi toute autre cession du foyer avant de laisser les cases vides.']);
-            else if (t2086.case_3an > 0) cases2042.push(['3AN', 'Plus-value imposable sur actifs numériques',
-                U.eur(t2086.case_3an, { dec: 0 }),
-                'Total des cessions > 305 € — case 3AN après le formulaire 2086.']);
-            else if (t2086.case_3bn > 0) cases2042.push(['3BN', 'Moins-value sur actifs numériques',
-                U.eur(t2086.case_3bn, { dec: 0 }), 'Inscrire en POSITIF en case 3BN.']);
-        }
-        cases2042.push(['8UU', 'Comptes ouverts, détenus, utilisés ou clos à l’étranger',
-            '☑ À COCHER', COMPTES_ETRANGER.length + ' compte(s) déclaré(s) sur l’annexe 3916 / 3916-bis.']);
-
-        out += UI.accordeon('Formulaire 2042 & 2042-C',
-            '<div style="font-size:12px;color:var(--txt-3);margin-bottom:8px">Déclaration principale — les montants '
-            + 'sont ceux de vos écritures ' + annee + ' et de vos paramètres. Recopiez-les tels quels.</div>'
-            + tableauCases(cases2042),
-            false, resume2042.join(' · '));
-
-        // ---- 2047
-        var ligne2047 = t2074.case_3vg > 0
-            ? 'Pays : Luxembourg / Suisse (Swissquote) · Plus-value nette : ' + U.eur(t2074.case_3vg, { dec: 0 })
-            : 'Aucune plus-value nette imposable de valeurs mobilières à reporter au Cadre 3 cette année.';
-        out += UI.accordeon('Formulaire 2047',
-            '<div style="font-size:12px;color:var(--txt-3);margin-bottom:8px">Sur impots.gouv.fr : étape 3, '
-            + 'cocher « Revenus encaissés à l’étranger par un contribuable domicilié en France », annexe 2047.</div>'
-            + '<div style="font-size:13px;font-weight:650;margin:10px 0 4px">Rubrique 2 — revenus de capitaux mobiliers</div>'
-            + (U.num(r.interetsEtrangers, 0) > 0
-                ? tableauCases([
-                    ['232 à 238', 'Crédits d’impôt conventionnels', 'VIDE', 'Aucun crédit d’impôt sur ces intérêts.'],
-                    ['250', 'Intérêts n’ouvrant pas droit à crédit d’impôt', U.eur(r.interetsEtrangers, { dec: 0 }),
-                        'Pays : ' + String(r.paysEtranger || '—')],
-                    ['251', 'Total', U.eur(r.interetsEtrangers, { dec: 0 })],
-                    ['252', 'Total à reporter en case 2TR de la 2042', U.eur(r.interetsEtrangers, { dec: 0 })]
-                ])
-                : '<div class="info">Aucun intérêt étranger saisi : rien à remplir dans la Rubrique 2.</div>')
-            + '<div style="font-size:13px;font-weight:650;margin:12px 0 4px">Cadre 3 — plus-values de source étrangère</div>'
-            + '<div class="' + (t2074.case_3vg > 0 ? 'ok-vert' : 'info') + '">' + UI.h(ligne2047) + '</div>',
-            false,
-            (U.num(r.interetsEtrangers, 0) > 0
-                ? 'Ligne 250 / 2TR : ' + U.eur(r.interetsEtrangers, { dec: 0 }) + ' (' + String(r.paysEtranger || '—') + ')'
-                : 'Aucun intérêt étranger saisi'));
-
-        // ---- 2074
-        out += UI.accordeon('Formulaire 2074 / 2074-CMV',
-            t2074.operations.length ? bloc2074(annee, t2074)
-                : '<div class="info">Aucune cession d’actions, d’ETF ou d’ETC détectée en ' + annee + '.</div>',
-            false,
-            t2074.operations.length
-                ? t2074.operations.length + ' cession(s) · bilan ' + U.eur(t2074.bilan_net, { dec: 0 })
-                : 'Aucune cession en ' + annee);
-
-        // ---- 2086
-        out += UI.accordeon('Formulaire 2086',
-            t2086.cessions.length ? bloc2086(annee, t2086)
-                : '<div class="info">Aucune cession de cryptomonnaie détectée en ' + annee + '.</div>',
-            false,
-            t2086.cessions.length
-                ? t2086.cessions.length + ' cession(s) · cédé net de frais ' + U.eur(t2086.total_cessions_218, { dec: 0 })
-                    + ' · bilan ' + U.eur(t2086.plus_value_globale_224, { dec: 0 })
-                : 'Aucune cession en ' + annee);
-
-        // ---- 3916
-        out += UI.accordeon('Formulaire 3916 / 3916-bis',
-            '<div style="font-size:12px;color:var(--txt-3);margin-bottom:8px">Tout compte ouvert, détenu, utilisé '
-            + 'ou clos hors de France doit être déclaré — même sans aucune opération.</div>'
-            + COMPTES_ETRANGER.map(function (c, i) {
-                return '<div class="ligne"><div class="gr"><div class="tt">Compte ' + (i + 1) + '</div>'
-                    + '<div class="st">' + UI.h(c) + '</div></div>'
-                    + '<div class="dr">' + UI.badge('à déclarer', 'warn') + '</div></div>';
-            }).join('')
-            + '<div class="sep"></div>'
-            + tableauCases([['8UU', 'Comptes détenus hors de France', '☑ À COCHER',
-                'Un 3916 par compte, et la case 8UU sur la 2042.']])
-            + '<div class="erreur" style="margin-top:10px">Défaut de déclaration : 1 500 € d’amende par compte '
-            + 'et par an, ramenée à 750 € si le solde total est inférieur à 50 000 €.</div>',
-            false, COMPTES_ETRANGER.length + ' compte(s) à déclarer · case 8UU');
-
-        return out;
+        return PF.fiscalFormulairesDgfip.render(annee, donnees || {}, ouverts);
     }
-
-    function bloc2074(annee, t) {
-        var out = '<div style="font-size:13px;font-weight:650;margin-bottom:6px">1. Synthèse</div>'
-            + ligneResultat('Ligne 905 — total des plus-values', U.eur(t.ligne_905, { dec: 0 }))
-            + ligneResultat('Ligne 913 — total des moins-values', U.eur(t.ligne_913, { dec: 0 }))
-            + ligneResultat('Bilan net (905 − 913)', U.eur(t.bilan_net, { dec: 0, signe: true }), true)
-            + '<div class="info" style="margin-top:8px">Bilan ' + U.eur(t.bilan_net, { dec: 0 })
-            + ' → case <b>' + (t.bilan_net >= 0 ? '3VG' : '3VH') + '</b> : <b>'
-            + U.eur(Math.abs(t.bilan_net), { dec: 0 }) + '</b>.'
-            + (t.mv_anterieures_reportables > 0
-                ? ' Moins-values antérieures encore disponibles : ' + U.eur(t.mv_anterieures_reportables, { dec: 0 })
-                  + ' — après imputation, la base imposable est de ' + U.eur(t.case_3vg, { dec: 0 }) + '.'
-                : '') + '</div>';
-
-        out += '<div class="sep"></div><div style="font-size:13px;font-weight:650;margin:4px 0 6px">'
-            + '2. Cadre 5 — détail par titre (lignes 511 à 524)</div>';
-        t.par_actif.forEach(function (a) {
-            out += '<div class="card tight" style="margin-bottom:10px">'
-                + '<div style="font-size:13.5px;font-weight:700;margin-bottom:6px">' + UI.h(a.actif)
-                + ' <span class="dim" style="font-weight:400">— ' + a.nb_operations + ' vente(s)</span></div>'
-                + ligneResultat('511 — désignation', UI.h(a.ligne_511))
-                + ligneResultat('512 — date de cession', a.ligne_512)
-                + ligneResultat('514 — valeur unitaire de cession', U.eur(a.ligne_514, { dec: 4 }))
-                + ligneResultat('515 — nombre de titres cédés', U.quantite(a.ligne_515))
-                + ligneResultat('516 / 518 — prix de cession net', U.eur(a.ligne_516, { dec: 2 }))
-                + ligneResultat('520 — prix d’acquisition unitaire', U.eur(a.ligne_520, { dec: 4 }))
-                + ligneResultat('521 / 523 — prix de revient', U.eur(a.ligne_521, { dec: 2 }))
-                + ligneResultat('524 — résultat', U.eur(a.ligne_524, { dec: 2, signe: true }), true)
-                + '</div>';
-        });
-
-        out += '<div style="font-size:13px;font-weight:650;margin:12px 0 6px">'
-            + '3. GPS fiscal — cadres 11 et 12 (imputation des moins-values)</div>';
-        if (t.bilan_net < 0) {
-            out += '<div class="erreur">Vous êtes en <b>perte nette globale</b> cette année (' + U.eur(t.bilan_net, { dec: 0 }) + ').<br><br>'
-                + '1. Laissez le <b>cadre 11</b> totalement <b>VIDE</b>.<br>'
-                + '2. Allez au <b>cadre 12</b> « suivi des moins-values reportables au 31/12/' + annee + ' ».<br>'
-                + '3. Sur la ligne ' + annee + ', inscrivez <b>' + U.eur(t.case_3vh, { dec: 0 }) + '</b> '
-                + 'et reportez le même montant en case <b>3VH</b> de la 2042-C.</div>';
-        } else if (t.bilan_net > 0 && t.ligne_913 > 0) {
-            out += '<div class="ok-vert">Gain net de <b>' + U.eur(t.bilan_net, { dec: 0 }) + '</b>, mais avec '
-                + U.eur(t.ligne_913, { dec: 0 }) + ' de moins-values à imputer :<br><br>'
-                + '1. Laissez le bloc <b>1132</b> totalement <b>VIDE</b>.<br>'
-                + '2. Remplissez le bloc <b>1133</b> avec les colonnes ci-dessous.</div>'
-                + '<table class="tableau compact" style="margin-top:8px"><tr><th>Titre</th><th>A gain</th>'
-                + '<th>B perte imputée</th><th>C solde</th><th>D pertes ant.</th><th>E net</th></tr>'
-                + t.cadre_11.map(function (c) {
-                    return '<tr><td><b>' + UI.h(c.actif) + '</b></td><td>' + U.eur(c.col_a, { dec: 0 })
-                        + '</td><td>' + U.eur(c.col_b, { dec: 0 }) + '</td><td>' + U.eur(c.col_c, { dec: 0 })
-                        + '</td><td>' + U.eur(c.col_d, { dec: 0 }) + '</td><td><b>' + U.eur(c.col_e, { dec: 0 })
-                        + '</b></td></tr>';
-                }).join('') + '</table>'
-                + '<div style="font-size:11.5px;color:var(--txt-3);margin-top:6px">Colonnes F et G (abattement pour '
-                + 'durée de détention) : 0 € — les ETF, ETC et titres acquis après le 01/01/2018 n’y ouvrent pas droit.</div>';
-        } else {
-            out += '<div class="ok-vert">Gain net de <b>' + U.eur(t.bilan_net, { dec: 0 }) + '</b> et '
-                + 'aucune moins-value cette année.<br><br>'
-                + 'Dans le <b>cadre 11</b>, ne remplissez que la <b>colonne A</b> (et reportez le même montant '
-                + 'en colonnes C et E). Colonnes F et G : 0 €.<br>'
-                + 'Reportez <b>' + U.eur(t.case_3vg, { dec: 0 }) + '</b> en case <b>3VG</b> de la 2042-C.</div>';
-        }
-
-        out += '<div class="sep"></div><div style="font-size:13px;font-weight:650;margin:4px 0 6px">'
-            + '4. Détail des ' + t.operations.length + ' ventes ' + annee + '</div>'
-            + '<table class="tableau compact"><tr><th>Actif</th><th>Date</th><th>Quantité</th>'
-            + '<th>PRU</th><th>Coût</th><th>Cession</th><th>PV</th></tr>'
-            + t.operations.map(function (o) {
-                return '<tr><td><b>' + UI.h(o.actif) + '</b></td><td>' + U.jourMoisAnneeISO(o.date) + '</td>'
-                    + '<td>' + U.quantite(o.quantite) + '</td><td>' + U.eur(o.pru_unitaire_eur, { dec: 4 }) + '</td>'
-                    + '<td>' + U.eur(o.acq_globale_eur, { dec: 0 }) + '</td>'
-                    + '<td>' + U.eur(o.cession_globale_eur, { dec: 0 }) + '</td>'
-                    + '<td class="' + (o.plus_value_eur >= 0 ? 'up' : 'down') + '">'
-                    + U.eur(o.plus_value_eur, { dec: 0, signe: true }) + '</td></tr>';
-            }).join('') + '</table>';
-
-        return out;
-    }
-
-    function bloc2086(annee, t) {
-        var out = '<div style="font-size:12.5px;color:var(--txt-2);margin-bottom:8px">' + t.cessions.length
-            + ' cession(s) · prix de cession brut (213) : <b>'
-            + U.eur(t.total_cessions_213, { dec: 0 }) + '</b> · part connue de la ligne 51 du foyer (218 nets de frais) : <b>'
-            + U.eur(t.total_cessions_218, { dec: 0 }) + '</b> · résultat net global (cumul des lignes 224) : <b>'
-            + U.eur(t.plus_value_globale_224, { dec: 0 }) + '</b>.</div>';
-
-        if (t.exonere_305) {
-            out += '<div class="info">Franchise de 305 € à confirmer sur tout le foyer : les cessions de '
-                + 'ce portefeuille (' + U.eur(t.total_cessions_218, { dec: 0 }) + ' nets de frais) restent sous le seuil. '
-                + 'Ce total ne suffit pas à prouver l’exonération du foyer fiscal : vérifiez aussi les cessions '
-                + 'éventuelles du conjoint hors de ce portefeuille. Laissez 3AN/3BN vides seulement si le '
-                + 'seuil du foyer est respecté ; vérifiez également l’annexe 2086.</div>';
-        } else {
-            out += '<div class="info">Seuil de 305 € franchi : la plus-value est imposable dès le premier euro. '
-                + 'Ce seuil porte sur le <b>total des prix de cession</b> de l’année, ce n’est pas un abattement.<br>'
-                + 'À reporter en case <b>' + (t.case_3an > 0 ? '3AN' : '3BN') + '</b> : <b>'
-                + U.eur(t.case_3an > 0 ? t.case_3an : t.case_3bn, { dec: 0 }) + '</b>.</div>';
-        }
-
-        out += '<table class="tableau compact" style="margin-top:10px"><tr><th>Actif</th><th>Date</th>'
-            + '<th>212 valeur globale</th><th>213 brut</th><th>214 frais</th><th>218 net</th>'
-            + '<th>220 coût total</th><th>221 déjà déduit</th><th>223</th><th>224 résultat</th></tr>'
-            + t.cessions.map(function (c) {
-                return '<tr><td><b>' + UI.h(c.actif) + '</b></td><td>' + U.jourMoisAnneeISO(c.date) + '</td>'
-                    + '<td>' + U.eur(c.ligne_212, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_213, { dec: 0 }) + '</td>'
-                    + '<td>' + U.eur(c.ligne_214, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_218, { dec: 0 }) + '</td>'
-                    + '<td>' + U.eur(c.ligne_220, { dec: 0 }) + '</td>'
-                    + '<td>' + U.eur(c.ligne_221, { dec: 0 }) + '</td><td>' + U.eur(c.ligne_223, { dec: 0 }) + '</td>'
-                    + '<td class="' + (c.ligne_224 >= 0 ? 'up' : 'down') + '">'
-                    + U.eur(c.ligne_224, { dec: 0, signe: true }) + '</td></tr>';
-            }).join('') + '</table>';
-
-        out += '<div style="font-size:11.5px;color:var(--txt-3);margin-top:8px">La ligne 221 retrace les fractions '
-            + 'de capital déjà déduites lors des cessions précédentes : sans elle, le même capital serait déduit '
-            + 'deux fois. Chaque 224 s’obtient par 218 (prix net des frais et soultes) − '
-            + '(223 × 217 (prix avant frais, net des soultes) / 212 (valeur globale du portefeuille '
-            + 'au jour de la cession)).</div>';
-
-        return out;
+    function formulaires(annee, sim, t2074, t2086, r, base, erreurSim) {
+        return formulaireGuide(annee, { sim: sim, t2074: t2074,
+            t2086: t2086, reglages: r, base: base, erreurSim: erreurSim,
+            comptes: COMPTES_ETRANGER });
     }
 
     // ------------------------------------------- 3. arbitrage, bilan et source
@@ -1828,12 +1908,174 @@
             manquants: Object.keys(feuilles).filter(function (nom) { return !feuilles[nom]; }) };
     }
 
+    /* Preuves réellement LUES pour un millésime, en vue de la matrice. Les
+       constantes embarquées du code n'y apparaissent jamais : seule une
+       relecture de cache revalidée, ou un document du millésime, compte. */
+    /* URL d'un document PDF pour CE millésime : l'inventaire des sources décide.
+       Un millésime sans document vérifié vaut `null`, jamais l'URL d'une autre
+       année. Les lecteurs antérieurs à l'inventaire (sans `urlPour`) retombent
+       sur leur adresse par défaut pour les revenus 2025 uniquement. */
+    function urlSource(module, type, annee) {
+        if (!module) return null;
+        if (typeof module.urlPour === 'function') return module.urlPour(type, annee);
+        return annee === 2025 && module.urls ? module.urls[type] || null : null;
+    }
+
+    function preuvesParAnnee(annee) {
+        var r = rapportsControle[annee] || {};
+        function cache(module, args) {
+            try {
+                return module && typeof module.lireCache === 'function'
+                    ? module.lireCache.apply(module, args || []) : null;
+            } catch (_) { return null; }
+        }
+        var recoupement = recoupementsCrypto[annee]
+            || cache(PF.fiscalCryptoPsRecoupement, [annee]) || null;
+        return {
+            boi: officiels[annee] || cache(PF.fiscalDgfipSources, [annee]) || null,
+            frais: fraisOfficiels[annee] || cache(PF.fiscalFraisSources, [annee]) || null,
+            titres: titresOfficiels[annee] || cache(PF.fiscalRegimesSources, [annee]) || null,
+            cryptoFaq: cache(PF.fiscalCryptoSources) || null,
+            brochure: cache(PF.fiscalBrochureSources) || null,
+            notice2086: cache(PF.fiscalCryptoPdfSources, ['notice', annee]) || null,
+            brochureCrypto: cache(PF.fiscalCryptoPdfSources, ['brochure', annee]) || null,
+            brochureRcm: cache(PF.fiscalRcmPdfSources, ['rcm', annee]) || null,
+            chargesRcm: cache(PF.fiscalRcmPdfSources, ['charges', annee]) || null,
+            recoupementPsCrypto: recoupement && recoupement.statut === 'partiel' ? recoupement
+                : recoupement ? { statut: recoupement.statut, taux: recoupement.taux,
+                    sources: recoupement.sources, note: recoupement.derivation } : null,
+            revisionPubliee: revisionActive(annee),
+            urls: {
+                frais: PF.fiscalFraisSources ? PF.fiscalFraisSources.KM(annee) : null,
+                repas: PF.fiscalFraisSources ? PF.fiscalFraisSources.repasUrl(annee) : null,
+                gains: PF.fiscalRegimesSources ? PF.fiscalRegimesSources.url(annee) : null,
+                cryptoFaq: PF.fiscalCryptoSources ? PF.fiscalCryptoSources.url : null,
+                notice2086: urlSource(PF.fiscalCryptoPdfSources, 'notice', annee),
+                brochureRcm: urlSource(PF.fiscalRcmPdfSources, 'rcm', annee),
+                charges: urlSource(PF.fiscalRcmPdfSources, 'charges', annee),
+                brochureCrypto: urlSource(PF.fiscalCryptoPdfSources, 'brochure', annee)
+            }
+        };
+    }
+
+    /* Historisation Supabase des preuves lues (migration 013).
+       - best effort : un échec (pont absent, réseau, contrainte qui refuse la
+         source) ne bloque ni la collecte ni le rendu ; le cache local reste la
+         référence du moteur ;
+       - séquentielle, un millésime après l'autre : la clé primaire
+         (user_id, annee_revenus, source, revision) et l'enchaînement des
+         révisions restent déterministes ;
+       - une ligne écrite n'est PAS une règle publiée : pf2_fiscal_annees
+         (révisions activées, R2) reste écrit par service_role, jamais ici. */
+    function historiserCollectes(annees) {
+        if (!PF.fiscalHistorique) return Promise.resolve();
+        return (annees || []).reduce(function (chaine, an) {
+            return chaine.then(function () {
+                var preuves = null;
+                try { preuves = preuvesParAnnee(an); } catch (_) { preuves = null; }
+                return PF.fiscalHistorique.historiser(an, preuves).then(function (r) {
+                    historiques[an] = r;
+                    if (rapportsControle[an]) rapportsControle[an].historique = r;
+                });
+            });
+        }, Promise.resolve()).catch(function () { /* jamais bloquant */ });
+    }
+
+    function matriceCouverture() {
+        if (!PF.fiscalCouverture) return null;
+        var preuves = {};
+        annéesCachables().forEach(function (an) { preuves[an] = preuvesParAnnee(an); });
+        return PF.fiscalCouverture.matrice(preuves);
+    }
+
+    /* Matrice repliée : le compte rendu court reste copiable en un clic, les
+       preuves détaillées ne s'imposent pas. */
+    function htmlMatrice() {
+        var m = matriceCouverture();
+        if (!m) return '';
+        var corps = m.annees.map(function (an) {
+            var verifs = PF.fiscalCouverture.texteVerifications(an);
+            return '<div style="margin-top:8px"><b>Revenus ' + UI.h(an) + '</b> — déclaration '
+                + UI.h(m.millesimes[an].declaration) + ', publication BOFiP '
+                + UI.h(m.millesimes[an].publicationBoi || 'non disponible')
+                + '<div class="st" style="white-space:pre-wrap;overflow-wrap:anywhere">'
+                + UI.h(PF.fiscalCouverture.texteDetail(m, an)) + '</div>'
+                + (verifs ? '<div class="st" style="white-space:pre-wrap;overflow-wrap:anywhere">'
+                    + '<b>Sources publiques relues hors application</b>\n' + UI.h(verifs) + '</div>' : '')
+                + '</div>';
+        }).join('');
+        var contra = PF.fiscalCouverture.contradictions();
+        return '<details style="margin-top:8px"><summary>Matrice de couverture DGFiP 2023–2026 '
+            + '(établis ' + m.synthese.etablis + '/' + m.synthese.total
+            + (m.synthese.recoupements ? ', recoupements ' + m.synthese.recoupements : '')
+            + ') — bascule totale : ' + (m.synthese.basculeComplete ? 'oui' : 'non') + '</summary>'
+            + corps + (contra.length ? '<div style="margin-top:8px"><b>Contradictions documentaires DGFiP</b>'
+                + contra.map(function (c) {
+                    return '<div class="st" style="margin-top:6px;overflow-wrap:anywhere">' + UI.h(c.resume)
+                        + ' (revenus ' + UI.h(c.millesime) + ') : ' + UI.h(c.termes.map(function (t) {
+                            return t.valeur + ' — ' + t.source + ' (' + (t.publication || 'date non indiquée') + ')'
+                                + (t.passage ? ' ' + t.passage : '');
+                        }).join(' CONTRE ')) + '. ' + UI.h(c.arbitrage) + '</div>';
+                }).join('') + '</div>' : '')
+            + '</details>';
+    }
+
+    /* Rapports des autres millésimes vérifiés par le même clic. Revenus, jamais
+       année de déclaration : c'est la confusion que toute la page s'attache à
+       lever, elle ne doit pas réapparaître ici. */
+    function htmlAutresAnnees(annee) {
+        var autres = Object.keys(rapportsControle)
+            .filter(function (an) { return Number(an) !== Number(annee); })
+            .sort(function (a, b) { return Number(a) - Number(b); });
+        if (!autres.length) return '';
+        return '<div style="margin-top:10px"><b>Autres années vérifiées (revenus, pas déclaration)</b>'
+            + autres.map(function (an) {
+                return '<div class="st" style="margin:8px 0;overflow-wrap:anywhere">'
+                    + htmlRapport(an) + '</div>';
+            }).join('') + '</div>';
+    }
+
+    /* Onglet replié qui regroupe TOUS les messages d'une mise à jour : résumé
+       copiable, audit détaillé, matrice de couverture et autres millésimes.
+
+       La pastille n'est pas décorative. Elle vient de `PF.fiscalEtatCollecte`,
+       qui classe les motifs réellement produits par les lecteurs :
+         vert   → tout ce que la DGFiP publie pour ces millésimes a été lu ;
+         orange → des informations manquent (document non publié pour le
+                  millésime, portée partielle, contradiction non levée) ;
+         rouge  → la récupération n'a pas abouti (source inaccessible, PDF
+                  illisible, écriture Supabase refusée, mise à jour interrompue).
+
+       L'onglet ne déroule une alerte QUE s'il manque quelque chose : tout est lu
+       ⇒ aucune alerte, conformément à ce qui a été demandé. Un repli explicite
+       est prévu : sans le module de classement, l'écran affiche les messages à
+       plat SANS pastille plutôt que d'inventer un état. */
+    function htmlOngletCollecte(annee) {
+        var contenu = htmlRapport(annee) + htmlMatrice() + htmlAutresAnnees(annee);
+        var E = PF.fiscalEtatCollecte;
+        if (!E) return contenu;
+        var s = E.syntheseTout(rapportsControle, derniereInterruption, interruptionAnnees);
+        var badge = s.couleur === E.ECHEC ? 'warn'
+            : s.couleur === E.MANQUANT ? 'attente'
+                : s.couleur === E.OK ? 'ok' : 'mut';
+        var alerte = E.texteManquants(s);
+        return '<details class="onglet-collecte" data-etat="' + UI.h(s.couleur || 'aucun') + '">'
+            + '<summary><span class="badge ' + badge + '">' + UI.h(E.libelle(s)) + '</span>'
+            + '<span class="onglet-collecte-titre">Messages de la mise à jour fiscale</span></summary>'
+            + (alerte
+                ? '<div class="' + (s.couleur === E.ECHEC ? 'erreur' : 'attention')
+                    + '" style="white-space:pre-wrap;overflow-wrap:anywhere">' + UI.h(alerte) + '</div>'
+                : '')
+            + contenu + '</details>';
+    }
+
     function bilanMiseAJour(annee, resultat) {
         var boi = resultat.boi || {}, frais = resultat.frais || {}, titres = resultat.titres || {},
             rcm = resultat.rcm || {}, crypto = resultat.crypto || {}, brochure = resultat.brochure || {},
             cryptoPdf = resultat.cryptoPdf || {}, notice2086 = cryptoPdf.notice || {},
             brochureCrypto = cryptoPdf.brochure || {}, rcmPdf = resultat.rcmPdf || {},
-            brochureRcm = rcmPdf.rcm || {}, chargesRcm = rcmPdf.charges || {};
+            brochureRcm = rcmPdf.rcm || {}, chargesRcm = rcmPdf.charges || {},
+            recoupement = resultat.recoupement || {};
         var v = boi.valeurs || {}, f = frais.valeurs || {};
         var sources = v.sources || {};
         function statut(nom, valeur, source) {
@@ -1905,6 +2147,16 @@
                 ? 'CSG sur certains revenus du patrimoine 2024 payée en 2025 déductible des revenus 2025 ; case 6DE pour corriger le préremplissage dans les cas prévus. CSG des lignes 2BH/2DF prélevée en 2025 calculée automatiquement, à ne pas ajouter en 6DE ('
                     + chargesRcm.url + '). Une plus-value 2025 imposée forfaitairement ne crée pas à elle seule une déduction CSG en 2025 ; avis et montants du foyer non lus, aucune activation'
                 : 'non disponible (' + (chargesRcm.etat || 'non recherchée') + ')') + '. '
+            + 'PS des cessions crypto privées — recoupement documentaire : '
+            + (recoupement.statut === 'recoupement'
+                ? 'revenus ' + annee + ' : ' + recoupement.derivation + '. Statut « recoupement » de deux textes '
+                    + 'DGFiP, aucun texte unique ne datant ce taux par année de cession. '
+                    + (recoupement.contradictionBofip || 'Contradiction BOFiP signalée.')
+                    + ' Aucun taux activé par cette lecture'
+                : 'revenus ' + annee + ' non établi (' + (recoupement.etat || 'non recherché') + '). '
+                    + 'La FAQ courante n’est pas attribuée à cette année ; le BOFiP crypto '
+                    + '(BOI-RPPM-PVBMC-30-30, version du 23/04/2024, 17,2 %) ne date pas son taux par année '
+                    + 'de cession. Aucun taux activé') + '. '
             + 'RCM complets selon produit/date, PS crypto, CSG déductible, crypto/2086, plafonds QF spéciaux, '
             + 'changements de formule et conditions personnelles : non vérifiés par ce lecteur. '
             + 'Les valeurs embarquées de ces catégories ne sont pas des mises à jour. '
@@ -1919,7 +2171,10 @@
             + ' ; brochure RCM PDF ' + (brochureRcm.etat || brochureRcm.erreur || 'non recherchée')
             + ' ; brochure charges PDF ' + (chargesRcm.etat || chargesRcm.erreur || 'non recherchée') + '. '
             + 'Bascule DGFiP totale : non ; contrôles manquants : ' + couvertureDgfip(annee).manquants.join(', ') + '. '
-            + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.';
+            + 'Les montants personnels, frais réels, autres revenus du foyer et PAS officiel ne sont pas contrôlés.'
+            + (resultat.historique && PF.fiscalHistorique
+                ? ' ' + PF.fiscalHistorique.texte(annee, resultat.historique)
+                : ' Historisation Supabase : aucune écriture tentée pour ce millésime.');
     }
 
     // -------------------------------------------------------------- événements
@@ -1956,7 +2211,12 @@
                 if (!PF.fiscalDgfipSources || !PF.fiscalFraisSources ||
                     !PF.fiscalRegimesSources || !PF.fiscalRcmSources || !PF.fiscalCryptoSources
                     || !PF.fiscalBrochureSources || !PF.fiscalCryptoPdfSources || !PF.fiscalRcmPdfSources) {
-                    if (etat) etat.textContent = 'Modules DGFiP absents.';
+                    // Sans lecteurs, la récupération est IMPOSSIBLE : c'est le rouge,
+                    // et il doit survivre au rendu au lieu d'être un texte effacé.
+                    derniereInterruption = 'Modules DGFiP absents : la récupération des documents officiels est impossible.';
+                    interruptionAnnees = [];
+                    if (PF.app && PF.app.rendre) PF.app.rendre();
+                    else if (etat) etat.textContent = 'Modules DGFiP absents.';
                     return;
                 }
                 var proprietaire = PF.net.auth.utilisateur();
@@ -1965,7 +2225,12 @@
                     return;
                 }
                 var années = collecte.getAttribute('data-fisc') === 'collecter-tout'
-                    ? [2023, 2024, 2025, 2026] : [anneeEnCours()];
+                    ? plageCollecte() : [anneeEnCours()];
+                // Un nouveau clic repart de zéro : sans cela l'échec d'une
+                // tentative précédente peindrait l'onglet en rouge alors même que
+                // la collecte en cours réussit.
+                derniereInterruption = null;
+                interruptionAnnees = [];
                 collecte.disabled = true;
                 if (etat) etat.textContent = 'Lecture DGFiP des revenus ' + années.join(', ') + '…';
                 Promise.all(années.map(function (an) {
@@ -1995,11 +2260,21 @@
                         PF.fiscalRcmPdfSources.chercher(an).catch(function (err) {
                             return { rcm: { erreur: String(err && err.message || err) },
                                 charges: { erreur: String(err && err.message || err) } };
+                        }),
+                        // Recoupement PS crypto : module récent, donc optionnel.
+                        // Son absence ne bloque pas la collecte déjà livrée.
+                        (PF.fiscalCryptoPsRecoupement
+                            ? PF.fiscalCryptoPsRecoupement.chercher(an)
+                            : Promise.resolve({ statut: 'partiel', etat: 'module de recoupement absent' })
+                        ).catch(function (err) {
+                            return { statut: 'partiel', etat: 'recoupement interrompu : '
+                                + String(err && err.message || err) };
                         })
                     ]).then(function (resultats) {
                         return { annee: an, boi: resultats[0], frais: resultats[1],
                             titres: resultats[2], rcm: resultats[3], crypto: resultats[4],
-                            brochure: resultats[5], cryptoPdf: resultats[6], rcmPdf: resultats[7] };
+                            brochure: resultats[5], cryptoPdf: resultats[6], rcmPdf: resultats[7],
+                            recoupement: resultats[8] };
                     });
                 })).then(function (resultats) {
                     var courant = PF.net.auth.utilisateur();
@@ -2008,15 +2283,34 @@
                     return actualiserCollectesDgfip(PF.app.etat.ctx).then(function () {
                         courant = PF.net.auth.utilisateur();
                         if (!courant || courant.id !== proprietaire.id) return;
-                        if (compteRapports && compteRapports !== proprietaire.id)
+                        if (compteRapports && compteRapports !== proprietaire.id) {
                             rapportsControle = Object.create(null);
+                            historiques = Object.create(null);
+                        }
                         compteRapports = proprietaire.id;
                         resultats.forEach(function (r) { rapportsControle[r.annee] = r; });
-                        PF.app.rendre();
+                        // Le recoupement relu est conservé par millésime : il ne
+                        // s'applique jamais à une autre année et n'active rien.
+                        resultats.forEach(function (r) {
+                            if (r.recoupement && r.recoupement.statut && r.recoupement.statut !== 'partiel')
+                                recoupementsCrypto[r.annee] = r.recoupement;
+                        });
+                        // Les preuves lues sont historisées côté serveur APRÈS le
+                        // rechargement des caches : preuvesParAnnee() reflète alors
+                        // exactement ce qui vient d'être lu, millésime par millésime.
+                        return historiserCollectes(resultats.map(function (r) { return r.annee; }))
+                            .then(function () { PF.app.rendre(); });
                     });
                 }).catch(function (err) {
-                    if (etat) etat.textContent = 'Actualisation interrompue : '
+                    // Une interruption est une IMPOSSIBILITÉ DE RÉCUPÉRATION, pas
+                    // une lacune documentaire : l'onglet doit passer en rouge et
+                    // nommer la raison. Un simple textContent serait effacé au
+                    // prochain rendu et l'échec disparaîtrait de l'écran.
+                    derniereInterruption = 'Actualisation interrompue : '
                         + String(err && err.message || err) + '. Aucune révision complète publiée.';
+                    interruptionAnnees = années.slice();
+                    if (PF.app && PF.app.rendre) PF.app.rendre();
+                    else if (etat) etat.textContent = derniereInterruption;
                 }).then(function () { collecte.disabled = false; });
                 return;
             }
@@ -2032,6 +2326,16 @@
             }
             var anneeBtn = cible.closest('[data-fisc="annee"]');
             if (anneeBtn) { anneeFiscale = Number(anneeBtn.getAttribute('data-valeur')); PF.app.rendre(); return; }
+            var anneeGuide = cible.closest('[data-fisc="annee-guide"]');
+            if (anneeGuide) {
+                var saisie = vue.querySelector('#fiscAnneeGuide');
+                var a = saisie && Number(saisie.value);
+                if (!Number.isInteger(a) || a < 2025 || a > 9999) {
+                    UI.toast('Saisissez une année des revenus entre 2025 et 9999.');
+                    return;
+                }
+                anneeFiscale = a; PF.app.rendre(); return;
+            }
             var lien = cible.closest('[data-fisc="ouvrir-lien"]');
             if (lien) {
                 if (typeof root.Native !== 'undefined' && root.Native.openExternal) root.Native.openExternal(URL_MAJ_BAREMES);
@@ -2044,7 +2348,10 @@
                     aide: 'À envoyer à l’assistant Arena : il régénère core/fiscal_bars.py avec les sources citées.',
                     corps: '<textarea id="fiscPrompt" rows="10" style="width:100%;background:rgba(255,255,255,.05);'
                         + 'border:1px solid var(--line);border-radius:13px;color:var(--txt);font-size:12.5px;padding:12px;font-family:monospace">'
-                        + UI.h(PROMPT_MAJ.replace('{ANNEE}', String(derniereAnnee() + 1))) + '</textarea>',
+                        + UI.h(PROMPT_MAJ.replace('{ANNEE}', String((function () {
+                            var sim = annéesSimulables();
+                            return Math.max(derniereAnnee(), sim[sim.length - 1]) + 1;
+                          })()))) + '</textarea>',
                     boutons: [
                         { texte: 'Copier', sorte: '', garder: true, action: function () { copier('fiscPrompt'); } },
                         { texte: 'Ouvrir l’assistant', sorte: 'sec', action: function () {
@@ -2088,6 +2395,14 @@
         revisionActive: revisionActive, bilanMiseAJour: bilanMiseAJour,
         resumeRapport: resumeRapport, htmlRapport: htmlRapport,
         plafondQF: plafondQF, franchiseCrypto: franchiseCrypto, couvertureDgfip: couvertureDgfip,
+        PROVENANCE_PS: PROVENANCE_PS, tauxPSEtabli: tauxPSEtabli, psCryptoRecoupement: psCryptoRecoupement,
+        preuvesParAnnee: preuvesParAnnee, matriceCouverture: matriceCouverture, htmlMatrice: htmlMatrice,
+        annéesCachables: annéesCachables, plageCollecte: plageCollecte, libelléPlage: libelléPlage,
+        millésimeComplet: millésimeComplet,
+        annéeSimulable: annéeSimulable, annéesSimulables: annéesSimulables,
+        csgDeductible6DE: function (d) { return PF.fiscalGardesFoyer.csgDeductible6DE(d); },
+        portee2086Foyer: function (d) { return PF.fiscalGardesFoyer.portee2086Foyer(d); },
+        casParticuliersQF: function (d) { return PF.fiscalGardesFoyer.casParticuliersQF(d); },
         vue: vue, attacher: attacher
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

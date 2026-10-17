@@ -30,7 +30,15 @@ def test_qf_general_2025_plafonne_et_deux_millesimes_isoles():
     avec = tax.impot_revenu(180_000, 3, 2025, couple)
     sans = tax.impot_revenu(180_000, 2, 2025, couple)
     assert sans.impot_brut - avec.impot_brut == pytest.approx(3614)
-    assert fb.plafond_qf_general(2024) == 1759  # hérité, PAS validé lors de l'audit
+    # Corrigé le 16/10/2026 : la valeur héritée de 2023 (1 759 €) est remplacée par
+    # la valeur officielle des revenus 2024, « 1 791 € par demi-part supplémentaire à
+    # compter de l'imposition des revenus de l'année 2024 » (BOFiP
+    # BOI-IR-LIQ-20-20-20-20250414, publication 14/04/2025).
+    assert fb.plafond_qf_general(2024) == 1791
+    # Chaque millésime garde son propre plafond : aucune reconduction.
+    assert fb.plafond_qf_general(2022) == 1678
+    assert fb.plafond_qf_general(2023) == 1759
+    assert fb.plafond_qf_general(2025) == 1807
     with pytest.raises(ValueError):
         fb.plafond_qf_general(2027)
 

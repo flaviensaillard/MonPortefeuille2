@@ -34,12 +34,18 @@ for (const file of ['util.js','fiscal.js','fiscal_dgfip_sources.js']) {
     assert.match(fiscal.vue(null), /Revenus 2026 : calcul fiscal indisponible/);
     await ctx.PF.fiscalDgfipSources.chercher(2024);
     await fiscal.actualiserRevisions({ transactions: [] });
-    assert.equal(fiscal.baremeDe(2024).tranches[0], 11497, 'corrige 11520 historique');
-    assert.equal(fiscal.baremeDe(2024).dc, 889, 'corrige décote embarquée');
-    assert.equal(fiscal.plafondQF(2024), 1791, 'corrige QF embarqué');
+    assert.equal(fiscal.baremeDe(2024).tranches[0], 11497, 'valeur officielle 2024 après collecte');
+    assert.equal(fiscal.baremeDe(2024).dc, 889, 'décote officielle 2024');
+    assert.equal(fiscal.plafondQF(2024), 1791, 'plafond QF officiel 2024');
+    assert.ok(fiscal.preuvesParAnnee(2024).boi, 'la collecte de ce compte est bien enregistrée');
     assert.throws(() => fiscal.baremeDe(2026), /non disponible/, 'aucun transfert 2024/2025 vers 2026');
     account = '87654321-1234-4123-a123-123456789012';
     await fiscal.actualiserRevisions({ transactions: [] });
-    assert.equal(fiscal.baremeDe(2024).tranches[0], 11520, 'autre compte non modifié');
+    // Depuis la correction du 16/10/2026 les constantes embarquées sont les valeurs
+    // officielles : l'isolation entre comptes se vérifie sur la PREUVE collectée, pas
+    // sur une valeur fausse qui servirait de témoin.
+    assert.equal(fiscal.baremeDe(2024).tranches[0], 11497, 'mêmes constantes officielles embarquées');
+    assert.equal(fiscal.preuvesParAnnee(2024).boi, null, 'autre compte : aucune collecte, preuve absente');
+    assert.equal(fiscal.revisionActive(2024), false, 'autre compte : aucune révision activée');
     console.log('Activation DGFiP : 2024 corrigé, 2026 suspendu, comptes isolés OK');
 })().catch(e => { console.error(e); process.exitCode = 1; });
