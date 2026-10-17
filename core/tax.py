@@ -809,11 +809,9 @@ def detail_2074_de_lannee(
     annee: int,
     choix_regime: str = "PFU",
 ) -> dict:
-    """Calcule l'intégralité du Formulaire 2074 / 2074-CMV pour `annee` :
-    - Ligne 905 (plus-values) et Ligne 913 (moins-values)
-    - Cadre 5 (lignes 511 à 524) détaillé actif par actif
-    - Cadres 11 et 12 (Bloc 1133 : imputation des moins-values col. A à G)
-    - Tableau détaillé opération par opération.
+    """Calcule les cessions du portefeuille pour les cadres 510, 900/903,
+    10/11/12 du 2074. Les autres comptes et abattements du foyer ne sont pas
+    couverts : ce n'est pas une déclaration 2074 complète.
     """
     from . import fx
     from .portfolio import classe_de, filtrer_ventes_excedentaires
@@ -841,31 +839,41 @@ def detail_2074_de_lannee(
         net_eur = _montant_eur(t.montant_net, t.devise, t.date.isoformat(), t.ticker,
                                t.date, indisponible)
 
-        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0})
+        etat = soldes.setdefault(t.ticker, {"qte": 0.0, "cout_eur": 0.0,
+                                           "frais_acq": 0.0, "ancien": False})
+        brut_eur = _montant_eur(t.quantite * t.cours, t.devise,
+                                t.date.isoformat(), t.ticker, t.date, indisponible)
         if t.est_achat:
             etat["qte"] += t.quantite
             etat["cout_eur"] += net_eur
-        elif t.est_vente and etat["qte"] > 1e-9:
+            etat["frais_acq"] += max(0.0, net_eur - brut_eur)
+            etat["ancien"] |= t.date.year < 2018
+        elif t.est_vente:
+            if t.quantite <= 0 or etat["qte"] + 1e-9 < t.quantite:
+                _ajouter_unique(indisponible, f"Position sans coût établi pour {t.ticker} le {t.date:%d/%m/%Y}.")
+                continue
             pru_eur = etat["cout_eur"] / etat["qte"]
             acq_eur = pru_eur * t.quantite
+            frais_acq = etat["frais_acq"] / etat["qte"] * t.quantite
+            frais_cession = max(0.0, brut_eur - net_eur)
+            ancien = etat["ancien"]
             pv_eur = net_eur - acq_eur
             etat["qte"] = max(0.0, etat["qte"] - t.quantite)
             etat["cout_eur"] = max(0.0, etat["cout_eur"] - acq_eur)
+            etat["frais_acq"] = max(0.0, etat["frais_acq"] - frais_acq)
             if etat["qte"] <= 1e-6:
-                etat["qte"] = 0.0
-                etat["cout_eur"] = 0.0
+                etat.update(qte=0.0, cout_eur=0.0, frais_acq=0.0, ancien=False)
 
             pv_par_annee[t.date.year] = pv_par_annee.get(t.date.year, 0.0) + pv_eur
             if t.date.year == annee:
                 operations.append({
-                    "actif": t.ticker,
-                    "date": t.date,
-                    "quantite": t.quantite,
-                    "pru_unitaire_eur": pru_eur,
-                    "acq_globale_eur": acq_eur,
-                    "cession_unitaire_eur": net_eur / t.quantite if t.quantite > 0 else 0.0,
-                    "cession_globale_eur": net_eur,
-                    "plus_value_eur": pv_eur,
+                    "actif": t.ticker, "date": t.date, "quantite": t.quantite,
+                    "pru_unitaire_eur": pru_eur, "acq_globale_eur": acq_eur,
+                    "acq_hors_frais_eur": acq_eur - frais_acq, "frais_acq_eur": frais_acq,
+                    "cession_brute_eur": brut_eur, "frais_cession_eur": frais_cession,
+                    "cession_unitaire_eur": brut_eur / t.quantite,
+                    "cession_globale_eur": net_eur, "plus_value_eur": pv_eur,
+                    "acquisition_avant_2018": ancien,
                 })
 
     # Suivi FIFO des moins-values mobilières antérieures reportables sur 10 ans (CGI art. 150-0 D, 11)
@@ -888,40 +896,31 @@ def detail_2074_de_lannee(
     files_mv_ant = [item for item in files_mv_ant if annee - int(item[0]) <= 10 and item[1] > 1e-6]
     mv_anterieures_dispo = round(sum(item[1] for item in files_mv_ant), 2)
 
-    # Agrégation annuelle par titre (Cadre 5 : lignes 511 à 524)
-    par_actif: list[dict] = []
-    actifs_distincts = sorted({op["actif"] for op in operations})
-    for actif in actifs_distincts:
-        ops_a = [op for op in operations if op["actif"] == actif]
-        qte_tot = sum(op["quantite"] for op in ops_a)
-        cession_tot = sum(op["cession_globale_eur"] for op in ops_a)
-        acq_tot = sum(op["acq_globale_eur"] for op in ops_a)
-        pv_tot = sum(op["plus_value_eur"] for op in ops_a)
-        par_actif.append({
-            "actif": actif,
-            "nb_operations": len(ops_a),
-            "ligne_511": f"{actif} (Agrégé annuel) — Swissquote Bank Europe SA",
-            "ligne_512": f"31/12/{annee}",
-            "ligne_514": cession_tot / qte_tot if qte_tot > 0 else 0.0,
-            "ligne_515": qte_tot,
-            "ligne_516": cession_tot,
-            "ligne_517": 0.0,
-            "ligne_518": cession_tot,
-            "ligne_520": acq_tot / qte_tot if qte_tot > 0 else 0.0,
-            "ligne_521": acq_tot,
-            "ligne_522": 0.0,
-            "ligne_523": acq_tot,
-            "ligne_524": pv_tot,
-        })
+    # Cadre 510 : une colonne par VENTE, avec la date véritable et les frais
+    # répartis (517/522) : aucun regroupement fictif au 31/12.
+    par_actif: list[dict] = [{
+        "actif": op["actif"], "nb_operations": 1,
+        "ligne_511": f"{op['actif']} — intermédiaire à confirmer",
+        "ligne_512": op["date"].isoformat(),
+        "ligne_514": op["cession_unitaire_eur"],
+        "ligne_515": op["quantite"], "ligne_516": op["cession_brute_eur"],
+        "ligne_517": op["frais_cession_eur"], "ligne_518": op["cession_globale_eur"],
+        "ligne_520": op["acq_hors_frais_eur"] / op["quantite"],
+        "ligne_521": op["acq_hors_frais_eur"], "ligne_522": op["frais_acq_eur"],
+        "ligne_523": op["acq_globale_eur"], "ligne_524": op["plus_value_eur"],
+        "acquisition_avant_2018": op["acquisition_avant_2018"],
+    } for op in operations]
 
-    ligne_905 = sum(a["ligne_524"] for a in par_actif if a["ligne_524"] > 0)
-    ligne_913 = abs(sum(a["ligne_524"] for a in par_actif if a["ligne_524"] < 0))
-    bilan_net = ligne_905 - ligne_913
+    # Cadre 900 : résultats déterminés par vous-même = 903 PV / MV.
+    # 905 = instruments à terme ; 913 = TOTAL du cadre 900, PAS pertes seules.
+    pv_903 = sum(a["ligne_524"] for a in par_actif if a["ligne_524"] > 0)
+    mv_903 = abs(sum(a["ligne_524"] for a in par_actif if a["ligne_524"] < 0))
+    bilan_net = pv_903 - mv_903
+    abattement_possible = any(a["ligne_524"] > 0 and a["acquisition_avant_2018"] for a in par_actif)
+    cadre_10 = [{"annee": int(a[0]), "montant": round(a[1], 2)} for a in files_mv_ant]
 
-    # Cadre 11 (Bloc 1133) : imputation des moins-values de l'année (Col B) et antérieures (Col D) sur les gains
     cadre_11: list[dict] = []
-    mv_restante = ligne_913
-    mv_ant_restante = mv_anterieures_dispo
+    mv_restante = mv_903
     for a in par_actif:
         if a["ligne_524"] <= 0:
             continue
@@ -929,8 +928,11 @@ def detail_2074_de_lannee(
         imput = min(gain_a, mv_restante)
         mv_restante = max(0.0, mv_restante - imput)
         col_c = gain_a - imput
-        imput_ant = min(col_c, mv_ant_restante)
-        mv_ant_restante = max(0.0, mv_ant_restante - imput_ant)
+        imput_ant = 0.0
+        for file in files_mv_ant:
+            pris = min(max(0.0, col_c - imput_ant), file[1])
+            file[1] -= pris
+            imput_ant += pris
         col_e = col_c - imput_ant
         cadre_11.append({
             "Titre (Bloc 1133)": a["actif"],
@@ -939,8 +941,16 @@ def detail_2074_de_lannee(
             "Col C — Solde (A − B) (€)": round(col_c, 2),
             "Col D — Pertes antérieures (€)": round(imput_ant, 2),
             "Col E — Gain net imposable (C − D) (€)": round(col_e, 2),
-            "Col F/G — Abattement durée détention (€)": 0.0,
+            "Col F — Abattement commun (€)": None if abattement_possible else 0.0,
+            "Col G — Abattement renforcé (€)": None if abattement_possible else 0.0,
+            "Col H — Gain imposable (E − F − G) (€)": None if abattement_possible else round(col_e, 2),
         })
+    ligne_1164 = round(sum(l["Col D — Pertes antérieures (€)"] for l in cadre_11), 2)
+    cadre_12 = [{"annee": int(a[0]), "montant": round(a[1], 2)}
+                for a in files_mv_ant if a[1] > 1e-6]
+    if bilan_net < 0:
+        cadre_12.append({"annee": annee, "montant": round(abs(bilan_net), 2)})
+    cadre_12.sort(key=lambda x: x["annee"])
 
     pv_nette_apres_mv_ant = max(0.0, bilan_net - mv_anterieures_dispo) if bilan_net > 0 else 0.0
 
@@ -950,13 +960,15 @@ def detail_2074_de_lannee(
         "calcul_complet": not indisponible,
         "operations": operations,
         "par_actif": par_actif,
-        "ligne_905": round(ligne_905, 2),
-        "ligne_913": round(ligne_913, 2),
+        "ligne_903_pv": round(pv_903, 2),
+        "ligne_903_mv": round(mv_903, 2),
         "bilan_net": round(bilan_net, 2),
         "mv_anterieures_reportables": mv_anterieures_dispo,
         "case_3vg": round(pv_nette_apres_mv_ant, 2) if bilan_net > 0 else 0.0,
         "case_3vh": round(abs(bilan_net), 2) if bilan_net < 0 else 0.0,
-        "cadre_11": cadre_11,
+        "cadre_10": cadre_10,
+        "cadre_11": cadre_11, "cadre_12": cadre_12, "ligne_1164": ligne_1164,
+        "abattementsNonVerifies": abattement_possible,
         "choix_regime": choix_regime,
         "ventes_excedentaires": ventes_excedentaires,
     }
@@ -1097,12 +1109,16 @@ def detail_2086_de_lannee(
                     "ligne_213": round(prix_cession_eur, 2),
                     "ligne_214": round(frais_eur, 2),
                     "ligne_215": round(net_eur, 2),
-                    "ligne_216": 0.0,
+                    # Les transactions ne disent pas si des échanges avec
+                    # soulte ont été effectués ailleurs : 0 serait une fausse
+                    # certification. La formule chiffrée suppose aucune soulte.
+                    "ligne_216": None,
                     "ligne_217": round(prix_cession_eur, 2),
                     "ligne_218": round(net_eur, 2),
                     "ligne_220": round(ligne_220, 2),
                     "ligne_221": round(ligne_221, 2),
-                    "ligne_222": 0.0,
+                    "ligne_222": None,
+                    "hypothese_sans_soulte": True,
                     "ligne_223": round(ligne_223, 2),
                     "fraction_capital": round(fraction_capital, 2),
                     "ligne_224": round(ligne_224, 2),

@@ -1,4 +1,4 @@
-"""Fiscalité — Simulateur complet & déclaration pré-remplie case par case.\n\nRestaure l'intégralité des fonctionnalités de la v1 (situation familiale,\nsalaires 1AJ/1BJ, frais réels kilométriques et repas 1AK/1BK mémorisés dans\n`Config`, intérêts étrangers 2047/2TR, formulaires 2042, 3916-bis, 2047, 2074\nlignes 511-524 / 905 / 913 / Cadres 11-12 et 2086 lignes 211-224, taux de PAS\nfoyer et individualisés) tout en sélectionnant automatiquement les barèmes\nintégrés de l'année des revenus (IR, décote, frais, PFU des titres et PS selon\ncatégorie). Les millésimes et les cas particuliers ne sont pas tous certifiés.\n"""
+"""Fiscalité — simulation indicative et aide au report des revenus connus.\n\nLes montants du portefeuille ne certifient ni l'ensemble des opérations du foyer,\nni le précompte RCM, ni les soultes crypto. Les repères 2074/2086 2025 suivent\nles imprimés DGFiP ; 903 = cessions déterminées par vous-même, 905 = instruments\nà terme et 913 = total du cadre. Voir docs/FORMULAIRES-FISCAUX-2.2.7.md.\n"""
 
 from __future__ import annotations
 
@@ -25,13 +25,13 @@ if not hasattr(fb, "verifier_maj_baremes_fiscaux") or not hasattr(fb, "generer_p
 
 st.set_page_config(page_title="Fiscalité", page_icon="🏛️", layout="wide")
 ui.styliser_navigation()
-st.title("🏛️ Simulateur Fiscal & Déclaration Pré-remplie")
+st.title("🏛️ Simulation fiscale & aide aux formulaires")
 st.caption(
-    "Tous les barèmes officiels (impôt sur le revenu, décote, barème "
-    "kilométrique URSSAF, forfait repas, PFU et prélèvements sociaux) sont "
-    "chargés automatiquement selon l'année choisie. Chaque formulaire et "
-    "chaque case vous donne directement le chiffre exact à recopier sur "
-    "impots.gouv.fr."
+    "Les valeurs vérifiées du millésime et les données saisies servent à préparer "
+    "les lignes utiles à ce portefeuille. Les revenus 2026 sont provisoires et "
+    "aucun formulaire futur n'est déclaré officiel avant sa publication. "
+    "Foyer complet, autres comptes, IFU, précomptes, soultes et crédits d'impôt "
+    "doivent être rapprochés de vos justificatifs avant le dépôt."
 )
 
 ctx = S.charger()
@@ -527,8 +527,10 @@ with cont_frais_reels:
 st.divider()
 st.subheader(f"📁 2. Vos formulaires de déclaration {annee + 1} (revenus {annee})")
 st.caption(
-    "Chaque volet ci-dessous correspond à un formulaire officiel d'impots.gouv.fr. "
-    "Cliquez sur un formulaire pour voir les cases exactes et les montants à y recopier."
+    "Formulaires 2025 vérifiés sur les imprimés DGFiP 2026 (2042, 2042 C, 2047, "
+    "2074, 2086, 3916). Les montants connus concernent ce portefeuille seulement : "
+    "foyer, IFU, soultes, comptes et crédits d'impôt doivent être contrôlés avant le report. "
+    "Pour un autre millésime, vérifier les numéros sur son imprimé officiel."
 )
 
 # --- VOLET 1 : FORMULAIRE 2042 & 2042-C (DÉCLARATION PRINCIPALE) ---
@@ -544,7 +546,7 @@ if d2074["case_3vg"] > 0:
 elif d2074["case_3vh"] > 0:
     resume_2042 += f" · 3VH : {round(d2074['case_3vh']):,} €".replace(",", " ")
 
-with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {resume_2042})", expanded=False):
+with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {resume_2042})", expanded=True):
     cases_2042 = []
     if sim["case_1aj"] > 0:
         cases_2042.append({
@@ -599,7 +601,10 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             "Case": "3VG",
             "Rubrique": "Plus-value nette imposable de cession de valeurs mobilières",
             "À inscrire": f"{round(d2074['case_3vg']):,} €".replace(",", " "),
-            "Indication": f"Calcul exact : {ui.eur(d2074['ligne_905'])} − {ui.eur(d2074['ligne_913'])} = {ui.eur(d2074['case_3vg'])}.",
+            "Indication": f"Cadre 900 ligne 903 : PV {ui.eur(d2074['ligne_903_pv'])}, MV "
+                          f"{ui.eur(d2074['ligne_903_mv'])} ; moins-values antérieures "
+                          f"{ui.eur(d2074['mv_anterieures_reportables'])} imputables. "
+                          "Part du portefeuille seulement : autres opérations du foyer à contrôler.",
         })
     elif d2074["case_3vh"] > 0:
         cases_2042.append({
@@ -609,27 +614,16 @@ with st.expander(f"📁 Formulaire 2042 & 2042-C (Déclaration Principale — {r
             "Indication": "Inscrire en POSITIF (sans signe moins).",
         })
     if d2086["cessions"]:
-        if d2086["exonere_305"]:
-            cases_2042.append({
-                "Case": "3AN / 3BN",
-                "Rubrique": "Plus ou moins-value sur actifs numériques",
-                "À inscrire": "À vérifier : vide seulement si toutes les cessions du foyer ≤ 305 €",
-                "Indication": f"Cessions de ce portefeuille = {ui.eur(d2086['total_cessions_213'])} ; autres cessions éventuelles du foyer inconnues du simulateur.",
-            })
-        elif d2086["case_3an"] > 0:
-            cases_2042.append({
-                "Case": "3AN",
-                "Rubrique": "Plus-value imposable sur actifs numériques",
-                "À inscrire": f"{round(d2086['case_3an']):,} €".replace(",", " "),
-                "Indication": f"Total des cessions ({ui.eur(d2086['total_cessions_213'])}) > 305 €.",
-            })
-        elif d2086["case_3bn"] > 0:
-            cases_2042.append({
-                "Case": "3BN",
-                "Rubrique": "Moins-value sur actifs numériques",
-                "À inscrire": f"{round(d2086['case_3bn']):,} €".replace(",", " "),
-                "Indication": "Inscrire en POSITIF en case 3BN.",
-            })
+        cases_2042.append({
+            "Case": "3AN / 3BN",
+            "Rubrique": "Total du FOYER depuis la ligne 52 du 2086",
+            "À inscrire": "À vérifier / compléter au niveau du foyer",
+            "Indication": f"Part connue de la ligne 51 (218 net des frais) : "
+                          f"{ui.eur(d2086['total_cessions_218'])}. "
+                          f"Résultat de ce portefeuille sous hypothèse sans soulte : "
+                          f"{ui.eur(d2086['plus_value_globale_224'])}. "
+                          "Ce n'est ni le total du foyer, ni un report prêt à copier.",
+        })
     if choisis:
         cases_2042.append({
             "Case": "8UU",
@@ -652,58 +646,63 @@ titre_2047 = (
     f"Ligne 250 / 2TR : {round(interets_etrangers):,} € ({pays_etranger})".replace(",", " ")
     if interets_etrangers > 0 else "Aucun intérêt étranger saisi"
 )
-with st.expander(f"📁 Formulaire 2047 (Revenus encaissés à l'étranger — {titre_2047})", expanded=False):
+with st.expander(f"📁 Formulaire 2047 (Revenus encaissés à l'étranger — {titre_2047})", expanded=True):
     st.markdown("📍 **Chemin sur impots.gouv.fr :** Étape 3 → Cocher *« Revenus encaissés à l'étranger par un contribuable domicilié en France »* → Annexe **2047**.")
     st.markdown("#### 🔹 Rubrique 2 : Revenus des valeurs et capitaux mobiliers imposables en France (Intérêts Revolut, etc.)")
     if interets_etrangers <= 0:
         st.info("Aucun intérêt étranger saisi : rien à remplir dans la Rubrique 2 de la 2047.")
     else:
-        st.markdown("- **Lignes `232` à `238` :** `Laissez totalement VIDE` *(aucun crédit d'impôt conventionnel sur ces intérêts)*")
-        st.markdown(f"- **Ligne `250` (Intérêts n'ouvrant pas droit à crédit d'impôt) :** Pays : `{pays_etranger}` | Montant : **`{ui.eur(interets_etrangers)}`**")
-        st.markdown(f"- **Ligne `251` (Total) :** **`{ui.eur(interets_etrangers)}`**")
-        st.markdown(f"- **Ligne `252` (Total à reporter en case `2TR` de la 2042) :** **`{round(interets_etrangers):,} €`**".replace(",", " "))
+        st.warning("Les lignes 231–240 concernent des crédits d’impôt conventionnels : "
+                   "vérifier le pays de SOURCE, l’impôt effectivement retenu et la convention. "
+                   "Le seul pays du courtier ne permet pas de conclure qu’elles sont vides.")
+        st.markdown(f"- **Ligne `250` (intérêts sans crédit d’impôt) :** {ui.eur(interets_etrangers)} "
+                    "UNIQUEMENT si cette qualification est confirmée sur les justificatifs.")
+        st.markdown(f"- **Ligne `251` (238 + 240 + 250) :** {ui.eur(interets_etrangers)} "
+                    "seulement si les autres lignes sont effectivement nulles.")
+        st.markdown(f"- **Ligne `252` → case `2TR` :** {ui.eur(interets_etrangers)} "
+                    "après vérification des intérêts de tout le foyer.")
 
-    st.markdown("#### 🔹 Cadre 3 : Plus-values de cession de valeurs mobilières de source étrangère (Swissquote)")
-    if d2074["case_3vg"] > 0:
-        st.markdown(
-            f"- **Cadre 3 (Plus-values imposables en France) :** Pays : `Luxembourg / Suisse (Swissquote)` | "
-            f"Plus-value nette : **`{round(d2074['case_3vg']):,} €`** *(reportée en case **`3VG`** de la 2042-C)*.".replace(",", " ")
-        )
-    else:
-        st.info("Aucune plus-value nette imposable de valeurs mobilières à reporter au Cadre 3 cette année.")
+    st.markdown("#### 🔹 Cadre 3 / ligne 30 : plus-values de source étrangère")
+    st.warning("Source et pays à vérifier sur les justificatifs et la convention fiscale. "
+               "La localisation de Swissquote seule ne prouve PAS que chaque plus-value "
+               "est de source étrangère ; aucun montant automatique de la 2074 n’est recopié ici.")
 
 # --- VOLET 3 : FORMULAIRE 2074 (ACTIONS, ETF, ETC) ---
 titre_2074 = (
     f"{len(d2074['operations'])} cession(s) · Bilan : {ui.eur(d2074['bilan_net'])}"
     if d2074["operations"] else f"Aucune cession en {annee}"
 )
-with st.expander(f"📁 Formulaire 2074 / 2074-CMV (Plus-values Actions, ETF, ETC — {titre_2074})", expanded=False):
+with st.expander(f"📁 Formulaire 2074 / 2074-CMV (Plus-values Actions, ETF, ETC — {titre_2074})", expanded=True):
     if not d2074["operations"]:
-        st.info(f"Aucune cession d'actions, d'ETF ou d'ETC détectée en {annee}.")
+        st.info(f"Aucune cession d'actions, d'ETF ou d'ETC détectée en {annee} dans ce portefeuille. "
+                "Vérifiez les autres comptes du foyer et le suivi des moins-values antérieures ci-dessous.")
     else:
-        st.markdown("#### 🔹 1. Synthèse du Formulaire 2074")
-        if d2074["ligne_905"] > 0:
-            st.markdown(f"- **Ligne `905` (Total des plus-values) :** **`{ui.eur(d2074['ligne_905'])}`**")
-        if d2074["ligne_913"] > 0:
-            st.markdown(f"- **Ligne `913` (Total des moins-values) :** **`{ui.eur(d2074['ligne_913'])}`**")
-        st.markdown(f"- **Bilan net annuel (`905 − 913`) :** **`{ui.eur(d2074['bilan_net'])}`** → Case **`{'3VG' if d2074['bilan_net'] >= 0 else '3VH'}`** : **`{round(abs(d2074['bilan_net'])):,} €`**".replace(",", " "))
+        st.markdown("#### 🔹 1. Cadre 900 de la 2074 (résultats du cadre 510)")
+        st.markdown(f"- **Ligne `903`, colonne PV (total des lignes 524 positives) :** {ui.eur(d2074['ligne_903_pv'])}")
+        st.markdown(f"- **Ligne `903`, colonne MV (total des lignes 524 négatives, en positif) :** {ui.eur(d2074['ligne_903_mv'])}")
+        st.caption("905 = profits sur instruments financiers à terme ; 913 = TOTAL de toutes les catégories "
+                   "du cadre 900, pas la seule moins-value. Vérifiez l’IFU et les autres comptes du foyer.")
+        st.markdown(f"- **Bilan des titres suivis (`903 PV − 903 MV`) :** {ui.eur(d2074['bilan_net'])}. "
+                    f"Après imputation des pertes antérieures du foyer connues : 3VG {ui.eur(d2074['case_3vg'])} "
+                    f"ou 3VH {ui.eur(d2074['case_3vh'])}, à confirmer pour le foyer entier.")
 
         st.divider()
-        st.markdown("#### 🔹 2. Cadre 5 (ou 3) : Détail des cessions de valeurs mobilières (Lignes `511` à `524` par titre)")
+        st.markdown("#### 🔹 2. Cadre 5 / §510 : une colonne par CESSION de valeurs mobilières (lignes 511 à 524)")
         for a_info in d2074["par_actif"]:
             with st.container(border=True):
-                st.markdown(f"**👉 Déclaration globale pour `{a_info['actif']}` ({a_info['nb_operations']} vente(s) en {annee})**")
+                st.markdown(f"**👉 Cession de `{a_info['actif']}` le {a_info['ligne_512']} — "
+                            "intermédiaire à confirmer (3 colonnes de cession par imprimé).**")
                 st.markdown(f"- **`511` — Désignation du titre et de l'intermédiaire :** `{a_info['ligne_511']}`")
-                st.markdown(f"- **`512` — Date de la cession :** `{a_info['ligne_512']}`")
+                st.markdown(f"- **`512` — Date réelle de la cession :** `{a_info['ligne_512']}`")
                 st.markdown(f"- **`514` — Valeur unitaire de cession :** `{ui.eur(a_info['ligne_514'], 4)}`")
                 st.markdown(f"- **`515` — Nombre de titres cédés :** `{ui.quantite(a_info['ligne_515'])}`")
-                st.markdown(f"- **`516` (ou `513`) — Prix de cession global :** `{ui.eur(a_info['ligne_516'])}`")
-                st.markdown("- **`517` — Frais de cession :** `0 €` *(déjà déduits du montant net)*")
-                st.markdown(f"- **`518` — Prix de cession net :** `{ui.eur(a_info['ligne_518'])}`")
-                st.markdown(f"- **`520` — Prix d'acquisition unitaire (PRU CUMP) :** `{ui.eur(a_info['ligne_520'], 4)}`")
-                st.markdown(f"- **`521` (ou `519`) — Prix d'acquisition global :** `{ui.eur(a_info['ligne_521'])}`")
-                st.markdown("- **`522` — Frais d'acquisition :** `0 €` *(déjà inclus dans le PRU)*")
-                st.markdown(f"- **`523` — Prix de revient total :** `{ui.eur(a_info['ligne_523'])}`")
+                st.markdown(f"- **`516` — Montant brut de cession (514 × 515) :** `{ui.eur(a_info['ligne_516'])}`")
+                st.markdown(f"- **`517` — Frais de cession :** `{ui.eur(a_info['ligne_517'])}`")
+                st.markdown(f"- **`518` — Prix de cession net (516 − 517) :** `{ui.eur(a_info['ligne_518'])}`")
+                st.markdown(f"- **`520` — Prix d'acquisition unitaire hors frais :** `{ui.eur(a_info['ligne_520'], 4)}`")
+                st.markdown(f"- **`521` — Prix d'acquisition global :** `{ui.eur(a_info['ligne_521'])}`")
+                st.markdown(f"- **`522` — Frais d'acquisition :** `{ui.eur(a_info['ligne_522'])}`")
+                st.markdown(f"- **`523` — Prix de revient (521 + 522) :** `{ui.eur(a_info['ligne_523'])}`")
                 signe_pv = "+" if a_info["ligne_524"] >= 0 else ""
                 st.info(f"**`524` — Résultat pour `{a_info['actif']}` :** **{signe_pv}{ui.eur(a_info['ligne_524'])}**")
 
@@ -716,10 +715,10 @@ with st.expander(f"📁 Formulaire 2074 / 2074-CMV (Plus-values Actions, ETF, ET
                 f"2. Allez au **Cadre 12** (*« Suivi des moins-values reportables au 31/12/{annee} »*).\n"
                 f"3. Sur la ligne de l'année **{annee}**, inscrivez : **`{round(d2074['case_3vh']):,} €`** (et reportez ce même montant en case **`3VH`** de la 2042-C).".replace(",", " ")
             )
-        elif d2074["bilan_net"] > 0 and d2074["ligne_913"] > 0:
+        elif d2074["bilan_net"] > 0 and d2074["ligne_903_mv"] > 0:
             st.success(
                 f"**Diagnostic :** Vous êtes en **gain net** sur l'année (**+{ui.eur(d2074['bilan_net'])}**), "
-                f"mais vous avez subi des moins-values (**{ui.eur(d2074['ligne_913'])}**) sur certains titres qu'il faut imputer sur vos plus-values :\n\n"
+                f"mais vous avez subi des moins-values (**{ui.eur(d2074['ligne_903_mv'])}**) sur certains titres qu'il faut imputer sur vos plus-values :\n\n"
                 "1. ⚠️ **Laissez le Bloc `1132` totalement VIDE.**\n"
                 "2. 👉 **Remplissez le Bloc `1133` exactement avec les colonnes ci-dessous :**"
             )
@@ -729,18 +728,27 @@ with st.expander(f"📁 Formulaire 2074 / 2074-CMV (Plus-values Actions, ETF, ET
                 "Col B (Perte imputée)": ui.eur(r["Col B — Perte de l'année imputée (€)"]),
                 "Col C (A − B)": ui.eur(r["Col C — Solde (A − B) (€)"]),
                 "Col D (Pertes antérieures)": ui.eur(r["Col D — Pertes antérieures (€)"]),
-                "Col E (Gain net C − D)": ui.eur(r["Col E — Gain net imposable (C − D) (€)"]),
-                "Col F/G (Abattement)": "0,00 € (titres acquis après 2018)",
+                "Col E (Solde C − D)": ui.eur(r["Col E — Gain net imposable (C − D) (€)"]),
+                "Col F (abattement commun)": ui.eur(r["Col F — Abattement commun (€)"])
+                    if r["Col F — Abattement commun (€)"] is not None else "À vérifier",
+                "Col G (abattement renforcé)": ui.eur(r["Col G — Abattement renforcé (€)"])
+                    if r["Col G — Abattement renforcé (€)"] is not None else "À vérifier",
+                "Col H (E − F − G)": ui.eur(r["Col H — Gain imposable (E − F − G) (€)"])
+                    if r["Col H — Gain imposable (E − F − G) (€)"] is not None else "À vérifier",
             } for r in d2074["cadre_11"]])
             ui.tableau(df_c11)
-        elif d2074["bilan_net"] > 0 and d2074["ligne_913"] == 0:
+        elif d2074["bilan_net"] > 0 and d2074["ligne_903_mv"] == 0:
             st.success(
                 f"**Diagnostic :** Vous êtes en **gain net** (**+{ui.eur(d2074['bilan_net'])}**) et vous n'avez subi **aucune moins-value** boursière en {annee}.\n\n"
                 "- Dans le **Cadre 11**, remplissez uniquement la **Colonne A** (ainsi que les **Colonnes C et E** avec le même montant).\n"
-                "- **Colonnes F et G (Abattement pour durée de détention) :** `0 €` (les ETF/ETC et titres acquis après le 01/01/2018 n'ouvrent pas droit à abattement).\n"
-                f"- Reportez **`{round(d2074['case_3vg']):,} €`** en case **`3VG`** de la 2042-C.".replace(",", " ")
+                + ("- **Colonnes F/G/H : à vérifier** — acquisition avant 2018 : un abattement peut s'appliquer avec 2OP.\n"
+                   if d2074['abattementsNonVerifies']
+                   else "- **Colonnes F/G : 0 €** si tous les achats connus sont postérieurs à 2017 ; H = E.\n")
+                + f"- Proposition 3VG du portefeuille : **`{round(d2074['case_3vg']):,} €`** à vérifier pour le foyer.".replace(",", " ")
             )
 
+        st.markdown(f"- **Ligne `1164`** (total des pertes antérieures imputées en colonne D) : "
+                    f"{ui.eur(d2074['ligne_1164'])}, sous réserve de rapprochement avec le foyer.")
         st.divider()
         st.markdown(f"#### 🔎 4. Détail des {len(d2074['operations'])} opérations de vente {annee} date par date")
         ui.tableau(pd.DataFrame([{
@@ -753,63 +761,68 @@ with st.expander(f"📁 Formulaire 2074 / 2074-CMV (Plus-values Actions, ETF, ET
             "Plus-value (€)": ui.eur(op["plus_value_eur"]),
         } for op in d2074["operations"]]))
 
+    st.markdown(f"#### Cadre 10 · stock antérieur au 31/12/{annee - 1} · "
+                f"cadre 12 · stock restant au 31/12/{annee}")
+    for cadre, cle in ((10, "cadre_10"), (12, "cadre_12")):
+        if d2074[cle]:
+            ui.tableau(pd.DataFrame([{
+                "Cadre": cadre, "Année d'origine de la perte": e["annee"],
+                "Montant connu — à rapprocher du foyer": ui.eur(e["montant"]),
+            } for e in d2074[cle]]))
+        else:
+            st.caption(f"Cadre {cadre} : aucune perte reportable connue du portefeuille. "
+                       "Le stock du foyer n'est pas certifié par cette application.")
+
 # --- VOLET 4 : FORMULAIRE 2086 (CRYPTOMONNAIES) ---
 titre_2086 = (
     f"{len(d2086['cessions'])} cession(s) · Total cédé : {ui.eur(d2086['total_cessions_213'])} · Bilan : {ui.eur(d2086['plus_value_globale_224'])}"
     if d2086["cessions"] else f"Aucune cession en {annee}"
 )
-with st.expander(f"📁 Formulaire 2086 (Cryptomonnaies — Art. 150 VH bis — {titre_2086})", expanded=False):
+with st.expander(f"📁 Formulaire 2086 (cryptomonnaies — Art. 150 VH bis — {titre_2086})", expanded=True):
+    st.caption("Imprimé 16043*07 des revenus 2025 : "
+               "https://www.impots.gouv.fr/sites/default/files/formulaires/2086/2026/2086_5515.pdf. "
+               "Pour un autre millésime, revérifiez les repères sur l'imprimé publié.")
+    st.warning("La 2086 est celle du FOYER : les autres plateformes, comptes du conjoint ou des personnes à charge "
+               "et les échanges avec soulte ne sont pas inventoriés ici. Aucun chiffre 3AN/3BN n'est prêt à copier "
+               "sans contrôler la ligne 52 complète. Les montants calculés supposent l'absence de soulte.")
     if not d2086["cessions"]:
-        st.info(f"Aucune cession de cryptomonnaie détectée en {annee}.")
+        st.info(f"Aucune cession crypto détectée en {annee} dans ce portefeuille : contrôlez les autres plateformes du foyer.")
     else:
-        st.markdown(
-            f"**Synthèse {annee} :** **{len(d2086['cessions'])} cession(s)** · "
-            f"Total des prix de cession (cumul lignes `213`) = **`{ui.eur(d2086['total_cessions_213'])}`** · "
-            f"Résultat net global (cumul lignes `224`) = **`{ui.eur(d2086['plus_value_globale_224'])}`**."
-        )
-        if d2086["exonere_305"]:
-            st.warning(
-                f"**Franchise de 305 € à confirmer sur tout le foyer :** les cessions de ce "
-                f"portefeuille en {annee} (`{ui.eur(d2086['total_cessions_213'])}`) ne dépassent "
-                "pas 305 €. Ce seul total ne prouve pas l'exonération du foyer fiscal : "
-                "vérifiez d'éventuelles cessions extérieures au portefeuille, y compris du "
-                "conjoint. Ne laissez 3AN/3BN vides que si le seuil du foyer est bien respecté ; "
-                "vérifiez également l'annexe 2086."
-            )
-        elif d2086["case_3an"] > 0:
-            st.info(
-                f"👉 Reportez **`{round(d2086['case_3an']):,} €`** en case **`3AN`** de la déclaration 2042-C.".replace(",", " ")
-            )
-        elif d2086["case_3bn"] > 0:
-            st.info(
-                f"👉 Reportez **`{round(d2086['case_3bn']):,} €`** (en positif) en case **`3BN`** de la déclaration 2042-C.".replace(",", " ")
-            )
-
+        st.markdown("#### Cadre 2 · déclarant 1 — lignes 2101 à 224")
+        st.markdown("**2101 Nom · 2102 Prénoms · 2103 Adresse :** à compléter depuis l'état civil du déclarant.")
         for idx_c, c in enumerate(d2086["cessions"], start=1):
             with st.container(border=True):
-                st.markdown(
-                    f"**🪙 Cession #{idx_c} — Vente du `{c['ligne_211']}` (`{ui.quantite(c['quantite'], 8)} {c['actif']}`)**"
-                )
-                st.markdown(f"- **`211` — Date de la cession :** `{c['ligne_211']}`")
-                st.markdown(f"- **`212` — Valeur globale du portefeuille d'actifs numériques à la date de cession :** `{round(c['ligne_212']):,} €` *(exact : {ui.eur(c['ligne_212'])})*".replace(",", " "))
-                st.markdown(f"- **`213` — Prix de cession :** `{round(c['ligne_213']):,} €` *(exact : {ui.eur(c['ligne_213'])})*".replace(",", " "))
-                st.markdown("- **`214` — Frais de cession :** `0 €` *(déjà déduits du montant net)*")
-                st.markdown(f"- **`215` — Prix de cession net des frais :** `{round(c['ligne_215']):,} €` *(exact : {ui.eur(c['ligne_215'])})*".replace(",", " "))
-                st.markdown("- **`216` — Soulte reçue ou versée :** `0 €`")
-                st.markdown(f"- **`217` — Prix de cession net des soultes :** `{round(c['ligne_217']):,} €` *(exact : {ui.eur(c['ligne_217'])})*".replace(",", " "))
-                st.markdown(f"- **`218` — Prix de cession net des frais et soultes :** `{round(c['ligne_218']):,} €` *(exact : {ui.eur(c['ligne_218'])})*".replace(",", " "))
-                st.markdown(f"- **`220` — Prix total d'acquisition du portefeuille :** `{round(c['ligne_220']):,} €` *(exact : {ui.eur(c['ligne_220'])})*".replace(",", " "))
-                st.markdown(f"- **`221` — Fractions de capital initial déduites lors des cessions antérieures :** `{round(c['ligne_221']):,} €` *(exact : {ui.eur(c['ligne_221'])})*".replace(",", " "))
-                st.markdown("- **`222` — Soultes reçues en cas d'échanges antérieurs :** `0 €`")
-                st.markdown(f"- **`223` — Prix total d'acquisition net (`220 − 221`) :** `{round(c['ligne_223']):,} €` *(exact : {ui.eur(c['ligne_223'])})*".replace(",", " "))
-                signe_c = "+" if c["ligne_224"] >= 0 else ""
-                st.info(
-                    f"**`224` — Plus-value ou moins-value de la cession (`213 − 223 × 213 / 212`) :** "
-                    f"**{signe_c}{round(c['ligne_224']):,} €** *(exact : {signe_c}{ui.eur(c['ligne_224'])})*".replace(",", " ")
-                )
+                st.markdown(f"**Cession {idx_c} : {c['actif']} — {c['ligne_211']}** "
+                            "(cinq colonnes par 2086 ; annexer une 2086 supplémentaire au-delà).")
+                ui.tableau(pd.DataFrame([
+                    {"Ligne": "211", "Intitulé": "Date de la cession", "À renseigner": c["ligne_211"]},
+                    {"Ligne": "212", "Intitulé": "Valeur globale du portefeuille crypto au moment de la cession", "À renseigner": f"{ui.eur(c['ligne_212'])} (part connue, à compléter)"},
+                    {"Ligne": "213", "Intitulé": "Prix brut de cession", "À renseigner": ui.eur(c["ligne_213"])},
+                    {"Ligne": "214", "Intitulé": "Frais de cession", "À renseigner": ui.eur(c["ligne_214"])},
+                    {"Ligne": "215", "Intitulé": "Prix net des frais (213 − 214)", "À renseigner": ui.eur(c["ligne_215"])},
+                    {"Ligne": "216", "Intitulé": "Soulte reçue ou versée", "À renseigner": "À vérifier ; jamais 0 € supposé"},
+                    {"Ligne": "217", "Intitulé": "Prix net des soultes", "À renseigner": f"{ui.eur(c['ligne_217'])} si aucune soulte"},
+                    {"Ligne": "218", "Intitulé": "Prix net des frais et soultes", "À renseigner": f"{ui.eur(c['ligne_218'])} si aucune soulte"},
+                    {"Ligne": "220", "Intitulé": "Prix total d'acquisition du portefeuille", "À renseigner": f"{ui.eur(c['ligne_220'])} (part connue)"},
+                    {"Ligne": "221", "Intitulé": "Fractions de capital initial déjà déduites", "À renseigner": f"{ui.eur(c['ligne_221'])} (part connue)"},
+                    {"Ligne": "222", "Intitulé": "Soultes reçues lors d'échanges antérieurs", "À renseigner": "À vérifier ; jamais 0 € supposé"},
+                    {"Ligne": "223", "Intitulé": "Prix total d'acquisition net (220 − 221 − 222)", "À renseigner": f"{ui.eur(c['ligne_223'])} si aucune soulte"},
+                ]))
+                st.caption(f"Calcul intermédiaire de cette cession (pas une ligne 224 par vente) : "
+                           f"218 − 223 × 217 / 212 = {ui.eur(c['ligne_224'])}. "
+                           "À refaire si une autre position ou une soulte manque.")
+        st.markdown("#### Cadre 2 total du déclarant · cadre 5 total du foyer")
+        ui.tableau(pd.DataFrame([
+            {"Ligne": "224", "Intitulé": "Total des plus ou moins-values du déclarant 1", "À renseigner": f"{ui.eur(d2086['plus_value_globale_224'])} (part connue, à vérifier)"},
+            {"Ligne": "51", "Intitulé": "Prix de cession du FOYER (218 + 258 + 318 + 413 + 423 + 433)", "À renseigner": f"{ui.eur(d2086['total_cessions_218'])} = part connue uniquement"},
+            {"Ligne": "52", "Intitulé": "Résultat du FOYER → 3AN ou 3BN de la 2042 C", "À renseigner": "À compléter après contrôle de toutes les cessions du foyer"},
+        ]))
+        st.info("Seuil de 305 € : il porte sur la ligne 51 du foyer, nets des frais (218), "
+                "pas sur la somme des lignes 213 ni sur le gain. Même en deçà du seuil, "
+                "la notice demande l'annexe avec les prix de cession.")
 
 # --- VOLET 5 : FORMULAIRE 3916 / 3916-BIS (COMPTES À L'ÉTRANGER) ---
-with st.expander(f"📁 Formulaire 3916 / 3916-bis (Comptes à l'étranger — {len(choisis)} compte(s) à déclarer & Case 8UU)", expanded=False):
+with st.expander(f"📁 Formulaire 3916 / 3916-bis (Comptes à l'étranger — {len(choisis)} compte(s) à déclarer & Case 8UU)", expanded=True):
     st.markdown(
         "📍 **Chemin sur impots.gouv.fr :** Étape 3 → Onglet **« Divers »** → Cocher la case **`8UU`** "
         "(*« Comptes ouverts, détenus, utilisés ou clos à l'étranger »*), puis valider une fiche **3916 / 3916-bis** par compte."
@@ -818,7 +831,10 @@ with st.expander(f"📁 Formulaire 3916 / 3916-bis (Comptes à l'étranger — {
         st.warning("Aucun compte à l'étranger coché ci-dessus.")
     else:
         for idx_c, cpt in enumerate(choisis, start=1):
-            st.markdown(f"- **Fiche #{idx_c} :** `{cpt}` — Usage : `Personnel uniquement`.")
+            st.markdown(f"- **Fiche #{idx_c} :** `{cpt}` — cadres **1** (identité), **2** (nature), "
+                        "**3.1/3.2** (compte bancaire) ou **4.1/4.2/4.3** (compte crypto), "
+                        "puis **5** (usage). Titulaire, numéro de compte, dates, organisme, pays "
+                        "et usage : à confirmer sur le contrat, jamais préremplis par déduction.")
         st.warning(
             "⚠️ **Sanction en cas d'oubli (CGI art. 1649 A & 1736) :** **1 500 € d'amende par compte et par an**, "
             "même si le compte n'a généré aucun revenu ou aucune opération dans l'année."

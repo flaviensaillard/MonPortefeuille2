@@ -621,26 +621,27 @@ les deux états (avant / après 013), y compris avec une écriture réelle de l'
 RLS, et qui exige que sa liste de sources reste **identique** à celle de la
 contrainte de la 013 (sinon une douzième source serait ignorée en silence).
 
-### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6
+### Livraison : 2.2.2 → 2.2.3 → 2.2.4 → 2.2.5 → 2.2.6 → 2.2.7
 
 Le workflow `apk.yml` se déclenche sur tout push modifiant `app/**`, et publie la
 release **depuis `main` seulement**. Or la release est **unique et immuable** : si
 `apk-2.2.2` existe déjà avec un APK de SHA256 différent, l'étape de publication
-fait `exit 1`. La PR #24 modifie neuf fichiers sous `app/` : la fusionner sous la
+fait `exit 1`. La PR #24 modifie des fichiers sous `app/` : la fusionner sous la
 version 2.2.2 aurait donc **fait échouer la construction sur `main`**, sans APK
 installable à la clé.
 
 La version est donc passée à **2.2.3 (code 33)**, puis à **2.2.4 (code 34)** après
 le retour réel du 15/10, puis à **2.2.5 (code 35)** pour l'onglet replié de mise à
-jour, puis à **2.2.6 (code 36)** pour le retrait de quatre bandeaux d'en-tête — une
-version étant déjà installée sur le téléphone à chaque fois, il faut un code
+jour, puis à **2.2.6 (code 36)** pour le retrait de quatre bandeaux d'en-tête,
+puis à **2.2.7 (code 37)** pour refaire les formulaires et corriger les reports
+2074/2086 — une version étant déjà construite sous son numéro, il faut un code
 supérieur pour que deux APK différentes ne portent pas le même nom. Les cinq
 endroits imposés par la procédure du dépôt sont alignés (`AndroidManifest.xml`,
 `apk.yml` `VERSION_NAME` et `VERSION_CODE`, `build.sh`, `core/__init__.py`), avec
-`telechargements/notes-2.2.6.md` et le nom d'artefact.
+`telechargements/notes-2.2.7.md` et le nom d'artefact.
 
 **Conséquence à connaître avant de fusionner** : la fusion de la PR #24 construira
-puis **publiera automatiquement la release `apk-2.2.6`**. C'est le comportement
+puis **publiera automatiquement la release `apk-2.2.7`**. C'est le comportement
 normal du workflow (la 2.2.2 a été publiée ainsi), mais c'est bien une publication
 définitive : aucun écrasement n'est possible ensuite.
 

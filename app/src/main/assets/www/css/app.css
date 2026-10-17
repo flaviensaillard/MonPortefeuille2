@@ -473,6 +473,23 @@ svg.graphique .trait { fill: none; stroke: var(--gold); stroke-width: 2.2; strok
 .onglet-collecte-titre { font-size: 13px; color: var(--txt-2); }
 .onglet-collecte[open] > summary { margin-bottom: 10px; }
 
+/* Guide de report DGFiP 2.2.7 : les six formulaires et toutes les lignes utiles
+   restent visibles sur téléphone, sans zoomer ni couper les montants. */
+.fisc-guide { margin-top: 10px; }
+.fisc-imprime { margin: 10px 0; }
+.fisc-imprime h3 { margin: 2px 0 6px; font-size: 16px; }
+.fisc-imprime a { color: var(--euro); overflow-wrap: anywhere; }
+.fisc-cadre { margin: 14px 0; }
+.fisc-cadre h4 { font-size: 13px; margin: 6px 0; color: var(--gold); }
+.fisc-cadre .st { overflow-wrap: anywhere; }
+.fisc-table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fisc-formulaire-table { min-width: 520px; }
+.fisc-formulaire-table th:first-child, .fisc-formulaire-table td:first-child { min-width: 80px; }
+.fisc-formulaire-table th:nth-child(2), .fisc-formulaire-table td:nth-child(2) { min-width: 220px; white-space: normal; }
+.fisc-formulaire-table th:last-child, .fisc-formulaire-table td:last-child { min-width: 170px; white-space: normal; }
+.fisc-formulaire-table .st { font-size: 11px; line-height: 1.4; }
+#fiscAnneeGuide { background: var(--card-2); border: 1px solid var(--line-strong); color: var(--txt); border-radius: 9px; padding: 9px; margin: 7px 5px; }
+
 .noanim * { animation: none !important; transition: none !important; }
 
 .actif-carte .sec {

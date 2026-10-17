@@ -1034,3 +1034,18 @@ là où ils ont été déplacés, et il **verrouille** le retrait — si l'un de
 bandeaux réapparaît dans un rendu, la suite échoue. L'assertion porte sur le code
 hors commentaires, car les commentaires citent volontairement ces incipits pour
 documenter le retrait.
+
+**2.2.7 — formulaires revenus 2025** : voir
+[FORMULAIRES-FISCAUX-2.2.7.md](FORMULAIRES-FISCAUX-2.2.7.md) pour les sept
+imprimés DGFiP, leurs liens et les limites du préremplissage. Le défaut ancien
+« 2074 ligne 905 = PV / ligne 913 = MV » est corrigé : les résultats des ventes
+calculées par le contribuable sont à reporter en 903 col. PV/MV ; 905 désigne les
+instruments financiers à terme, 913 est le total du cadre 900. Les ventes d'un
+même titre gardent leur date, leurs frais de cession (517) et leur part de frais
+d'acquisition (522) : calculs JS et Python concordants sur les mêmes exemples.
+Les lignes 2086 215, 216, 222, 224, 51 et 52 ne sont plus cachées ; 51/52
+restent « à compléter au niveau du foyer » sans supposer 0 soulte. Un guide
+2025 complet est disponible même pendant le chargement ; les années futures
+peuvent être demandées mais leur numérotation est explicitement un *modèle 2025
+à revalider*, **jamais une source officielle du futur millésime**. Bascule DGFiP
+totale : toujours **non**. Suite locale : 54 tests JS, 981 tests Python.

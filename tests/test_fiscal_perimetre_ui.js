@@ -26,19 +26,18 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const texte = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/js/fiscal.js'), 'utf8');
+const guide = fs.readFileSync(path.join(__dirname,
+    '../app/src/main/assets/www/js/fiscal_formulaires_dgfip.js'), 'utf8');
 
 /* ---------------------------------------------------------- ce qui doit rester
    L'avertissement sur le périmètre du foyer, au contact des chiffres. */
 assert.match(texte, /2OP est globale pour tous les RCM et gains mobiliers du foyer/,
     'la limite foyer du comparateur 2OP doit subsister');
-assert.match(texte, /Ce total ne suffit pas à prouver l’exonération du foyer fiscal/,
-    'le seuil crypto de 305 € doit rester qualifié au niveau du foyer');
-// Deux assertions simples plutôt qu'un motif multi-ligne : dans la source, la
-// phrase est coupée par une concaténation JS (« …les cessions ' » + « 'éventuelles… »),
-// qu'un regex traversant mal ferait échouer à tort.
-assert.match(texte, /éventuelles du conjoint hors de ce portefeuille/,
+assert.match(guide, /Ce total ne suffit pas à prouver l’exonération du foyer fiscal/,
+    'le seuil crypto de 305 € doit rester qualifié dans le formulaire 2086');
+assert.match(guide, /éventuelles du conjoint hors de ce portefeuille/,
     'le conjoint hors portefeuille doit être explicitement mentionné');
-assert.match(texte, /seuil du foyer est respecté/);
+assert.match(guide, /seuil du foyer est respecté/);
 assert.match(texte, /portee2086Foyer/, 'la portée foyer de l’annexe 2086 doit subsister');
 assert.doesNotMatch(texte, /<b>exonéré<\/b>/,
     'sous le seuil, le mot « exonéré » ne doit pas être affirmé en gras');

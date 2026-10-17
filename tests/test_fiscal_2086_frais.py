@@ -24,6 +24,10 @@ def test_2086_frais_distincts_du_quotient_et_du_seuil(monkeypatch):
     assert c["ligne_212"] == 1140
     assert c["ligne_213"] == 320
     assert c["ligne_214"] == 20
+    assert c["ligne_215"] == 300
+    assert c["ligne_216"] is None
+    assert c["ligne_222"] is None
+    assert c["hypothese_sans_soulte"] is True
     assert c["ligne_217"] == 320
     assert c["ligne_218"] == 300
     assert c["fraction_capital"] == pytest.approx(1500 * 320 / 1140, abs=0.01)
